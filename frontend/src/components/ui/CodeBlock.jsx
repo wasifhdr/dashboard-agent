@@ -16,22 +16,22 @@ export default function CodeBlock({ lang, children, showCopy = true, className }
   }
 
   return (
-    <div className={cx("glass-deep overflow-hidden rounded-card", className)}>
+    <div className={cx("panel overflow-hidden rounded-card", className)}>
       {(lang || showCopy) && (
         <div className="flex items-center justify-between border-b border-glass-border px-4 py-2">
-          <span className="text-label uppercase text-mist/50">{lang}</span>
+          <span className="text-label uppercase text-fg/50">{lang}</span>
           {showCopy && (
             <button
               type="button"
               onClick={handleCopy}
-              className="rounded-dot border border-glass-border px-2 py-1 text-xs font-bold text-mist hover:bg-glass-hover focus-visible:outline-[3px] focus-visible:outline-gold focus-visible:outline-offset-2"
+              className="rounded-dot border border-glass-border px-2 py-1 text-xs font-bold text-fg hover:bg-glass-hover focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
             >
               {copied ? "Copied" : "Copy"}
             </button>
           )}
         </div>
       )}
-      <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-mist">{codeText}</pre>
+      <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-fg">{codeText}</pre>
     </div>
   );
 }

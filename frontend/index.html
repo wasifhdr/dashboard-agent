@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Docent — dashboard QA agent</title>
+    <script>
+      // Set the theme before first paint so there is no flash. Light is the
+      // product default (demo theme); "system" is deliberately not used.
+      try {
+        var t = localStorage.getItem("docent-theme");
+        document.documentElement.dataset.theme = t === "dark" ? "dark" : "light";
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

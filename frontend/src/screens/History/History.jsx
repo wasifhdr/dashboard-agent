@@ -40,18 +40,18 @@ export default function History({ onOpenReplay, onGoToLanding }) {
   return (
     <div>
       <h1 className="text-h1">Session history</h1>
-      <p className="mt-1 text-sm text-mist/70">
+      <p className="mt-1 text-sm text-fg/70">
         {sessions ? `${sessions.length} session${sessions.length === 1 ? "" : "s"}` : "Loading…"}
       </p>
 
-      {error && <div className="mt-4 text-sm text-coral">{error}</div>}
+      {error && <div className="mt-4 text-sm text-coral-ink">{error}</div>}
 
       {sessions && sessions.length === 0 && (
         <div className="mt-8">
           <EmptyState
             statement={
               <>
-                No sessions <span className="text-gold">yet.</span>
+                No sessions <span className="text-gold-ink">yet.</span>
               </>
             }
             line="Ask your first question from the landing page."

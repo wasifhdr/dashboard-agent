@@ -7,23 +7,26 @@ import { TYPEWRITER_MS_PER_CHAR } from "./pacing.js";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 
 const OUTCOME_CONFIG = {
-  answered: { label: "ANSWER", labelColor: "text-green", border: "border-l-green" },
+  answered: { label: "ANSWER", labelColor: "text-green-ink", surface: "panel-tint-green", border: "border-l-green" },
   max_steps: {
     label: "BEST-EFFORT ANSWER",
-    labelColor: "text-gold",
+    labelColor: "text-gold-ink",
+    surface: "panel-tint-gold",
     border: "border-l-gold",
     subline: "Step budget reached before a confident answer.",
   },
   failed: {
     label: "NOT ANSWERABLE",
-    labelColor: "text-gold",
+    labelColor: "text-gold-ink",
+    surface: "panel-tint-gold",
     border: "border-l-gold",
     body: "The agent determined this dashboard cannot answer this question.",
   },
-  error: { label: "SESSION ERROR", labelColor: "text-coral", border: "border-l-coral" },
+  error: { label: "SESSION ERROR", labelColor: "text-coral-ink", surface: "panel-tint-coral", border: "border-l-coral" },
   stopped: {
     label: "STOPPED",
-    labelColor: "text-mist/60",
+    labelColor: "text-fg/60",
+    surface: "panel",
     border: "border-l-glass-border-strong",
     body: "Stopped by you before the agent finished.",
   },
@@ -58,7 +61,7 @@ function ElapsedTimer({ since }) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return (
-    <span className="font-mono text-xs text-mist/60">
+    <span className="font-mono text-xs text-fg/60">
       {m}:{String(s).padStart(2, "0")}
     </span>
   );
@@ -68,7 +71,7 @@ function ThoughtLine({ text, active }) {
   const { revealed, done } = useTypewriter(text, TYPEWRITER_MS_PER_CHAR, active);
   if (!text) return null;
   return (
-    <p className={cx("mt-1 text-sm leading-relaxed text-mist", active && !done && "typewriter-caret")}>{revealed}</p>
+    <p className={cx("mt-1 text-sm leading-relaxed text-fg", active && !done && "typewriter-caret")}>{revealed}</p>
   );
 }
 
@@ -76,29 +79,29 @@ function ActionLine({ step, pending }) {
   if (pending) {
     return (
       <div className="mt-2 flex items-center gap-2 rounded-control border border-glass-border px-3 py-2 font-mono text-[13px]">
-        <span className="text-mist">▸ {step.planned.label}</span>
-        <Spinner className="size-4 border-glass-border border-t-gold" />
-        <span className="text-mist/60">applying…</span>
+        <span className="text-fg">▸ {step.planned.label}</span>
+        <Spinner className="size-4 border-glass-border border-t-gold-ink" />
+        <span className="text-fg/60">applying…</span>
       </div>
     );
   }
 
   const status = step.actionStatus;
   let icon = "✓";
-  let colorClass = "text-green";
+  let colorClass = "text-green-ink";
   let explain = null;
 
   if (status === "rejected_loop") {
     icon = "✗";
-    colorClass = "text-gold";
+    colorClass = "text-gold-ink";
     explain = "rejected: already tried — rethinking…";
   } else if (status === "rejected_target") {
     icon = "✗";
-    colorClass = "text-gold";
+    colorClass = "text-gold-ink";
     explain = "rejected: unknown target — rethinking…";
   } else if (status === "error") {
     icon = "✗";
-    colorClass = "text-coral";
+    colorClass = "text-coral-ink";
     explain = (step.errorMsg ?? "").slice(0, 120);
   }
 
@@ -107,7 +110,7 @@ function ActionLine({ step, pending }) {
       <div className={colorClass}>
         {icon} {step.planned.label}
       </div>
-      {explain && <div className="mt-1 text-xs text-mist/60">{explain}</div>}
+      {explain && <div className="mt-1 text-xs text-fg/60">{explain}</div>}
     </div>
   );
 }
@@ -122,17 +125,17 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
       className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
       onClick={onSelect}
     >
-      <div className="flex items-center justify-between font-mono text-xs text-mist/50">
+      <div className="flex items-center justify-between font-mono text-xs text-fg/50">
         <span>STEP {step.idx}</span>
         {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
       </div>
 
       {revealMode === "pending" && (
         <div className="mt-1 flex items-center gap-2">
-          <Spinner className="border-glass-border border-t-gold" />
-          <span className="text-sm text-mist/70">Reading the dashboard…</span>
+          <Spinner className="border-glass-border border-t-gold-ink" />
+          <span className="text-sm text-fg/70">Reading the dashboard…</span>
           {step.attempt && (
-            <span className="text-xs text-gold">
+            <span className="text-xs text-gold-ink">
               Attempt {step.attempt} of 3 — the previous response was invalid.
             </span>
           )}
@@ -142,9 +145,9 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
       {revealMode !== "pending" && isInvalid && (
         <div className="mt-1 text-sm">
           {step.actionStatus === "vlm_error" ? (
-            <span className="text-coral">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
+            <span className="text-coral-ink">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
           ) : (
-            <span className="text-gold">The model's response was invalid — retrying.</span>
+            <span className="text-gold-ink">The model's response was invalid — retrying.</span>
           )}
         </div>
       )}
@@ -175,17 +178,17 @@ function LiveStepCard({ step, isSelected, onSelect }) {
       className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
       onClick={onSelect}
     >
-      <div className="flex items-center justify-between font-mono text-xs text-mist/50">
+      <div className="flex items-center justify-between font-mono text-xs text-fg/50">
         <span>STEP {step.idx}</span>
         {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
       </div>
 
       {!step.thought && !isInvalid && (
         <div className="mt-1 flex items-center gap-2">
-          <Spinner className="border-glass-border border-t-gold" />
-          <span className="text-sm text-mist/70">Reading the dashboard…</span>
+          <Spinner className="border-glass-border border-t-gold-ink" />
+          <span className="text-sm text-fg/70">Reading the dashboard…</span>
           {step.attempt && (
-            <span className="text-xs text-gold">
+            <span className="text-xs text-gold-ink">
               Attempt {step.attempt} of 3 — the previous response was invalid.
             </span>
           )}
@@ -196,16 +199,16 @@ function LiveStepCard({ step, isSelected, onSelect }) {
       {isInvalid && (
         <div className="mt-1 text-sm">
           {step.actionStatus === "vlm_error" ? (
-            <span className="text-coral">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
+            <span className="text-coral-ink">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
           ) : (
-            <span className="text-gold">The model's response was invalid — retrying.</span>
+            <span className="text-gold-ink">The model's response was invalid — retrying.</span>
           )}
         </div>
       )}
 
       {step.thought && !isInvalid && (
         <>
-          <p className={cx("mt-1 text-sm leading-relaxed text-mist", !done && "typewriter-caret")}>{revealed}</p>
+          <p className={cx("mt-1 text-sm leading-relaxed text-fg", !done && "typewriter-caret")}>{revealed}</p>
           {done && step.planned && <ActionLine step={step} pending={step.actionStatus == null} />}
         </>
       )}
@@ -215,9 +218,9 @@ function LiveStepCard({ step, isSelected, onSelect }) {
 
 function QuestionCard({ index, question }) {
   return (
-    <div className="glass rounded-control p-3">
-      <CapsLabel className="text-mist/60">QUESTION {index}</CapsLabel>
-      <p className="mt-1 text-[15px] font-medium text-mist">{question}</p>
+    <div className="panel-tint-teal rounded-control p-3">
+      <CapsLabel className="text-teal-ink">QUESTION {index}</CapsLabel>
+      <p className="mt-1 text-[15px] font-medium text-fg">{question}</p>
     </div>
   );
 }
@@ -230,11 +233,11 @@ function OutcomeCard({ run }) {
   const showConfidence = (run.status === "answered" || run.status === "max_steps") && run.confidence != null;
 
   return (
-    <div className={cx("glass rounded-control border-l-4 p-4", config.border)}>
+    <div className={cx("rounded-control border-l-4 p-4", config.surface, config.border)}>
       <div className={cx("text-label uppercase", config.labelColor)}>{config.label}</div>
-      <p className="mt-1 text-base font-bold text-mist">{body}</p>
-      {showConfidence && <div className="mt-1 font-mono text-xs text-mist/60">confidence {run.confidence.toFixed(2)}</div>}
-      {config.subline && <p className="mt-1 text-sm text-mist/70">{config.subline}</p>}
+      <p className="mt-1 text-base font-bold text-fg">{body}</p>
+      {showConfidence && <div className="mt-1 font-mono text-xs text-fg/60">confidence {run.confidence.toFixed(2)}</div>}
+      {config.subline && <p className="mt-1 text-sm text-fg/70">{config.subline}</p>}
     </div>
   );
 }
@@ -259,7 +262,7 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      className="glass-deep flex h-full flex-col gap-3 overflow-y-auto rounded-card p-4 text-mist"
+      className="glass-deep flex h-full flex-col gap-3 overflow-y-auto rounded-card p-4 text-fg"
     >
       {runs.map((run, runIdx) => {
         const sortedIdxs = [...run.steps.keys()].sort((a, b) => a - b);
@@ -268,15 +271,15 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
         return (
           <div key={run.sessionId} className="flex flex-col gap-2">
             {runIdx > 0 && (
-              <div className="my-1 text-center font-mono text-xs text-mist/50">
+              <div className="my-1 text-center font-mono text-xs text-fg/50">
                 — new question · the dashboard resets to its default state —
               </div>
             )}
             <QuestionCard index={runIdx + 1} question={run.question} />
             {run.status === "loading" ? (
-              <div className="font-mono text-xs text-mist/60">→ opening dashboard…</div>
+              <div className="font-mono text-xs text-fg/60">→ opening dashboard…</div>
             ) : (
-              run.steps.size > 0 && <div className="font-mono text-xs text-mist/60">→ dashboard ready</div>
+              run.steps.size > 0 && <div className="font-mono text-xs text-fg/60">→ dashboard ready</div>
             )}
 
             {sortedIdxs.map((stepIdx) => {

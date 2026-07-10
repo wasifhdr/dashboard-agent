@@ -42,11 +42,11 @@ export default function Stage({
             {isPlaying ? "Pause" : "Play"}
           </Button>
         )}
-        <label className="flex items-center gap-2 text-sm text-mist/70">
+        <label className="flex items-center gap-2 text-sm text-fg/70">
           <Checkbox checked={showOverlay} onChange={onToggleOverlay} /> Overlays
         </label>
         <div className="flex-1" />
-        {step && <div className="font-mono text-xs text-mist/60">step {step.idx}</div>}
+        {step && <div className="font-mono text-xs text-fg/60">step {step.idx}</div>}
       </div>
 
       <div className="relative mx-auto w-full max-w-3xl">
@@ -69,11 +69,11 @@ export default function Stage({
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
                 <Spinner />
-                <p className="text-sm text-mist/70">{loadingState.message}</p>
+                <p className="text-sm text-fg/70">{loadingState.message}</p>
               </div>
             </div>
           ) : !step?.frameUrl ? (
-            <div className="py-24 text-center text-sm text-mist/60">No frame yet.</div>
+            <div className="py-24 text-center text-sm text-fg/60">No frame yet.</div>
           ) : (
             <>
               <CrossfadeImage

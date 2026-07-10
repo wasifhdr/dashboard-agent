@@ -2,7 +2,7 @@ import { cx } from "./cx.js";
 
 export default function SegmentedMeter({ used, total, unlimited = false, caption, className }) {
   if (unlimited) {
-    return <div className={cx("text-sm text-mist/60", className)}>Unlimited</div>;
+    return <div className={cx("text-sm text-fg/60", className)}>Unlimited</div>;
   }
 
   const atLimit = total > 0 && used >= total;
@@ -23,7 +23,7 @@ export default function SegmentedMeter({ used, total, unlimited = false, caption
           <span key={i} className={cellClass(i < used)} />
         ))}
       </div>
-      <div className="font-mono text-sm tabular-nums text-mist/70">{caption ?? `${used} / ${total}`}</div>
+      <div className="font-mono text-sm tabular-nums text-fg/70">{caption ?? `${used} / ${total}`}</div>
     </div>
   );
 }

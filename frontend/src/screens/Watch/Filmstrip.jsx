@@ -18,7 +18,7 @@ export default function Filmstrip({ runs, selected, onSelect }) {
   });
 
   if (!items.length) {
-    return <div className="glass-deep px-4 py-3 text-sm text-mist/60">No frames yet.</div>;
+    return <div className="glass-deep px-4 py-3 text-sm text-fg/60">No frames yet.</div>;
   }
 
   return (
@@ -35,7 +35,7 @@ export default function Filmstrip({ runs, selected, onSelect }) {
               "relative h-[55px] w-[88px] flex-shrink-0 overflow-hidden rounded-dot border bg-glass",
               isRunStart && "ml-2 border-l-2 border-l-glass-border-strong pl-2",
               isSelected ? "border-2 border-teal shadow-teal-glow" : "border-glass-border",
-              "focus-visible:outline-[3px] focus-visible:outline-gold focus-visible:outline-offset-2",
+              "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
             )}
           >
             <img src={step.frameUrl} alt="" className="h-full w-full object-cover" />

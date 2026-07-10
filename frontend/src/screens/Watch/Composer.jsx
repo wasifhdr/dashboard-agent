@@ -92,13 +92,13 @@ export default function Composer({
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <Spinner />
-            <span className="truncate text-sm text-mist/50">{runningQuestion}</span>
+            <span className="truncate text-sm text-fg/50">{runningQuestion}</span>
           </div>
           <div className="flex flex-shrink-0 items-center gap-4">
-            <span className="font-mono text-sm text-mist/70">
+            <span className="font-mono text-sm text-fg/70">
               Step {stepsUsed} of {maxSteps}
             </span>
-            <span className="font-mono text-sm text-mist/70">{formatElapsed(elapsedSeconds)}</span>
+            <span className="font-mono text-sm text-fg/70">{formatElapsed(elapsedSeconds)}</span>
             <SegmentedMeter used={stepsUsed} total={maxSteps} caption={`${stepsUsed} / ${maxSteps}`} />
             <Button
               size="sm"

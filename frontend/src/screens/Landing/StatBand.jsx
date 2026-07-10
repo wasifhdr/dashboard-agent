@@ -9,7 +9,7 @@ const STATS = [
 
 export default function StatBand() {
   return (
-    <section className="bg-canvas-alt/60">
+    <section className="bg-canvas-edge/70">
       <div className="mx-auto flex max-w-6xl flex-wrap justify-center gap-6 px-6 py-16">
         {STATS.map((s) => (
           <StatChip key={s.label} value={s.value} label={s.label} accent={s.accent} />

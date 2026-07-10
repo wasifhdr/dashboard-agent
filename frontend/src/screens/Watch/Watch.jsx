@@ -128,10 +128,10 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
   }
 
   if (mode === "replay" && loadError) {
-    return <div className="p-6 text-sm text-coral">Failed to load session: {loadError}</div>;
+    return <div className="p-6 text-sm text-coral-ink">Failed to load session: {loadError}</div>;
   }
   if (mode === "replay" && !primaryRun) {
-    return <div className="p-6 text-sm text-mist/60">Loading session…</div>;
+    return <div className="p-6 text-sm text-fg/60">Loading session…</div>;
   }
 
   const loadingState =
@@ -152,7 +152,7 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
       <StatusBar dashboard={dashboard} run={lastRun} maxSteps={lastRun?.maxSteps ?? stream.maxSteps} />
 
       {showConnectionBanner && (
-        <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral">
+        <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral-ink">
           <span>Lost connection to the live session.</span>
           <Button size="sm" onClick={stream.reconnect}>
             Reconnect
@@ -161,7 +161,7 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 min-[901px]:grid-cols-[1fr_400px]">
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 flex-col bg-canvas-edge/40">
           <Stage
             step={selectedStep}
             showOverlay={showOverlay}
@@ -189,7 +189,7 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
                 onClick={() => setActiveTab(tab)}
                 className={cx(
                   "rounded-pill px-3 py-1 text-sm font-bold capitalize",
-                  activeTab === tab ? "bg-glass-hover text-gold" : "text-mist/70 hover:bg-glass-hover hover:text-mist",
+                  activeTab === tab ? "bg-glass-hover text-gold-ink" : "text-fg/70 hover:bg-glass-hover hover:text-fg",
                 )}
               >
                 {tab}

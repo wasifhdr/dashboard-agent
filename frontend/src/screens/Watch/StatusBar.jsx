@@ -30,7 +30,7 @@ export default function StatusBar({ dashboard, run, maxSteps }) {
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h3 className="truncate text-h3">{dashboard?.name || (dashboard?.url ? hostnameOf(dashboard.url) : "")}</h3>
-          <div className="truncate font-mono text-[13px] text-mist/45">{dashboard?.url}</div>
+          <div className="truncate font-mono text-[13px] text-fg/45">{dashboard?.url}</div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-4">
           <SegmentedMeter used={stepsUsed} total={maxSteps} caption={`${stepsUsed} / ${maxSteps}`} />
@@ -44,7 +44,7 @@ export default function StatusBar({ dashboard, run, maxSteps }) {
       {warningKinds.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
           {warningKinds.map((kind) => (
-            <Card key={kind} variant="callout" accent="gold" className="py-2 text-sm text-mist/80">
+            <Card key={kind} variant="callout" accent="gold" className="py-2 text-sm text-fg/80">
               {WARNING_LABEL[kind] ?? kind}
             </Card>
           ))}

@@ -23,11 +23,11 @@ export default function HeroBand({ query, onQueryChange, onEnterSearch, onOpenUr
     <section>
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-16 md:grid-cols-2 md:items-center">
         <div>
-          <CapsLabel className="text-teal">VISION-LANGUAGE AGENT · RUNS LOCALLY</CapsLabel>
-          <h1 className="mt-2 font-sans text-display font-extrabold text-mist">
-            Ask a question. Watch the agent <span className="text-gold">work the dashboard.</span>
+          <CapsLabel className="text-teal-ink">VISION-LANGUAGE AGENT · RUNS LOCALLY</CapsLabel>
+          <h1 className="mt-2 font-sans text-display font-extrabold text-fg">
+            Ask a question. Watch the agent <span className="text-teal-ink">work the dashboard.</span>
           </h1>
-          <p className="mt-4 max-w-[55ch] text-[15px] text-mist/70">
+          <p className="mt-4 max-w-[55ch] text-[15px] text-fg/70">
             Docent answers questions about live, interactive Tableau dashboards — by operating them the way a
             person would: looking, thinking, filtering, and reading the result. Every step is shown as it happens.
           </p>
@@ -44,7 +44,7 @@ export default function HeroBand({ query, onQueryChange, onEnterSearch, onOpenUr
             />
 
             <div>
-              <label className="mb-1.5 block text-label uppercase text-mist/70">Or open a Tableau Public link</label>
+              <label className="mb-1.5 block text-label uppercase text-fg/70">Or open a Tableau Public link</label>
               <form onSubmit={handleUrlSubmit} className="flex items-start gap-2">
                 <div className="flex-1">
                   <Field

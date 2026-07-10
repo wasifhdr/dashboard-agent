@@ -2,7 +2,7 @@ import { cx } from "./cx.js";
 
 function Table({ className, children }) {
   return (
-    <div className="glass overflow-x-auto rounded-card">
+    <div className="panel overflow-x-auto rounded-card">
       <table className={cx("w-full text-sm", className)}>{children}</table>
     </div>
   );
@@ -10,7 +10,7 @@ function Table({ className, children }) {
 
 function Th({ className, children }) {
   return (
-    <th className={cx("border-b border-glass-border-strong px-3 py-2 text-left text-label uppercase text-mist/50", className)}>
+    <th className={cx("border-b border-glass-border-strong px-3 py-2 text-left text-label uppercase text-fg/50", className)}>
       {children}
     </th>
   );

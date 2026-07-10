@@ -28,13 +28,13 @@ export default function FeatureBand() {
   return (
     <section>
       <div className="mx-auto max-w-6xl px-6 py-16">
-        <CapsLabel className="text-teal">WHY IT'S INTERESTING</CapsLabel>
+        <CapsLabel className="text-teal-ink">WHY IT'S INTERESTING</CapsLabel>
         <h2 className="mt-2 text-h1">Built to show its work.</h2>
         <div className="mt-8 grid gap-5 md:grid-cols-4">
           {FEATURES.map((f) => (
             <Card key={f.title} variant="standard" accent={f.accent}>
               <h3 className="text-h3">{f.title}</h3>
-              <p className="mt-2 text-sm text-mist/70">{f.body}</p>
+              <p className="mt-2 text-sm text-fg/70">{f.body}</p>
             </Card>
           ))}
         </div>

@@ -1,63 +1,172 @@
 @import "tailwindcss";
 
+/* ================================================================
+   Theme-dependent values. LIGHT is the default/primary theme; dark
+   overrides live under [data-theme="dark"] (set pre-paint in
+   index.html and toggled by useTheme.js).
+   ================================================================ */
+:root {
+  /* Canvas */
+  --t-canvas: #eef1f6;
+  --t-canvas-alt: #e4e9f1;
+  --t-canvas-edge: #d8dfec;
+
+  /* Glass (blurred chrome surfaces) */
+  --t-glass: rgba(255, 255, 255, 0.6);
+  --t-glass-hover: rgba(255, 255, 255, 0.8);
+  --t-glass-deep: rgba(250, 251, 253, 0.75);
+  --t-glass-border: rgba(23, 32, 43, 0.1);
+  --t-glass-border-strong: rgba(23, 32, 43, 0.18);
+
+  /* Panel (non-blurred nested surfaces) */
+  --t-panel: rgba(255, 255, 255, 0.55);
+  --t-tint: 16%; /* accent strength mixed into panel-tint-* fills */
+
+  /* Text */
+  --t-fg: #17202b;
+
+  /* Accent text safe at small sizes on this theme's surfaces */
+  --t-teal-ink: #0f6b66;
+  --t-coral-ink: #b03e21;
+  --t-gold-ink: #8a6420;
+  --t-sky-ink: #2b6488;
+  --t-green-ink: #157a58;
+  --t-violet-ink: #6647c0;
+
+  /* Focus outline */
+  --t-focus: #0f6b66;
+
+  /* Elevation */
+  --t-shadow-glass-sm: 0 2px 10px rgba(23, 32, 43, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --t-shadow-glass: 0 8px 28px rgba(23, 32, 43, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --t-shadow-glass-lg: 0 16px 48px rgba(23, 32, 43, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --t-shadow-panel: 0 2px 10px rgba(23, 32, 43, 0.06);
+  --t-shadow-teal-glow: 0 4px 24px rgba(43, 168, 162, 0.3);
+  --t-shadow-coral-glow: 0 4px 24px rgba(212, 82, 51, 0.3);
+  --t-shadow-gold-glow: 0 4px 24px rgba(230, 184, 0, 0.35);
+  --t-shadow-sky-glow: 0 4px 20px rgba(61, 130, 174, 0.28);
+  --t-shadow-green-glow: 0 4px 20px rgba(31, 157, 116, 0.28);
+
+  /* Orb bloom strength (pastel on light) */
+  --t-orb-teal: 30%;
+  --t-orb-gold: 26%;
+  --t-orb-coral: 24%;
+  --t-orb-violet: 20%;
+}
+
+:root[data-theme="dark"] {
+  --t-canvas: #0a0d12;
+  --t-canvas-alt: #12161d;
+  --t-canvas-edge: #05070a;
+
+  --t-glass: rgba(255, 255, 255, 0.06);
+  --t-glass-hover: rgba(255, 255, 255, 0.1);
+  --t-glass-deep: rgba(18, 22, 29, 0.72);
+  --t-glass-border: rgba(255, 255, 255, 0.14);
+  --t-glass-border-strong: rgba(255, 255, 255, 0.22);
+
+  --t-panel: rgba(255, 255, 255, 0.05);
+  --t-tint: 12%;
+
+  --t-fg: #f4f6f9;
+
+  --t-teal-ink: #3ed9cf;
+  --t-coral-ink: #ff7a5c;
+  --t-gold-ink: #ffd23f;
+  --t-sky-ink: #6fbceb;
+  --t-green-ink: #34d399;
+  --t-violet-ink: #a78bfa;
+
+  --t-focus: #ffd23f;
+
+  --t-shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --t-shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --t-shadow-glass-lg: 0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --t-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --t-shadow-teal-glow: 0 4px 28px rgba(62, 217, 207, 0.38);
+  --t-shadow-coral-glow: 0 4px 28px rgba(255, 122, 92, 0.38);
+  --t-shadow-gold-glow: 0 4px 28px rgba(255, 210, 63, 0.4);
+  --t-shadow-sky-glow: 0 4px 24px rgba(111, 188, 235, 0.35);
+  --t-shadow-green-glow: 0 4px 24px rgba(52, 211, 153, 0.35);
+
+  --t-orb-teal: 35%;
+  --t-orb-gold: 22%;
+  --t-orb-coral: 28%;
+  --t-orb-violet: 16%;
+}
+
+/* Theme-dependent Tailwind tokens — `inline` so utilities carry the var()
+   reference and flip live when [data-theme] changes. */
+@theme inline {
+  --color-canvas: var(--t-canvas);
+  --color-canvas-alt: var(--t-canvas-alt);
+  --color-canvas-edge: var(--t-canvas-edge);
+
+  --color-glass: var(--t-glass);
+  --color-glass-hover: var(--t-glass-hover);
+  --color-glass-deep: var(--t-glass-deep);
+  --color-glass-border: var(--t-glass-border);
+  --color-glass-border-strong: var(--t-glass-border-strong);
+  --color-panel: var(--t-panel);
+
+  --color-fg: var(--t-fg);
+  --color-focus: var(--t-focus);
+
+  --color-teal-ink: var(--t-teal-ink);
+  --color-coral-ink: var(--t-coral-ink);
+  --color-gold-ink: var(--t-gold-ink);
+  --color-sky-ink: var(--t-sky-ink);
+  --color-green-ink: var(--t-green-ink);
+  --color-violet-ink: var(--t-violet-ink);
+
+  --shadow-glass-sm: var(--t-shadow-glass-sm);
+  --shadow-glass: var(--t-shadow-glass);
+  --shadow-glass-lg: var(--t-shadow-glass-lg);
+  --shadow-panel: var(--t-shadow-panel);
+  --shadow-teal-glow: var(--t-shadow-teal-glow);
+  --shadow-coral-glow: var(--t-shadow-coral-glow);
+  --shadow-gold-glow: var(--t-shadow-gold-glow);
+  --shadow-sky-glow: var(--t-shadow-sky-glow);
+  --shadow-green-glow: var(--t-shadow-green-glow);
+}
+
+/* Static tokens — identical in both themes. */
 @theme {
   /* Fonts */
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  /* Canvas (app background) */
-  --color-canvas: #0a0d12;        /* app background — deep near-black navy */
-  --color-canvas-alt: #12161d;    /* raised background zones, footer band */
-  --color-canvas-edge: #05070a;   /* deepest — orb blend edges, overlays */
+  /* Accent palette (Flip7-derived) — same hex in both themes; solid fills
+     always pair with the constant `night`/`snow` text colors below. */
+  --color-teal: #3ed9cf;
+  --color-teal-deep: #1e8c86;
+  --color-coral: #ff7a5c;
+  --color-coral-deep: #d45233;
+  --color-gold: #ffd23f;
+  --color-gold-deep: #e6b800;
+  --color-sky: #6fbceb;
+  --color-sky-deep: #3d82ae;
+  --color-green: #34d399;
+  --color-green-deep: #1f9d74;
+  --color-violet: #a78bfa;
+  --color-violet-deep: #7c5cdb;
 
-  /* Glass surface */
-  --color-glass: rgba(255, 255, 255, 0.06);         /* default panel/card fill */
-  --color-glass-hover: rgba(255, 255, 255, 0.10);   /* hover / raised fill */
-  --color-glass-deep: rgba(18, 22, 29, 0.72);       /* nav bar, code blocks */
-  --color-glass-border: rgba(255, 255, 255, 0.14);  /* default glass edge */
-  --color-glass-border-strong: rgba(255, 255, 255, 0.22); /* modals, focused panels */
+  /* Constant on-accent text (do NOT flip with theme) */
+  --color-night: #0a0d12; /* text on bright accent fills */
+  --color-snow: #f4f6f9;  /* text on -deep accent fills (hover) */
 
-  /* Text on dark canvas */
-  --color-mist: #f4f6f9;          /* primary text — the dominant foreground */
-
-  /* Accent palette (Flip7-derived, brightened for dark-glass contrast) */
-  --color-teal: #3ed9cf;          /* brand / primary action */
-  --color-teal-deep: #1e8c86;     /* teal hover / teal on light chips */
-  --color-coral: #ff7a5c;         /* danger / destructive / energy */
-  --color-coral-deep: #d45233;    /* coral hover */
-  --color-gold: #ffd23f;          /* pending / live / highlight */
-  --color-gold-deep: #e6b800;     /* gold hover */
-  --color-sky: #6fbceb;           /* info / running / in-progress */
-  --color-sky-deep: #3d82ae;      /* sky hover */
-  --color-green: #34d399;         /* success / done / verified */
-  --color-green-deep: #1f9d74;    /* green hover */
-  --color-violet: #a78bfa;        /* special / variety accent (feature cards) */
-  --color-violet-deep: #7c5cdb;   /* violet hover */
-
-  /* Radii — generous, glass-friendly */
-  --radius-dot: 8px;              /* tiny elements: checkboxes, meter cells */
-  --radius-control: 14px;         /* buttons, inputs, selects, callouts */
-  --radius-card: 20px;            /* cards, tables, code blocks, panels */
-  --radius-card-lg: 28px;         /* modals, hero/feature cards */
-  --radius-pill: 999px;           /* pill buttons, badges, nav pills */
-
-  /* Elevation — glass depth (ambient + inset sheen, never flat black) */
-  --shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --shadow-glass-lg: 0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-
-  /* Elevation — colored glow (Flip7 callback: glow instead of black shadow) */
-  --shadow-teal-glow: 0 4px 28px rgba(62, 217, 207, 0.38);
-  --shadow-coral-glow: 0 4px 28px rgba(255, 122, 92, 0.38);
-  --shadow-gold-glow: 0 4px 28px rgba(255, 210, 63, 0.40);
-  --shadow-sky-glow: 0 4px 24px rgba(111, 188, 235, 0.35);
-  --shadow-green-glow: 0 4px 24px rgba(52, 211, 153, 0.35);
+  /* Radii */
+  --radius-dot: 8px;
+  --radius-control: 14px;
+  --radius-card: 20px;
+  --radius-card-lg: 28px;
+  --radius-pill: 999px;
 
   /* Motion */
-  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);     /* smooth lift/hover */
-  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); /* press/pop */
+  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  /* Display type (font-sans, extra-bold — no separate serif family) */
+  /* Display type */
   --text-display: 3.5rem;
   --text-display--line-height: 1.02;
   --text-display--letter-spacing: -0.02em;
@@ -78,53 +187,88 @@
   --text-h3--line-height: 1.3;
   --text-h3--font-weight: 700;
 
-  /* Caps label — badges, eyebrows, table headers (always with `uppercase`) */
+  /* Caps label */
   --text-label: 0.72rem;
   --text-label--line-height: 1.2;
   --text-label--letter-spacing: 0.08em;
   --text-label--font-weight: 800;
 }
 
-/* Glass surface utilities — the system's signature. Backdrop-blur + translucent
-   fill + hairline light border + ambient shadow, never a flat opaque panel. */
+/* ================================================================
+   Surface utilities.
+   glass*   = blurred chrome (header, status/composer bars, stage frame,
+              modals, hero cards). Blur budget: ≤6 per screen.
+   panel    = nested content surface — translucent fill, hairline border,
+              soft shadow, NO backdrop blur.
+   panel-tint-* = the colorful zones: accent mixed into the panel fill.
+   ================================================================ */
 @utility glass {
-  background: var(--color-glass);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: var(--shadow-glass);
+  background: var(--t-glass);
+  border: 1px solid var(--t-glass-border);
+  box-shadow: var(--t-shadow-glass);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
 }
 @utility glass-raised {
-  background: var(--color-glass-hover);
-  border: 1px solid var(--color-glass-border-strong);
-  box-shadow: var(--shadow-glass-lg);
+  background: var(--t-glass-hover);
+  border: 1px solid var(--t-glass-border-strong);
+  box-shadow: var(--t-shadow-glass-lg);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 @utility glass-deep {
-  background: var(--color-glass-deep);
-  border: 1px solid var(--color-glass-border);
-  box-shadow: var(--shadow-glass);
+  background: var(--t-glass-deep);
+  border: 1px solid var(--t-glass-border);
+  box-shadow: var(--t-shadow-glass);
   backdrop-filter: blur(28px) saturate(140%);
   -webkit-backdrop-filter: blur(28px) saturate(140%);
 }
 
+@utility panel {
+  background: var(--t-panel);
+  border: 1px solid var(--t-glass-border);
+}
+@utility panel-tint-teal {
+  background: color-mix(in srgb, var(--color-teal) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-teal) 38%, var(--t-glass-border));
+}
+@utility panel-tint-coral {
+  background: color-mix(in srgb, var(--color-coral) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-coral) 38%, var(--t-glass-border));
+}
+@utility panel-tint-gold {
+  background: color-mix(in srgb, var(--color-gold) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-gold) 38%, var(--t-glass-border));
+}
+@utility panel-tint-sky {
+  background: color-mix(in srgb, var(--color-sky) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-sky) 38%, var(--t-glass-border));
+}
+@utility panel-tint-green {
+  background: color-mix(in srgb, var(--color-green) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-green) 38%, var(--t-glass-border));
+}
+@utility panel-tint-violet {
+  background: color-mix(in srgb, var(--color-violet) var(--t-tint), var(--t-panel));
+  border: 1px solid color-mix(in srgb, var(--color-violet) 38%, var(--t-glass-border));
+}
+
 /* Background orbs — fixed, blurred color blooms behind all content. This is
-   what the glass actually shows through; never remove or flatten this layer. */
+   what the glass shows through; never remove or flatten this layer. */
 @utility bg-orbs {
   position: fixed;
   inset: 0;
   z-index: -10;
   pointer-events: none;
   background:
-    radial-gradient(600px circle at 12% 18%, color-mix(in srgb, var(--color-teal) 35%, transparent), transparent 65%),
-    radial-gradient(700px circle at 88% 12%, color-mix(in srgb, var(--color-gold) 22%, transparent), transparent 65%),
-    radial-gradient(800px circle at 78% 88%, color-mix(in srgb, var(--color-coral) 28%, transparent), transparent 65%),
-    radial-gradient(900px circle at 10% 95%, color-mix(in srgb, var(--color-violet) 16%, transparent), transparent 65%);
+    radial-gradient(600px circle at 12% 18%, color-mix(in srgb, var(--color-teal) var(--t-orb-teal), transparent), transparent 65%),
+    radial-gradient(700px circle at 88% 12%, color-mix(in srgb, var(--color-gold) var(--t-orb-gold), transparent), transparent 65%),
+    radial-gradient(800px circle at 78% 88%, color-mix(in srgb, var(--color-coral) var(--t-orb-coral), transparent), transparent 65%),
+    radial-gradient(900px circle at 10% 95%, color-mix(in srgb, var(--color-violet) var(--t-orb-violet), transparent), transparent 65%);
 }
 
 body {
-  @apply bg-canvas font-sans text-mist antialiased;
+  @apply bg-canvas font-sans text-fg antialiased;
 }
 
 /* Glow pulse — live/recording indicators, active steps. */

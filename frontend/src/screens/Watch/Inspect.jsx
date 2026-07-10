@@ -13,21 +13,21 @@ const ACTION_STATUS_BADGE = {
 
 export default function Inspect({ step }) {
   if (!step) {
-    return <div className="glass-deep h-full rounded-card p-4 text-sm text-mist/60">Select a step to inspect.</div>;
+    return <div className="panel h-full rounded-card p-4 text-sm text-fg/60">Select a step to inspect.</div>;
   }
 
   const statusBadge = ACTION_STATUS_BADGE[step.actionStatus];
   const inv = step.inventorySummary;
 
   return (
-    <div className="glass-deep flex h-full flex-col gap-4 overflow-y-auto rounded-card p-4 text-mist">
+    <div className="panel flex h-full flex-col gap-4 overflow-y-auto rounded-card p-4 text-fg">
       <div>
-        <CapsLabel className="text-mist/60">Thought</CapsLabel>
-        <p className="mt-1 text-sm leading-relaxed">{step.thought || <span className="text-mist/50">(none)</span>}</p>
+        <CapsLabel className="text-fg/60">Thought</CapsLabel>
+        <p className="mt-1 text-sm leading-relaxed">{step.thought || <span className="text-fg/50">(none)</span>}</p>
       </div>
 
       <div>
-        <CapsLabel className="text-mist/60">Action</CapsLabel>
+        <CapsLabel className="text-fg/60">Action</CapsLabel>
         {step.action ? (
           <div className="mt-1">
             <CodeBlock lang="JSON" showCopy={false}>
@@ -35,22 +35,22 @@ export default function Inspect({ step }) {
             </CodeBlock>
           </div>
         ) : (
-          <p className="mt-1 text-sm text-mist/50">(none)</p>
+          <p className="mt-1 text-sm text-fg/50">(none)</p>
         )}
       </div>
 
       <div>
-        <CapsLabel className="text-mist/60">Status</CapsLabel>
+        <CapsLabel className="text-fg/60">Status</CapsLabel>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           {statusBadge && <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>}
-          {step.errorMsg && <span className="text-sm text-coral">{step.errorMsg}</span>}
+          {step.errorMsg && <span className="text-sm text-coral-ink">{step.errorMsg}</span>}
         </div>
       </div>
 
       {inv && (
         <div>
-          <CapsLabel className="text-mist/60">Inventory (this step)</CapsLabel>
-          <div className="mt-1 font-mono text-sm text-mist/80">
+          <CapsLabel className="text-fg/60">Inventory (this step)</CapsLabel>
+          <div className="mt-1 font-mono text-sm text-fg/80">
             <div>Active sheet: {inv.activeSheet}</div>
             <div>{inv.sheetCount} sheet(s)</div>
             <div>{inv.filterCount} filter(s)</div>
@@ -61,7 +61,7 @@ export default function Inspect({ step }) {
 
       <div className="flex flex-wrap items-center gap-3">
         {step.durationMs != null && (
-          <span className="font-mono text-sm text-mist/70">{(step.durationMs / 1000).toFixed(1)} s</span>
+          <span className="font-mono text-sm text-fg/70">{(step.durationMs / 1000).toFixed(1)} s</span>
         )}
         {step.settleTimeout && <Badge variant="pending">settle timeout</Badge>}
       </div>

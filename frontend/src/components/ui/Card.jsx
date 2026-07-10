@@ -1,19 +1,18 @@
 import { cx } from "./cx.js";
 
-const VARIANT_CLASSES = {
-  feature: "rounded-card-lg glass-raised p-6",
-  standard: "rounded-card glass p-5",
-  quiet: "rounded-card border border-glass-border bg-glass/60 p-5",
-  callout: "rounded-control glass p-4",
+// Surface tiers (DESIGN.md §4): only `feature` blurs (glass); everything else
+// is a non-blurred panel. An `accent` swaps the panel for its tinted variant —
+// the colorful-zone move — so a card is either `panel` OR `panel-tint-*`,
+// never both (they'd fight over background/border).
+const PANEL_TINT = {
+  green: "panel-tint-green",
+  teal: "panel-tint-teal",
+  sky: "panel-tint-sky",
+  violet: "panel-tint-violet",
+  gold: "panel-tint-gold",
+  coral: "panel-tint-coral",
 };
 
-const CLICKABLE_EXTRA =
-  "block w-full text-left transition-[transform,box-shadow,background-color] duration-200 ease-glass " +
-  "hover:-translate-y-1 hover:shadow-glass-lg hover:bg-glass-hover " +
-  "focus-visible:outline-[3px] focus-visible:outline-gold focus-visible:outline-offset-2";
-
-// Only ever one of these is emitted per card (never two colors on the same
-// side) so there is no same-specificity utility clash in the generated CSS.
 const ACCENT_BORDER_T = {
   green: "border-t-4 border-t-green",
   teal: "border-t-4 border-t-teal",
@@ -32,19 +31,34 @@ const ACCENT_BORDER_L = {
   coral: "border-l-4 border-l-coral",
 };
 
+const CLICKABLE_EXTRA =
+  "block w-full text-left transition-[transform,box-shadow,background-color] duration-200 ease-glass " +
+  "hover:-translate-y-1 hover:shadow-glass-lg " +
+  "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2";
+
 export default function Card({ variant = "standard", accent, onClick, className, children, ...props }) {
   const isClickable = variant === "clickable" || typeof onClick === "function";
   const baseVariant = variant === "clickable" ? "standard" : variant;
 
-  const accentClass =
-    baseVariant === "callout" ? ACCENT_BORDER_L[accent ?? "gold"] : accent ? ACCENT_BORDER_T[accent] : null;
+  let surface;
+  let accentClass = null;
+  if (baseVariant === "feature") {
+    surface = "rounded-card-lg glass-raised p-6";
+    if (accent) accentClass = ACCENT_BORDER_T[accent];
+  } else if (baseVariant === "callout") {
+    surface = "rounded-control panel p-4";
+    accentClass = ACCENT_BORDER_L[accent ?? "gold"];
+  } else if (baseVariant === "quiet") {
+    surface = accent ? `rounded-card ${PANEL_TINT[accent]} p-5` : "rounded-card panel p-5";
+  } else {
+    // standard
+    surface = accent
+      ? `rounded-card ${PANEL_TINT[accent]} p-5 shadow-panel`
+      : "rounded-card panel p-5 shadow-panel";
+    if (accent) accentClass = ACCENT_BORDER_T[accent];
+  }
 
-  const classes = cx(
-    VARIANT_CLASSES[baseVariant] ?? VARIANT_CLASSES.standard,
-    isClickable && CLICKABLE_EXTRA,
-    accentClass,
-    className,
-  );
+  const classes = cx(surface, isClickable && CLICKABLE_EXTRA, accentClass, className);
 
   if (isClickable) {
     return (

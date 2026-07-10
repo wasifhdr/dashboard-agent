@@ -74,10 +74,10 @@ export default function HeroReplay() {
       return (
         <Card variant="feature">
           <Badge variant="neutral">RECORDED SESSION</Badge>
-          <div className="glass mt-4 overflow-hidden rounded-control">
+          <div className="panel mt-4 overflow-hidden rounded-control">
             <img src={fallbackThumb} alt="" className="w-full" />
           </div>
-          <p className="mt-3 text-sm text-mist/70">Waiting for the first recorded session</p>
+          <p className="mt-3 text-sm text-fg/70">Waiting for the first recorded session</p>
         </Card>
       );
     }
@@ -102,14 +102,14 @@ export default function HeroReplay() {
         <>
           <CrossfadeImage
             src={currentStep.frame_url}
-            className="glass mt-4 overflow-hidden rounded-control"
+            className="panel mt-4 overflow-hidden rounded-control"
           />
-          <p className="mt-2 font-mono text-xs text-mist/60">{caption}</p>
+          <p className="mt-2 font-mono text-xs text-fg/60">{caption}</p>
         </>
       ) : (
-        <div className="mt-4 rounded-control border-l-4 border-l-green bg-green/10 p-4">
-          <div className="text-label uppercase text-green">Answer</div>
-          <p className="mt-1 text-sm text-mist">{sessionData.session.final_answer}</p>
+        <div className="panel-tint-green mt-4 rounded-control border-l-4 border-l-green p-4">
+          <div className="text-label uppercase text-green-ink">Answer</div>
+          <p className="mt-1 text-sm text-fg">{sessionData.session.final_answer}</p>
         </div>
       )}
     </Card>
