@@ -1,0 +1,87 @@
+{
+  "label": "qwen3.5-4b-stock",
+  "endpoint": "http://127.0.0.1:8080",
+  "score": "8/10",
+  "results": [
+    {
+      "id": "r1_zhvi_us_value",
+      "expected": "$226,800",
+      "response": "226,800",
+      "pass": true,
+      "error": null,
+      "durationMs": 11707
+    },
+    {
+      "id": "r2_zri_us_value",
+      "expected": "$1,477",
+      "response": "1477",
+      "pass": true,
+      "error": null,
+      "durationMs": 5065
+    },
+    {
+      "id": "r3_zhvi_boston_value",
+      "expected": "$465,000",
+      "response": "",
+      "pass": false,
+      "error": null,
+      "durationMs": 14556
+    },
+    {
+      "id": "r4_overthehill_older_pct",
+      "expected": "48.9%",
+      "response": "48.9",
+      "pass": true,
+      "error": null,
+      "durationMs": 3160
+    },
+    {
+      "id": "r5_ca_disease_map_legend",
+      "expected": "0.04%",
+      "response": "Minimum: 0.00%\nMaximum: 0.04%",
+      "pass": true,
+      "error": null,
+      "durationMs": 7095
+    },
+    {
+      "id": "r6_ca_disease_year_sex",
+      "expected": "2015",
+      "response": "The year shown is **2015**, and the currently selected sex is **(All)**.",
+      "pass": true,
+      "error": null,
+      "durationMs": 4943
+    },
+    {
+      "id": "r7_redfin_controls",
+      "expected": "True",
+      "response": "True",
+      "pass": true,
+      "error": null,
+      "durationMs": 2187
+    },
+    {
+      "id": "r8_redfin_latest_value",
+      "expected": "4,222,253",
+      "response": "4,222,253",
+      "pass": true,
+      "error": null,
+      "durationMs": 3876
+    },
+    {
+      "id": "r9_ca_revenue_waterfall",
+      "expected": "28.3%",
+      "response": "38.4%",
+      "pass": false,
+      "error": null,
+      "durationMs": 5248
+    },
+    {
+      "id": "r10_ca_revenue_date_range",
+      "expected": "1951",
+      "response": "The min year is 1951 and the max year is 2012.",
+      "pass": true,
+      "error": null,
+      "durationMs": 3647
+    }
+  ]
+}

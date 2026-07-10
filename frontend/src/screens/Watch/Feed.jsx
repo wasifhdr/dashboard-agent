@@ -1,0 +1,300 @@
+import { useEffect, useRef, useState } from "react";
+import { cx } from "../../components/ui/cx.js";
+import CapsLabel from "../../components/ui/CapsLabel.jsx";
+import Spinner from "../../components/ui/Spinner.jsx";
+import { useTypewriter } from "../../hooks/useTypewriter.js";
+import { TYPEWRITER_MS_PER_CHAR } from "./pacing.js";
+import { TERMINAL_STATUSES } from "./terminalStatuses.js";
+
+const OUTCOME_CONFIG = {
+  answered: { label: "ANSWER", labelColor: "text-green", border: "border-l-green" },
+  max_steps: {
+    label: "BEST-EFFORT ANSWER",
+    labelColor: "text-gold",
+    border: "border-l-gold",
+    subline: "Step budget reached before a confident answer.",
+  },
+  failed: {
+    label: "NOT ANSWERABLE",
+    labelColor: "text-gold",
+    border: "border-l-gold",
+    body: "The agent determined this dashboard cannot answer this question.",
+  },
+  error: { label: "SESSION ERROR", labelColor: "text-coral", border: "border-l-coral" },
+  stopped: {
+    label: "STOPPED",
+    labelColor: "text-mist/60",
+    border: "border-l-glass-border-strong",
+    body: "Stopped by you before the agent finished.",
+  },
+};
+
+// revealMode: 'resolved' (fully static) | 'pending' | 'typing' | 'action-pending' | null (withheld)
+function revealModeFor(runIdx, stepIdx, playback, atOutcome) {
+  if (atOutcome || !playback) return "resolved";
+  if (runIdx < playback.runIdx) return "resolved";
+  if (runIdx > playback.runIdx) return null;
+  if (stepIdx < playback.stepIdx) return "resolved";
+  if (stepIdx > playback.stepIdx) return null;
+  switch (playback.phase) {
+    case "frame":
+      return "pending";
+    case "thought":
+      return "typing";
+    case "action-pending":
+      return "action-pending";
+    default:
+      return "resolved";
+  }
+}
+
+function ElapsedTimer({ since }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const totalSeconds = Math.max(0, Math.floor((now - since) / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return (
+    <span className="font-mono text-xs text-mist/60">
+      {m}:{String(s).padStart(2, "0")}
+    </span>
+  );
+}
+
+function ThoughtLine({ text, active }) {
+  const { revealed, done } = useTypewriter(text, TYPEWRITER_MS_PER_CHAR, active);
+  if (!text) return null;
+  return (
+    <p className={cx("mt-1 text-sm leading-relaxed text-mist", active && !done && "typewriter-caret")}>{revealed}</p>
+  );
+}
+
+function ActionLine({ step, pending }) {
+  if (pending) {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-control border border-glass-border px-3 py-2 font-mono text-[13px]">
+        <span className="text-mist">▸ {step.planned.label}</span>
+        <Spinner className="size-4 border-glass-border border-t-gold" />
+        <span className="text-mist/60">applying…</span>
+      </div>
+    );
+  }
+
+  const status = step.actionStatus;
+  let icon = "✓";
+  let colorClass = "text-green";
+  let explain = null;
+
+  if (status === "rejected_loop") {
+    icon = "✗";
+    colorClass = "text-gold";
+    explain = "rejected: already tried — rethinking…";
+  } else if (status === "rejected_target") {
+    icon = "✗";
+    colorClass = "text-gold";
+    explain = "rejected: unknown target — rethinking…";
+  } else if (status === "error") {
+    icon = "✗";
+    colorClass = "text-coral";
+    explain = (step.errorMsg ?? "").slice(0, 120);
+  }
+
+  return (
+    <div className="mt-2 rounded-control border border-glass-border px-3 py-2 font-mono text-[13px]">
+      <div className={colorClass}>
+        {icon} {step.planned.label}
+      </div>
+      {explain && <div className="mt-1 text-xs text-mist/60">{explain}</div>}
+    </div>
+  );
+}
+
+function StepCard({ step, revealMode, isSelected, onSelect }) {
+  if (revealMode === null) return null;
+
+  const isInvalid = !step.thought && !step.planned;
+
+  return (
+    <div
+      className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
+      onClick={onSelect}
+    >
+      <div className="flex items-center justify-between font-mono text-xs text-mist/50">
+        <span>STEP {step.idx}</span>
+        {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
+      </div>
+
+      {revealMode === "pending" && (
+        <div className="mt-1 flex items-center gap-2">
+          <Spinner className="border-glass-border border-t-gold" />
+          <span className="text-sm text-mist/70">Reading the dashboard…</span>
+          {step.attempt && (
+            <span className="text-xs text-gold">
+              Attempt {step.attempt} of 3 — the previous response was invalid.
+            </span>
+          )}
+        </div>
+      )}
+
+      {revealMode !== "pending" && isInvalid && (
+        <div className="mt-1 text-sm">
+          {step.actionStatus === "vlm_error" ? (
+            <span className="text-coral">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
+          ) : (
+            <span className="text-gold">The model's response was invalid — retrying.</span>
+          )}
+        </div>
+      )}
+
+      {revealMode !== "pending" && !isInvalid && (
+        <>
+          <ThoughtLine text={step.thought} active={revealMode === "typing"} />
+          {step.planned && (revealMode === "action-pending" || revealMode === "resolved") && (
+            <ActionLine step={step} pending={revealMode === "action-pending"} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Live (data-driven) step rendering: unlike the playback-driven StepCard
+// above, there's no beat sequencer imposing artificial pacing here - the
+// thought's own typewriter reveal is what gates the action card, since real
+// `thought` and `action_planned` events arrive near-simultaneously (gating
+// on raw event data alone would make the typewriter effectively invisible).
+function LiveStepCard({ step, isSelected, onSelect }) {
+  const isInvalid = step.actionStatus === "invalid_json" || step.actionStatus === "vlm_error";
+  const { revealed, done } = useTypewriter(step.thought, TYPEWRITER_MS_PER_CHAR, !!step.thought);
+
+  return (
+    <div
+      className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
+      onClick={onSelect}
+    >
+      <div className="flex items-center justify-between font-mono text-xs text-mist/50">
+        <span>STEP {step.idx}</span>
+        {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
+      </div>
+
+      {!step.thought && !isInvalid && (
+        <div className="mt-1 flex items-center gap-2">
+          <Spinner className="border-glass-border border-t-gold" />
+          <span className="text-sm text-mist/70">Reading the dashboard…</span>
+          {step.attempt && (
+            <span className="text-xs text-gold">
+              Attempt {step.attempt} of 3 — the previous response was invalid.
+            </span>
+          )}
+          {step.stepStartedAt && <ElapsedTimer since={step.stepStartedAt} />}
+        </div>
+      )}
+
+      {isInvalid && (
+        <div className="mt-1 text-sm">
+          {step.actionStatus === "vlm_error" ? (
+            <span className="text-coral">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
+          ) : (
+            <span className="text-gold">The model's response was invalid — retrying.</span>
+          )}
+        </div>
+      )}
+
+      {step.thought && !isInvalid && (
+        <>
+          <p className={cx("mt-1 text-sm leading-relaxed text-mist", !done && "typewriter-caret")}>{revealed}</p>
+          {done && step.planned && <ActionLine step={step} pending={step.actionStatus == null} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function QuestionCard({ index, question }) {
+  return (
+    <div className="glass rounded-control p-3">
+      <CapsLabel className="text-mist/60">QUESTION {index}</CapsLabel>
+      <p className="mt-1 text-[15px] font-medium text-mist">{question}</p>
+    </div>
+  );
+}
+
+function OutcomeCard({ run }) {
+  const config = OUTCOME_CONFIG[run.status];
+  if (!config) return null;
+
+  const body = config.body ?? (run.status === "error" ? run.error : run.finalAnswer);
+  const showConfidence = (run.status === "answered" || run.status === "max_steps") && run.confidence != null;
+
+  return (
+    <div className={cx("glass rounded-control border-l-4 p-4", config.border)}>
+      <div className={cx("text-label uppercase", config.labelColor)}>{config.label}</div>
+      <p className="mt-1 text-base font-bold text-mist">{body}</p>
+      {showConfidence && <div className="mt-1 font-mono text-xs text-mist/60">confidence {run.confidence.toFixed(2)}</div>}
+      {config.subline && <p className="mt-1 text-sm text-mist/70">{config.subline}</p>}
+    </div>
+  );
+}
+
+export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive }) {
+  const scrollRef = useRef(null);
+  const userScrolledUpRef = useRef(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || userScrolledUpRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  });
+
+  function handleScroll(e) {
+    const el = e.target;
+    userScrolledUpRef.current = el.scrollTop + el.clientHeight < el.scrollHeight - 24;
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      aria-live="polite"
+      className="glass-deep flex h-full flex-col gap-3 overflow-y-auto rounded-card p-4 text-mist"
+    >
+      {runs.map((run, runIdx) => {
+        const sortedIdxs = [...run.steps.keys()].sort((a, b) => a - b);
+        const runOutcomeVisible = atOutcome ? true : !playback ? true : runIdx < playback.runIdx;
+
+        return (
+          <div key={run.sessionId} className="flex flex-col gap-2">
+            {runIdx > 0 && (
+              <div className="my-1 text-center font-mono text-xs text-mist/50">
+                — new question · the dashboard resets to its default state —
+              </div>
+            )}
+            <QuestionCard index={runIdx + 1} question={run.question} />
+            {run.status === "loading" ? (
+              <div className="font-mono text-xs text-mist/60">→ opening dashboard…</div>
+            ) : (
+              run.steps.size > 0 && <div className="font-mono text-xs text-mist/60">→ dashboard ready</div>
+            )}
+
+            {sortedIdxs.map((stepIdx) => {
+              const step = run.steps.get(stepIdx);
+              const isSelected = selected?.runIdx === runIdx && selected?.stepIdx === stepIdx;
+              const onSelect = () => onSelectStep({ runIdx, stepIdx });
+
+              if (isLive && !playback) {
+                return <LiveStepCard key={stepIdx} step={step} isSelected={isSelected} onSelect={onSelect} />;
+              }
+              const revealMode = revealModeFor(runIdx, stepIdx, playback, atOutcome);
+              return <StepCard key={stepIdx} step={step} revealMode={revealMode} isSelected={isSelected} onSelect={onSelect} />;
+            })}
+
+            {TERMINAL_STATUSES.has(run.status) && runOutcomeVisible && <OutcomeCard run={run} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}

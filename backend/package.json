@@ -1,0 +1,24 @@
+{
+  "name": "dashboard-agent-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.js",
+    "vision-smoke-test": "node scripts/vision-smoke-test.js",
+    "dev": "node src/server.js",
+    "run-agent": "node run.js",
+    "eval": "node eval.js",
+    "reading-bench": "node eval/reading-bench.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pixelmatch": "^7.1.0",
+    "playwright": "^1.58.2",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.34.4",
+    "zod": "^4.1.13"
+  }
+}

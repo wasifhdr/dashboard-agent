@@ -1,0 +1,249 @@
+@import "tailwindcss";
+
+@theme {
+  /* Fonts */
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  /* Canvas (app background) */
+  --color-canvas: #0a0d12;        /* app background — deep near-black navy */
+  --color-canvas-alt: #12161d;    /* raised background zones, footer band */
+  --color-canvas-edge: #05070a;   /* deepest — orb blend edges, overlays */
+
+  /* Glass surface */
+  --color-glass: rgba(255, 255, 255, 0.06);         /* default panel/card fill */
+  --color-glass-hover: rgba(255, 255, 255, 0.10);   /* hover / raised fill */
+  --color-glass-deep: rgba(18, 22, 29, 0.72);       /* nav bar, code blocks */
+  --color-glass-border: rgba(255, 255, 255, 0.14);  /* default glass edge */
+  --color-glass-border-strong: rgba(255, 255, 255, 0.22); /* modals, focused panels */
+
+  /* Text on dark canvas */
+  --color-mist: #f4f6f9;          /* primary text — the dominant foreground */
+
+  /* Accent palette (Flip7-derived, brightened for dark-glass contrast) */
+  --color-teal: #3ed9cf;          /* brand / primary action */
+  --color-teal-deep: #1e8c86;     /* teal hover / teal on light chips */
+  --color-coral: #ff7a5c;         /* danger / destructive / energy */
+  --color-coral-deep: #d45233;    /* coral hover */
+  --color-gold: #ffd23f;          /* pending / live / highlight */
+  --color-gold-deep: #e6b800;     /* gold hover */
+  --color-sky: #6fbceb;           /* info / running / in-progress */
+  --color-sky-deep: #3d82ae;      /* sky hover */
+  --color-green: #34d399;         /* success / done / verified */
+  --color-green-deep: #1f9d74;    /* green hover */
+  --color-violet: #a78bfa;        /* special / variety accent (feature cards) */
+  --color-violet-deep: #7c5cdb;   /* violet hover */
+
+  /* Radii — generous, glass-friendly */
+  --radius-dot: 8px;              /* tiny elements: checkboxes, meter cells */
+  --radius-control: 14px;         /* buttons, inputs, selects, callouts */
+  --radius-card: 20px;            /* cards, tables, code blocks, panels */
+  --radius-card-lg: 28px;         /* modals, hero/feature cards */
+  --radius-pill: 999px;           /* pill buttons, badges, nav pills */
+
+  /* Elevation — glass depth (ambient + inset sheen, never flat black) */
+  --shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --shadow-glass-lg: 0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+
+  /* Elevation — colored glow (Flip7 callback: glow instead of black shadow) */
+  --shadow-teal-glow: 0 4px 28px rgba(62, 217, 207, 0.38);
+  --shadow-coral-glow: 0 4px 28px rgba(255, 122, 92, 0.38);
+  --shadow-gold-glow: 0 4px 28px rgba(255, 210, 63, 0.40);
+  --shadow-sky-glow: 0 4px 24px rgba(111, 188, 235, 0.35);
+  --shadow-green-glow: 0 4px 24px rgba(52, 211, 153, 0.35);
+
+  /* Motion */
+  --ease-glass: cubic-bezier(0.22, 1, 0.36, 1);     /* smooth lift/hover */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); /* press/pop */
+
+  /* Display type (font-sans, extra-bold — no separate serif family) */
+  --text-display: 3.5rem;
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 800;
+  --text-display-sm: 2.25rem;
+  --text-display-sm--line-height: 1.08;
+  --text-display-sm--letter-spacing: -0.015em;
+  --text-display-sm--font-weight: 800;
+
+  /* Headings */
+  --text-h1: 1.75rem;
+  --text-h1--line-height: 1.15;
+  --text-h1--font-weight: 700;
+  --text-h2: 1.3125rem;
+  --text-h2--line-height: 1.25;
+  --text-h2--font-weight: 700;
+  --text-h3: 1.0625rem;
+  --text-h3--line-height: 1.3;
+  --text-h3--font-weight: 700;
+
+  /* Caps label — badges, eyebrows, table headers (always with `uppercase`) */
+  --text-label: 0.72rem;
+  --text-label--line-height: 1.2;
+  --text-label--letter-spacing: 0.08em;
+  --text-label--font-weight: 800;
+}
+
+/* Glass surface utilities — the system's signature. Backdrop-blur + translucent
+   fill + hairline light border + ambient shadow, never a flat opaque panel. */
+@utility glass {
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+@utility glass-raised {
+  background: var(--color-glass-hover);
+  border: 1px solid var(--color-glass-border-strong);
+  box-shadow: var(--shadow-glass-lg);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+@utility glass-deep {
+  background: var(--color-glass-deep);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+}
+
+/* Background orbs — fixed, blurred color blooms behind all content. This is
+   what the glass actually shows through; never remove or flatten this layer. */
+@utility bg-orbs {
+  position: fixed;
+  inset: 0;
+  z-index: -10;
+  pointer-events: none;
+  background:
+    radial-gradient(600px circle at 12% 18%, color-mix(in srgb, var(--color-teal) 35%, transparent), transparent 65%),
+    radial-gradient(700px circle at 88% 12%, color-mix(in srgb, var(--color-gold) 22%, transparent), transparent 65%),
+    radial-gradient(800px circle at 78% 88%, color-mix(in srgb, var(--color-coral) 28%, transparent), transparent 65%),
+    radial-gradient(900px circle at 10% 95%, color-mix(in srgb, var(--color-violet) 16%, transparent), transparent 65%);
+}
+
+body {
+  @apply bg-canvas font-sans text-mist antialiased;
+}
+
+/* Glow pulse — live/recording indicators, active steps. */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.08); }
+}
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Success flourish — a single soft ring ping, used once on the agent's final answer. */
+@keyframes ring-ping {
+  0% { opacity: 0.6; transform: scale(0.8); }
+  100% { opacity: 0; transform: scale(1.8); }
+}
+.ring-ping::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  animation: ring-ping 600ms var(--ease-glass) 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-glow-pulse {
+    animation: none;
+  }
+  .ring-ping::after {
+    animation: none;
+    display: none;
+  }
+}
+
+/* ================================================================
+   App-specific additions (FRONTEND_PLAN.md §4.2) — tokens only.
+   ================================================================ */
+
+/* Stage crossfade: two stacked frame layers, the incoming one fades in. */
+.stage-crossfade {
+  position: relative;
+}
+.stage-crossfade .frame-layer {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.stage-crossfade .frame-layer.frame-layer-incoming {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+.stage-crossfade .frame-layer.frame-layer-incoming.is-visible {
+  opacity: 1;
+}
+
+/* Changed-region pulse (sky) — drawn over the stage SVG overlay. */
+@keyframes overlay-region-pulse {
+  0% {
+    fill-opacity: 0.55;
+  }
+  100% {
+    fill-opacity: 0.18;
+  }
+}
+.overlay-region {
+  fill: color-mix(in srgb, var(--color-sky) 18%, transparent);
+  stroke: var(--color-sky);
+  stroke-width: 2;
+  animation: overlay-region-pulse 1.4s ease-out;
+}
+
+/* Widget-highlight bbox (gold, dashed) — drawn over the stage SVG overlay. */
+.overlay-widget {
+  fill: none;
+  stroke: var(--color-gold);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+/* Typewriter caret — appended after in-progress typewriter text, hidden via
+   .is-done once the reveal finishes. */
+@keyframes typewriter-caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.typewriter-caret::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  margin-left: 1px;
+  border-right: 1px solid currentColor;
+  animation: typewriter-caret-blink 0.9s steps(1) infinite;
+}
+.typewriter-caret.is-done::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-crossfade .frame-layer.frame-layer-incoming {
+    transition: none;
+  }
+  .overlay-region {
+    animation: none;
+    fill-opacity: 0.18;
+  }
+  .typewriter-caret::after {
+    animation: none;
+    opacity: 1;
+  }
+}

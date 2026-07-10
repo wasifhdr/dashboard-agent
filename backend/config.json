@@ -1,0 +1,67 @@
+{
+  "llamaEndpoint": "http://127.0.0.1:8080",
+  "modelName": "Jackrong-Qwen3.5-4B-Claude-Opus-Reasoning-Distilled-v2-Q4_K_M",
+  "promptStyle": "constrained_json",
+  "maxSteps": 15,
+  "imageLongSide": 1280,
+  "backendPort": 8788,
+  "hostPageOrigin": "http://127.0.0.1:8788",
+  "vlmCallTimeoutMs": 120000,
+  "actionTimeoutMs": 30000,
+  "sessionWallClockMs": 900000,
+  "settleGate": {
+    "postActionWaitMs": 400,
+    "compareIntervalMs": 500,
+    "diffThresholdPct": 0.5,
+    "timeoutMs": 12000
+  },
+  "dashboards": [
+    {
+      "name": "Zillow Home Value Index (April 2019)",
+      "url": "https://public.tableau.com/views/April2019Data/ZHVI",
+      "description": "Median U.S. home values by region, with inventory and rent-index (ZRI) tabs.",
+      "tags": ["real estate", "home values", "housing", "zillow", "rent"],
+      "exampleQuestions": [
+        "What is the ZHVI (median home value) for Boston, MA according to the dashboard?",
+        "Switch to the ZRI dashboard tab and report the current Zillow Rent Index (ZRI) value shown for the United States."
+      ]
+    },
+    {
+      "name": "California Infectious Diseases",
+      "url": "https://public.tableau.com/views/CAInfectiousDiseases/CAInfectiousDiseases",
+      "description": "Reported infectious disease cases across California, filterable by year and sex.",
+      "tags": ["health", "diseases", "california", "public health", "epidemiology"],
+      "exampleQuestions": [
+        "Filter the dashboard to show only Male cases (keep the year at its default). Which disease appears to have the most reported case icons for males?"
+      ]
+    },
+    {
+      "name": "Over the Hill (US Demographics)",
+      "url": "https://public.tableau.com/views/OverTheHill_US_9/Dashboard1",
+      "description": "What share of Americans are older than a given age — U.S. age demographics by gender.",
+      "tags": ["demographics", "age", "population", "census"],
+      "exampleQuestions": [
+        "Set the gender filter to Female. What percentage of Female Americans are older than the currently displayed age?"
+      ]
+    },
+    {
+      "name": "California Revenue Sources",
+      "url": "https://public.tableau.com/views/CAStateRevenues_10_0/CAIncome",
+      "description": "California state revenue sources over time, with a fiscal-year range filter.",
+      "tags": ["finance", "revenue", "taxes", "california", "government"],
+      "exampleQuestions": [
+        "Narrow the FY Ending date range to 1990 through 2000 and describe what happened to total California revenue over that period."
+      ]
+    },
+    {
+      "name": "Redfin Existing Home Sales",
+      "url": "https://public.tableau.com/views/EHSPublic/EHSDashboard",
+      "description": "U.S. existing home sales: annualized rate, MoM/YoY metrics, seasonal adjustment toggle.",
+      "tags": ["real estate", "home sales", "redfin", "market", "economics"],
+      "exampleQuestions": [
+        "What is the most recent Home Sales Annualized Rate for the National region (seasonally adjusted), according to the dashboard?",
+        "Change the Metrics parameter to 'Home Sales YoY' and report the most recent value shown."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+[
+  {
+    "id": "q1_easy_zillow_no_action",
+    "dashboard_url": "https://public.tableau.com/views/April2019Data/ZHVI",
+    "question": "According to the dashboard, what is the median home value (ZHVI) for the United States, and is the trend over the last few years upward or downward?",
+    "difficulty": "easy",
+    "expected_action": null,
+    "expected_answer_hint": "$226,800; upward trend toward the most recent years",
+    "notes": "Answerable directly from the initial screenshot; agent should not need any actions before answering."
+  },
+  {
+    "id": "q2_filter_zillow_region_boston",
+    "dashboard_url": "https://public.tableau.com/views/April2019Data/ZHVI",
+    "question": "What is the ZHVI (median home value) for Boston, MA according to the dashboard?",
+    "difficulty": "medium",
+    "expected_action": { "type": "set_filter", "field": "RegionName", "value_contains": "Boston" },
+    "expected_answer_hint": "$465,000",
+    "notes": "Tests case-insensitive/partial value matching and recovery from a decoy 'Select Region' parameter that isn't wired to anything visible (see README known findings)."
+  },
+  {
+    "id": "q3_tab_zillow_zri",
+    "dashboard_url": "https://public.tableau.com/views/April2019Data/ZHVI",
+    "question": "Switch to the ZRI dashboard tab and report the current Zillow Rent Index (ZRI) value shown for the United States.",
+    "difficulty": "medium",
+    "expected_action": { "type": "switch_sheet", "sheet": "ZRI" },
+    "expected_answer_hint": "$1,477",
+    "notes": "Genuine multi-tab workbook (ZHVI/Inventory/ZRI are real top-level published sheets, not just parameters)."
+  },
+  {
+    "id": "q4_filter_disease_male",
+    "dashboard_url": "https://public.tableau.com/views/CAInfectiousDiseases/CAInfectiousDiseases",
+    "question": "Filter the dashboard to show only Male cases (keep the year at its default). Which disease appears to have the most reported case icons for males?",
+    "difficulty": "medium",
+    "expected_action": { "type": "set_filter", "field": "Sex", "value": "Male" },
+    "expected_answer_hint": "unknown - the icon chart is dense enough that even manual pixel inspection could not confidently establish ground truth; treat this question's answer as unverified",
+    "notes": "Action correctness is the bar here, not answer correctness - this question probes a genuinely hard, fine-grained icon-position reading task."
+  },
+  {
+    "id": "q5_filter_overthehill_gender",
+    "dashboard_url": "https://public.tableau.com/views/OverTheHill_US_9/Dashboard1",
+    "question": "Set the gender filter to Female. What percentage of Female Americans are older than the currently displayed age?",
+    "difficulty": "medium",
+    "expected_action": { "type": "set_filter", "field": "Gender", "value": "Female" },
+    "expected_answer_hint": "48.9%",
+    "notes": "The dashboard's primary 'pick your age' interaction is a mark-selection click, out of scope for this phase - only the Gender filter is used here."
+  },
+  {
+    "id": "q6_unanswerable_temperature",
+    "dashboard_url": "https://public.tableau.com/views/CAInfectiousDiseases/CAInfectiousDiseases",
+    "question": "What is the average outdoor temperature recorded in this dataset?",
+    "difficulty": "trap",
+    "expected_action": { "type": "fail" },
+    "expected_answer_hint": "N/A - dashboard has no temperature data",
+    "notes": "Loop-guard / graceful-failure test: correct behavior is a clean 'fail' or equivalent answer, not looping or exhausting the step budget."
+  },
+  {
+    "id": "q7_easy_redfin_no_action",
+    "dashboard_url": "https://public.tableau.com/views/EHSPublic/EHSDashboard",
+    "question": "What is the most recent Home Sales Annualized Rate for the National region (seasonally adjusted), according to the dashboard?",
+    "difficulty": "easy",
+    "expected_action": null,
+    "expected_answer_hint": "4,222,253",
+    "notes": "Default state already shows Metrics=Home Sales Annualized Rate, Region=National, Seasonally Adjusted=True - answerable from the initial screenshot."
+  },
+  {
+    "id": "q8_filter_redfin_seasonally_adjusted",
+    "dashboard_url": "https://public.tableau.com/views/EHSPublic/EHSDashboard",
+    "question": "Set 'Seasonally Adjusted' to False. What is the new latest home sales value shown on the chart?",
+    "difficulty": "medium",
+    "expected_action": { "type": "set_filter", "field": "Seasonally Adjusted", "value": "False" },
+    "expected_answer_hint": "unknown - verify against the after-action screenshot",
+    "notes": "Confirmed via probe.js: 'Seasonally Adjusted' is a categorical filter with domain [False, True], not a parameter."
+  },
+  {
+    "id": "q9_parameter_redfin_metric",
+    "dashboard_url": "https://public.tableau.com/views/EHSPublic/EHSDashboard",
+    "question": "Change the Metrics parameter to 'Home Sales YoY' and report the most recent value shown.",
+    "difficulty": "medium",
+    "expected_action": { "type": "set_parameter", "name": "Metrics", "value": "Home Sales YoY" },
+    "expected_answer_hint": "unknown - verify against the after-action screenshot",
+    "notes": "Confirmed via probe.js: 'Metrics' is a list parameter (Home Sales Annualized Rate / Home Sales MoM / Home Sales YoY)."
+  },
+  {
+    "id": "q10_range_filter_ca_revenue",
+    "dashboard_url": "https://public.tableau.com/views/CAStateRevenues_10_0/CAIncome",
+    "question": "Narrow the FY Ending date range to 1990 through 2000 and describe what happened to total California revenue over that period.",
+    "difficulty": "hard",
+    "expected_action": { "type": "set_range_filter", "field": "FY Ending", "min": 1990, "max": 2000 },
+    "expected_answer_hint": "unknown - verify against the after-action screenshot",
+    "notes": "First eval question exercising set_range_filter specifically (existing smoke-questions.json only covered set_filter/set_parameter/switch_sheet/fail)."
+  }
+]

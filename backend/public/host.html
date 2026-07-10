@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>dashboard-agent host</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #1a1a1a; }
+  #viz { display: block; width: 1600px; height: 1000px; }
+  /* Dev-only manual test panel. Not shown to end users; only used when this
+     page is opened directly in a browser during Phase 0 development. */
+  #devPanel {
+    position: fixed; top: 0; right: 0; width: 380px; max-height: 100vh;
+    overflow: auto; background: #111; color: #ddd; font: 12px monospace;
+    padding: 10px; box-sizing: border-box; z-index: 9999; border-left: 1px solid #444;
+  }
+  #devPanel button { display: block; width: 100%; margin: 4px 0; padding: 6px; cursor: pointer; }
+  #devPanel pre { white-space: pre-wrap; word-break: break-all; background: #000; padding: 6px; max-height: 300px; overflow: auto; }
+  #devPanel.hidden { display: none; }
+</style>
+</head>
+<body>
+  <tableau-viz id="agentViz" hide-tabs toolbar="hidden"></tableau-viz>
+
+  <div id="devPanel">
+    <div><strong>dashboard-agent dev panel</strong> (add ?dev=1 to hide)</div>
+    <button id="btnInventory">getInventory()</button>
+    <button id="btnSwitchSheet">switchSheet(prompt)</button>
+    <button id="btnCatFilter">applyCategoricalFilter(prompt)</button>
+    <button id="btnRangeFilter">applyRangeFilter(prompt)</button>
+    <button id="btnParam">setParameter(prompt)</button>
+    <button id="btnEvents">getEventLog()</button>
+    <pre id="devOut">(output appears here)</pre>
+  </div>
+
+  <script type="module">
+    import {
+      TableauEventType,
+      FilterUpdateType,
+    } from "https://public.tableau.com/javascripts/api/tableau.embedding.3.latest.js";
+
+    const params = new URLSearchParams(location.search);
+    const vizUrl = params.get("viz");
+    const devMode = params.get("dev") !== "0"; // dev panel visible by default
+
+    const vizEl = document.getElementById("agentViz");
+
+    // ---- bridge state -------------------------------------------------
+    const eventLog = [];
+    function logEvent(type) {
+      eventLog.push({ type, ts: Date.now() });
+    }
+
+    window.__agentBridgeState = { interactive: false, loadError: null };
+
+    let readyResolve, readyReject;
+    const readyPromise = new Promise((res, rej) => {
+      readyResolve = res;
+      readyReject = rej;
+    });
+
+    vizEl.addEventListener(TableauEventType.FirstInteractive, async () => {
+      // The dashboard's published size is usually smaller than our generous
+      // default box (1600x1000), which would otherwise leave dead black
+      // margin in every screenshot and waste image tokens the VLM needs for
+      // reading fine print. Shrink the element to the sheet's real size when
+      // it reports one (behavior !== "automatic").
+      try {
+        const size = vizEl.workbook.activeSheet.size;
+        const target = size?.minSize || size?.maxSize;
+        if (size && size.behavior !== "automatic" && target?.width && target?.height) {
+          vizEl.style.width = `${target.width}px`;
+          vizEl.style.height = `${target.height}px`;
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        }
+      } catch (e) {
+        // sizing is a cosmetic best-effort; never block readiness on it.
+      }
+      window.__agentBridgeState.interactive = true;
+      readyResolve();
+    });
+    vizEl.addEventListener(TableauEventType.FilterChanged, () => logEvent("FilterChanged"));
+    vizEl.addEventListener(TableauEventType.ParameterChanged, () => logEvent("ParameterChanged"));
+    vizEl.addEventListener(TableauEventType.TabSwitched, () => logEvent("TabSwitched"));
+    vizEl.addEventListener(TableauEventType.VizLoadError, (e) => {
+      const msg = String(e?.detail?.message ?? "vizloaderror");
+      window.__agentBridgeState.loadError = msg;
+      readyReject(new Error(msg));
+    });
+
+    if (vizUrl) {
+      vizEl.src = vizUrl;
+    } else {
+      window.__agentBridgeState.loadError = "no ?viz= URL provided";
+    }
+
+    // ---- helpers --------------------------------------------------------
+    // Extracts a plain value from a Tableau DataValue-ish object.
+    function plain(v) {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "object") return v.formattedValue ?? v.nativeValue ?? v.value ?? null;
+      return v;
+    }
+
+    // The active sheet is either a Dashboard (has .worksheets, dashboard-level
+    // getFiltersAsync/applyFilterAsync) or a bare Worksheet (single-sheet viz).
+    function activeContainer() {
+      const sheet = vizEl.workbook.activeSheet;
+      if (sheet.sheetType === "dashboard") {
+        return { container: sheet, worksheets: sheet.worksheets, isDashboard: true };
+      }
+      return { container: sheet, worksheets: [sheet], isDashboard: false };
+    }
+
+    async function getRawFilters() {
+      const { container, isDashboard, worksheets } = activeContainer();
+      return isDashboard ? container.getFiltersAsync() : worksheets[0].getFiltersAsync();
+    }
+
+    // ---- bridge methods ---------------------------------------------------
+    async function getInventory() {
+      const { container, worksheets, isDashboard } = activeContainer();
+
+      const rawFilters = await getRawFilters();
+      const filters = [];
+      for (const f of rawFilters) {
+        let domain = null;
+        let domainRange = null;
+        try {
+          if (f.filterType === "categorical" && typeof f.getDomainAsync === "function") {
+            const d = await f.getDomainAsync();
+            domain = (d.values || []).map(plain);
+          } else if (f.filterType === "range" && typeof f.getDomainAsync === "function") {
+            const d = await f.getDomainAsync();
+            domainRange = { min: plain(d.min), max: plain(d.max) };
+          }
+        } catch (e) {
+          // domain enumeration not available for this filter/API version; leave null.
+        }
+
+        filters.push({
+          fieldName: f.fieldName,
+          filterType: f.filterType,
+          worksheetName: f.worksheetName,
+          appliedValues: (f.appliedValues || []).map(plain),
+          isAllSelected: f.isAllSelected ?? null,
+          minValue: plain(f.minValue),
+          maxValue: plain(f.maxValue),
+          domain,
+          domainRange,
+        });
+      }
+
+      let parameters = [];
+      try {
+        const rawParams = await vizEl.workbook.getParametersAsync();
+        parameters = rawParams.map((p) => ({
+          name: p.name,
+          dataType: p.dataType,
+          currentValue: plain(p.currentValue),
+          allowableType: p.allowableValues?.type ?? null,
+          allowableValues: (p.allowableValues?.allowableValues || []).map(plain),
+          minValue: plain(p.allowableValues?.minValue),
+          maxValue: plain(p.allowableValues?.maxValue),
+          stepSize: p.allowableValues?.stepSize ?? null,
+        }));
+      } catch (e) {
+        // some vizzes have no parameters; leave empty.
+      }
+
+      const sheetsInfo = (vizEl.workbook.publishedSheetsInfo || []).map((s) => ({
+        name: s.name,
+        index: s.index,
+        isActive: s.isActive,
+        isHidden: s.isHidden,
+        sheetType: s.sheetType,
+      }));
+
+      return {
+        activeSheetName: container.name,
+        isDashboard,
+        worksheetNames: worksheets.map((w) => w.name),
+        sheets: sheetsInfo,
+        filters,
+        parameters,
+      };
+    }
+
+    async function applyCategoricalFilter(fieldName, values) {
+      try {
+        const { container, isDashboard, worksheets } = activeContainer();
+        if (isDashboard) {
+          await container.applyFilterAsync(fieldName, values, FilterUpdateType.Replace, { isExcludeMode: false });
+        } else {
+          await worksheets[0].applyFilterAsync(fieldName, values, FilterUpdateType.Replace, { isExcludeMode: false });
+        }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+
+    async function applyRangeFilter(fieldName, min, max) {
+      // Range filters have no dashboard-level broadcast method in the Embedding
+      // API, so apply per-worksheet: target whichever worksheets already report
+      // this field as a range filter, falling back to all worksheets.
+      try {
+        const { worksheets } = activeContainer();
+        const rawFilters = await getRawFilters();
+        const targetNames = new Set(
+          rawFilters.filter((f) => f.fieldName === fieldName).map((f) => f.worksheetName),
+        );
+        const targets = targetNames.size > 0 ? worksheets.filter((w) => targetNames.has(w.name)) : worksheets;
+
+        const results = [];
+        for (const ws of targets) {
+          try {
+            await ws.applyRangeFilterAsync(fieldName, { min, max });
+            results.push({ worksheet: ws.name, ok: true });
+          } catch (e) {
+            results.push({ worksheet: ws.name, ok: false, error: String(e?.message ?? e) });
+          }
+        }
+        return { ok: results.some((r) => r.ok), results };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+
+    async function setParameter(name, value) {
+      try {
+        await vizEl.workbook.changeParameterValueAsync(name, value);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+
+    async function switchSheet(nameOrIndex) {
+      try {
+        await vizEl.workbook.activateSheetAsync(nameOrIndex);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+
+    function getEventLog() {
+      return eventLog.slice();
+    }
+
+    window.__agentBridge = {
+      ready: readyPromise,
+      getInventory,
+      applyCategoricalFilter,
+      applyRangeFilter,
+      setParameter,
+      switchSheet,
+      getEventLog,
+    };
+
+    // ---- dev-only manual test panel ---------------------------------------
+    const devPanel = document.getElementById("devPanel");
+    if (!devMode) devPanel.classList.add("hidden");
+    const devOut = document.getElementById("devOut");
+    function show(label, data) {
+      devOut.textContent = `${label}\n` + JSON.stringify(data, null, 2);
+      console.log(label, data);
+    }
+    document.getElementById("btnInventory").onclick = async () => show("getInventory()", await getInventory());
+    document.getElementById("btnEvents").onclick = () => show("getEventLog()", getEventLog());
+    document.getElementById("btnSwitchSheet").onclick = async () => {
+      const name = prompt("Sheet name or index:");
+      if (name == null) return;
+      show("switchSheet()", await switchSheet(isNaN(Number(name)) ? name : Number(name)));
+    };
+    document.getElementById("btnCatFilter").onclick = async () => {
+      const field = prompt("Field name:");
+      if (field == null) return;
+      const valuesRaw = prompt("Comma-separated values:");
+      if (valuesRaw == null) return;
+      show("applyCategoricalFilter()", await applyCategoricalFilter(field, valuesRaw.split(",").map((s) => s.trim())));
+    };
+    document.getElementById("btnRangeFilter").onclick = async () => {
+      const field = prompt("Field name:");
+      if (field == null) return;
+      const min = Number(prompt("Min:"));
+      const max = Number(prompt("Max:"));
+      show("applyRangeFilter()", await applyRangeFilter(field, min, max));
+    };
+    document.getElementById("btnParam").onclick = async () => {
+      const name = prompt("Parameter name:");
+      if (name == null) return;
+      const value = prompt("New value:");
+      if (value == null) return;
+      show("setParameter()", await setParameter(name, value));
+    };
+  </script>
+</body>
+</html>
