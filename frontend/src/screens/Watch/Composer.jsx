@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import Field from "../../components/ui/Field.jsx";
 import Button from "../../components/ui/Button.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
-import SegmentedMeter from "../../components/ui/SegmentedMeter.jsx";
 
 function truncateChip(text, max = 60) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
@@ -26,10 +25,12 @@ function formatElapsed(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// Bottom composer bar for the Watch screen (FRONTEND_PLAN.md §6.7). Idle
-// state asks a question (fresh or follow-up); Running state shows live
-// status + Stop. Busy-conflict (409) and other POST failures render inline
-// under the input with the exact copy the plan specifies.
+// Composer for the Watch screen (FRONTEND_PLAN.md §6.7), pinned at the bottom
+// of the right rail under the question thread. Idle state asks a question
+// (fresh or follow-up); Running state shows live status + Stop (the step
+// meter lives in StatusBar — not duplicated here). Busy-conflict (409) and
+// other POST failures render inline under the input with the exact copy the
+// plan specifies.
 export default function Composer({
   hasPriorRun,
   exampleQuestions = [],
@@ -88,38 +89,36 @@ export default function Composer({
 
   if (isRunning) {
     return (
-      <div className="glass-deep px-6 py-3">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Spinner />
-            <span className="truncate text-sm text-fg/50">{runningQuestion}</span>
-          </div>
-          <div className="flex flex-shrink-0 items-center gap-4">
-            <span className="font-mono text-sm text-fg/70">
-              Step {stepsUsed} of {maxSteps}
-            </span>
-            <span className="font-mono text-sm text-fg/70">{formatElapsed(elapsedSeconds)}</span>
-            <SegmentedMeter used={stepsUsed} total={maxSteps} caption={`${stepsUsed} / ${maxSteps}`} />
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={stopping}
-              onClick={handleStop}
-              title="Stops at the next step boundary — the current model call finishes first."
-            >
-              {stopping ? "Stopping…" : "Stop"}
-            </Button>
-          </div>
+      <div className="glass-deep px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Spinner className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-sm text-fg/50">{runningQuestion}</span>
+          <Button
+            size="sm"
+            variant="danger"
+            className="shrink-0"
+            disabled={stopping}
+            onClick={handleStop}
+            title="Stops at the next step boundary — the current model call finishes first."
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </Button>
+        </div>
+        <div className="mt-2 flex items-center justify-between font-mono text-sm text-fg/70">
+          <span>
+            Step {stepsUsed} of {maxSteps}
+          </span>
+          <span>{formatElapsed(elapsedSeconds)}</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="glass-deep px-6 py-3">
-      <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl flex-col gap-2">
+    <div className="glass-deep px-4 py-3">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <div className="flex items-start gap-2">
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <Field
               ref={inputRef}
               placeholder={hasPriorRun ? "Ask a follow-up — the dashboard reloads fresh…" : "Ask anything about this dashboard…"}
@@ -128,7 +127,7 @@ export default function Composer({
               error={error || undefined}
             />
           </div>
-          <Button type="submit" variant="primary" disabled={submitting}>
+          <Button type="submit" variant="primary" className="shrink-0" disabled={submitting}>
             {submitting ? "Asking…" : "Ask"}
           </Button>
         </div>
@@ -144,7 +143,7 @@ export default function Composer({
                 title={q}
                 onClick={() => handleChipClick(q)}
               >
-                {truncateChip(q)}
+                {truncateChip(q, 44)}
               </Button>
             ))}
           </div>

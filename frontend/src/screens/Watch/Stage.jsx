@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { cx } from "../../components/ui/cx.js";
 import CrossfadeImage from "../../components/CrossfadeImage.jsx";
 import Button from "../../components/ui/Button.jsx";
 import { Checkbox } from "../../components/ui/Field.jsx";
@@ -28,9 +29,11 @@ export default function Stage({
 
   const overlay = step?.overlay;
 
+  const showingFrame = !loadingState && !!step?.frameUrl;
+
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+      <div className="flex shrink-0 items-center gap-3">
         <Button size="sm" onClick={onPrev} disabled={!canPrev}>
           Prev
         </Button>
@@ -49,7 +52,7 @@ export default function Stage({
         {step && <div className="font-mono text-xs text-fg/60">step {step.idx}</div>}
       </div>
 
-      <div className="relative mx-auto w-full max-w-3xl">
+      <div className="relative mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col items-center justify-center">
         {showJumpToLivePill && (
           <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2">
             <Badge variant="info">Viewing step {step?.idx}</Badge>
@@ -59,11 +62,15 @@ export default function Stage({
           </div>
         )}
 
-        <div className="glass shadow-teal-glow relative overflow-hidden rounded-card-lg">
+        <div className={cx("glass shadow-teal-glow relative overflow-hidden rounded-card-lg", showingFrame ? "w-fit max-w-full" : "w-full")}>
           {loadingState ? (
             <div className="relative">
               {loadingState.thumbnailUrl ? (
-                <img src={loadingState.thumbnailUrl} alt="" className="w-full opacity-50" />
+                <img
+                  src={loadingState.thumbnailUrl}
+                  alt=""
+                  className="max-h-[calc(100dvh-19rem)] w-full object-contain opacity-50"
+                />
               ) : (
                 <div className="py-24" />
               )}

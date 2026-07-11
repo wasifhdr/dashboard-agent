@@ -26,7 +26,7 @@ export default function StatusBar({ dashboard, run, maxSteps }) {
   const warningKinds = run ? [...new Set(run.warnings.map((w) => w.kind))] : [];
 
   return (
-    <div className="glass-deep px-6 py-3">
+    <div className="glass-deep shrink-0 px-6 py-3">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h3 className="truncate text-h3">{dashboard?.name || (dashboard?.url ? hostnameOf(dashboard.url) : "")}</h3>

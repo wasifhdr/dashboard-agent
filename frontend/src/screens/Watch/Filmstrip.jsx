@@ -18,11 +18,11 @@ export default function Filmstrip({ runs, selected, onSelect }) {
   });
 
   if (!items.length) {
-    return <div className="glass-deep px-4 py-3 text-sm text-fg/60">No frames yet.</div>;
+    return <div className="glass-deep shrink-0 px-4 py-3 text-sm text-fg/60">No frames yet.</div>;
   }
 
   return (
-    <div className="glass-deep flex gap-2 overflow-x-auto px-4 py-3">
+    <div className="glass-deep flex shrink-0 gap-2 overflow-x-auto px-4 py-3">
       {items.map(({ runIdx, stepIdx, step, isRunStart }) => {
         const isSelected = selected && selected.runIdx === runIdx && selected.stepIdx === stepIdx;
         const dotColor = statusDotColor(step.actionStatus);

@@ -308,13 +308,19 @@ body {
    App-specific additions (FRONTEND_PLAN.md §4.2) — tokens only.
    ================================================================ */
 
-/* Stage crossfade: two stacked frame layers, the incoming one fades in. */
+/* Stage crossfade: two stacked frame layers, the incoming one fades in.
+   The base layer is height-capped so the Watch page fits the viewport with no
+   page scroll (~19rem = shell header + status bar + stage controls/padding +
+   filmstrip); the box shrink-wraps the image (w-fit on the frame), keeping the
+   absolute overlay/incoming layers aligned with the visible pixels. */
 .stage-crossfade {
   position: relative;
 }
 .stage-crossfade .frame-layer {
   display: block;
-  width: 100%;
+  max-width: 100%;
+  max-height: calc(100dvh - 19rem);
+  width: auto;
   height: auto;
 }
 .stage-crossfade .frame-layer.frame-layer-incoming {

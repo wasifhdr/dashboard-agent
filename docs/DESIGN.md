@@ -178,9 +178,13 @@ nav pills (active = `bg-glass-hover text-teal-ink` on the History pill / `text-g
 Watch tabs), and the theme toggle. Content `mx-auto max-w-6xl px-6 py-8` (landing/watch are
 full-bleed). Landing bands alternate rooms: hero (orbs strong) → gallery (plain canvas) → loop
 band (`bg-canvas-alt/70`, tinted step cards teal→sky→gold→green) → features (tinted cards) →
-stats (`bg-canvas-edge/70`) → footer. Watch: stage column gets `bg-canvas-edge/40` (spotlight
-wash) with the glass+teal-glow frame on top; feed is glass-deep chrome with tinted
-question/outcome panels inside. ≤900px stacks to one column.
+stats (`bg-canvas-edge/70`) → footer. Watch: a **fixed-viewport cockpit on desktop** — the shell
+is `h-dvh overflow-hidden` at ≥901px so the page never scrolls; the stage image is height-capped
+(`calc(100dvh - 19rem)` in `.frame-layer`) and the frame shrink-wraps it (`w-fit`); the right
+rail stacks tabs / question thread (flex-1, scrolls internally) / composer pinned at the bottom.
+Stage column gets `bg-canvas-edge/40` (spotlight wash) with the glass+teal-glow frame on top;
+feed is glass-deep chrome with tinted question/outcome panels inside. ≤900px falls back to normal
+page flow and stacks to one column.
 
 ---
 

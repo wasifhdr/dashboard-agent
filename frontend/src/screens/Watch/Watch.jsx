@@ -161,7 +161,7 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 min-[901px]:grid-cols-[1fr_400px]">
-        <div className="flex min-h-0 flex-col bg-canvas-edge/40">
+        <div className="flex min-h-0 flex-col overflow-hidden bg-canvas-edge/40">
           <Stage
             step={selectedStep}
             showOverlay={showOverlay}
@@ -180,8 +180,10 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
           <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
         </div>
 
+        {/* Right rail: tabs / thread (scrolls internally) / composer pinned at
+            the bottom — the page itself never scrolls on desktop. */}
         <div className="flex min-h-0 flex-col border-l border-glass-border max-[900px]:border-l-0 max-[900px]:border-t">
-          <div className="glass-deep flex gap-1 px-3 py-2">
+          <div className="glass-deep flex shrink-0 gap-1 px-3 py-2">
             {["feed", "inspect"].map((tab) => (
               <button
                 key={tab}
@@ -210,35 +212,34 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
               <Inspect step={selectedStep} />
             )}
           </div>
-        </div>
-      </div>
-
-      <div className="max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10">
-        {isPureReplay ? (
-          <div className="glass-deep flex items-center justify-between px-6 py-3">
-            <Badge variant="neutral">REPLAY</Badge>
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={togglePlay}>
-                {sequencer.isPlaying ? "Pause" : "Play"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={onBack}>
-                Back to history
-              </Button>
-            </div>
+          <div className="shrink-0">
+            {isPureReplay ? (
+              <div className="glass-deep flex items-center justify-between px-4 py-3">
+                <Badge variant="neutral">REPLAY</Badge>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={togglePlay}>
+                    {sequencer.isPlaying ? "Pause" : "Play"}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={onBack}>
+                    Back to history
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Composer
+                hasPriorRun={runs.length > 0}
+                exampleQuestions={stream.exampleQuestions}
+                isRunning={isRunning}
+                runningQuestion={lastRun?.question}
+                stepsUsed={lastRun?.steps.size ?? 0}
+                maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
+                startedAt={lastRun?.startedAt}
+                onAsk={handleAsk}
+                onStop={handleStop}
+              />
+            )}
           </div>
-        ) : (
-          <Composer
-            hasPriorRun={runs.length > 0}
-            exampleQuestions={stream.exampleQuestions}
-            isRunning={isRunning}
-            runningQuestion={lastRun?.question}
-            stepsUsed={lastRun?.steps.size ?? 0}
-            maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
-            startedAt={lastRun?.startedAt}
-            onAsk={handleAsk}
-            onStop={handleStop}
-          />
-        )}
+        </div>
       </div>
     </div>
   );

@@ -43,8 +43,11 @@ export default function AppShell({ view, onNavigate, children }) {
   // padded content wrapper (DESIGN.md §6).
   const fullBleed = view === "landing" || view === "watch";
 
+  // Watch is a fixed-viewport cockpit on desktop: the page itself never
+  // scrolls; the feed/inspect panels scroll internally. ≤900px falls back to
+  // normal page flow (stacked columns).
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className={cx("flex min-h-screen flex-col", view === "watch" && "min-[901px]:h-dvh min-[901px]:overflow-hidden")}>
       <div className="bg-orbs" aria-hidden="true" />
       <header className="glass-deep sticky top-0 z-40">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
