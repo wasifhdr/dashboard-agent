@@ -310,16 +310,18 @@ body {
 
 /* Stage crossfade: two stacked frame layers, the incoming one fades in.
    The base layer is height-capped so the Watch page fits the viewport with no
-   page scroll (~19rem = shell header + status bar + stage controls/padding +
-   filmstrip); the box shrink-wraps the image (w-fit on the frame), keeping the
-   absolute overlay/incoming layers aligned with the visible pixels. */
+   page scroll (~12rem = shell header + status bar + stage padding; the playback
+   controls live in the StatusBar and the step thumbnails float over the Stage,
+   so neither takes a docked row); the box shrink-wraps the image (w-fit on the
+   frame), keeping the absolute overlay/incoming layers aligned with the visible
+   pixels. */
 .stage-crossfade {
   position: relative;
 }
 .stage-crossfade .frame-layer {
   display: block;
   max-width: 100%;
-  max-height: calc(100dvh - 19rem);
+  max-height: calc(100dvh - 12rem);
   width: auto;
   height: auto;
 }
@@ -396,4 +398,25 @@ body {
     animation: none;
     opacity: 1;
   }
+}
+
+/* Slim, theme-aware scrollbar for panels the floating composer overlays, so it
+   clears a narrow gutter instead of the OS's wide (~17px) default scrollbar. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-glass-border-strong) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--t-glass-border-strong);
+  border-radius: 999px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--t-fg) 35%, transparent);
 }

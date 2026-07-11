@@ -248,7 +248,9 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || userScrolledUpRef.current) return;
+    // offsetParent is null while the Feed tab is hidden (display:none) — skip
+    // so a hidden Feed doesn't reset its scroll position on background renders.
+    if (!el || el.offsetParent === null || userScrolledUpRef.current) return;
     el.scrollTop = el.scrollHeight;
   });
 
@@ -262,7 +264,7 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      className="glass-deep flex h-full flex-col gap-3 overflow-y-auto rounded-card p-4 text-fg"
+      className="thin-scrollbar glass-deep flex h-full flex-col gap-3 overflow-y-auto p-4 pb-28 text-fg"
     >
       {runs.map((run, runIdx) => {
         const sortedIdxs = [...run.steps.keys()].sort((a, b) => a - b);

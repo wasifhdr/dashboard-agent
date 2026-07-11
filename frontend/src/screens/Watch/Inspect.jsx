@@ -13,14 +13,14 @@ const ACTION_STATUS_BADGE = {
 
 export default function Inspect({ step }) {
   if (!step) {
-    return <div className="panel h-full rounded-card p-4 text-sm text-fg/60">Select a step to inspect.</div>;
+    return <div className="glass-deep h-full p-4 text-sm text-fg/60">Select a step to inspect.</div>;
   }
 
   const statusBadge = ACTION_STATUS_BADGE[step.actionStatus];
   const inv = step.inventorySummary;
 
   return (
-    <div className="panel flex h-full flex-col gap-4 overflow-y-auto rounded-card p-4 text-fg">
+    <div className="thin-scrollbar glass-deep flex h-full flex-col gap-4 overflow-y-auto p-4 pb-28 text-fg">
       <div>
         <CapsLabel className="text-fg/60">Thought</CapsLabel>
         <p className="mt-1 text-sm leading-relaxed">{step.thought || <span className="text-fg/50">(none)</span>}</p>

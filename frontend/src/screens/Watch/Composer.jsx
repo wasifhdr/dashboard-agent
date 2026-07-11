@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import Field from "../../components/ui/Field.jsx";
 import Button from "../../components/ui/Button.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
-
-function truncateChip(text, max = 60) {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
-}
 
 function useElapsedSeconds(startedAt, active) {
   const [now, setNow] = useState(Date.now());
@@ -25,12 +20,30 @@ function formatElapsed(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// Composer for the Watch screen (FRONTEND_PLAN.md §6.7), pinned at the bottom
-// of the right rail under the question thread. Idle state asks a question
-// (fresh or follow-up); Running state shows live status + Stop (the step
-// meter lives in StatusBar — not duplicated here). Busy-conflict (409) and
-// other POST failures render inline under the input with the exact copy the
-// plan specifies.
+function SendIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  );
+}
+
+// Composer for the Watch screen — a floating glass bubble that overlays the
+// bottom of the question thread (FRONTEND_PLAN.md §6.7). Idle state asks a
+// question (fresh or follow-up); Running state shows live status + Stop (the
+// per-question step meter lives here while a question runs). Example questions
+// are no longer shown as chips: pressing Tab in an empty input drops one in.
+// Busy-conflict (409) and other POST failures render inline under the input.
 export default function Composer({
   hasPriorRun,
   exampleQuestions = [],
@@ -73,9 +86,21 @@ export default function Composer({
     }
   }
 
-  function handleChipClick(question) {
-    setValue(question);
-    inputRef.current?.focus();
+  // Tab on an empty input drops in the first suggested question; Tab again while
+  // an untouched suggestion is showing cycles to the next. Once the user edits
+  // it into something of their own, Tab reverts to its normal focus behavior.
+  function handleKeyDown(e) {
+    if (e.key !== "Tab" || e.shiftKey || exampleQuestions.length === 0) return;
+    if (value.trim() === "") {
+      e.preventDefault();
+      setValue(exampleQuestions[0]);
+      return;
+    }
+    const idx = exampleQuestions.indexOf(value);
+    if (idx !== -1) {
+      e.preventDefault();
+      setValue(exampleQuestions[(idx + 1) % exampleQuestions.length]);
+    }
   }
 
   async function handleStop() {
@@ -89,10 +114,10 @@ export default function Composer({
 
   if (isRunning) {
     return (
-      <div className="glass-deep px-4 py-3">
+      <div className="glass-raised rounded-card px-4 py-3">
         <div className="flex items-center gap-3">
           <Spinner className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-sm text-fg/50">{runningQuestion}</span>
+          <span className="min-w-0 flex-1 truncate text-sm text-fg/60">{runningQuestion}</span>
           <Button
             size="sm"
             variant="danger"
@@ -114,41 +139,41 @@ export default function Composer({
     );
   }
 
-  return (
-    <div className="glass-deep px-4 py-3">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <Field
-              ref={inputRef}
-              placeholder={hasPriorRun ? "Ask a follow-up — the dashboard reloads fresh…" : "Ask anything about this dashboard…"}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              error={error || undefined}
-            />
-          </div>
-          <Button type="submit" variant="primary" className="shrink-0" disabled={submitting}>
-            {submitting ? "Asking…" : "Ask"}
-          </Button>
-        </div>
+  const showTabHint = value === "" && exampleQuestions.length > 0;
 
-        {exampleQuestions.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {exampleQuestions.map((q) => (
-              <Button
-                key={q}
-                type="button"
-                size="sm"
-                variant="ghost"
-                title={q}
-                onClick={() => handleChipClick(q)}
-              >
-                {truncateChip(q, 44)}
-              </Button>
-            ))}
-          </div>
-        )}
+  return (
+    <div className="glass-raised rounded-card">
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 py-2 pl-4 pr-2">
+        <input
+          ref={inputRef}
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-fg placeholder:text-fg/40 focus:outline-none"
+          placeholder={hasPriorRun ? "Ask a follow-up — the dashboard reloads fresh…" : "Ask anything about this dashboard…"}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          aria-label="Ask a question about this dashboard"
+        />
+        <Button
+          type="submit"
+          variant="primary"
+          aria-label="Send question"
+          className="size-10 shrink-0 !p-0"
+          disabled={submitting || !value.trim()}
+        >
+          <SendIcon />
+        </Button>
       </form>
+      {error ? (
+        <div className="px-4 pb-2 text-xs font-medium text-coral-ink">{error}</div>
+      ) : (
+        showTabHint && (
+          <div className="px-4 pb-2 text-right text-xs text-fg/40">
+            Press{" "}
+            <kbd className="rounded border border-glass-border px-1 py-0.5 font-mono text-[11px] text-fg/60">Tab</kbd>{" "}
+            for a suggested question
+          </div>
+        )
+      )}
     </div>
   );
 }

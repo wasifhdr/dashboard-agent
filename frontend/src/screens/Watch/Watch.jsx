@@ -149,7 +149,20 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
 
   return (
     <div className="flex h-full flex-col">
-      <StatusBar dashboard={dashboard} run={lastRun} maxSteps={lastRun?.maxSteps ?? stream.maxSteps} />
+      <StatusBar
+        dashboard={dashboard}
+        run={lastRun}
+        step={selectedStep}
+        showOverlay={showOverlay}
+        onToggleOverlay={() => setShowOverlay((v) => !v)}
+        onPrev={goPrev}
+        onNext={goNext}
+        canPrev={selectedFlatIdx > 0}
+        canNext={selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1}
+        isPlaying={sequencer.isPlaying}
+        onTogglePlay={togglePlay}
+        showPlayButton={canPlay}
+      />
 
       {showConnectionBanner && (
         <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral-ink">
@@ -161,22 +174,16 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 min-[901px]:grid-cols-[1fr_400px]">
-        <div className="flex min-h-0 flex-col overflow-hidden bg-canvas-edge/40">
+        <div className="relative flex min-h-0 flex-col overflow-hidden bg-canvas-edge/40">
           <Stage
             step={selectedStep}
             showOverlay={showOverlay}
-            onToggleOverlay={() => setShowOverlay((v) => !v)}
-            onPrev={goPrev}
-            onNext={goNext}
-            canPrev={selectedFlatIdx > 0}
-            canNext={selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1}
-            isPlaying={sequencer.isPlaying}
-            onTogglePlay={togglePlay}
-            showPlayButton={canPlay}
             showJumpToLivePill={stream.everLive && !followLive && isRunning}
             onJumpToLive={jumpToLive}
             loadingState={loadingState}
           />
+          {/* Step thumbnails now live in a floating history bubble (bottom-left),
+              overlaid on the Stage rather than a docked bottom strip. */}
           <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
         </div>
 
@@ -198,8 +205,14 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
               </button>
             ))}
           </div>
-          <div className="min-h-0 flex-1 max-[900px]:max-h-[40vh] max-[900px]:flex-none max-[900px]:overflow-y-auto">
-            {activeTab === "feed" ? (
+          {/* Thread fills the rail; the composer floats over its bottom as a
+              glass bubble, so the last messages scroll behind it (Feed/Inspect
+              carry bottom padding to clear the float). */}
+          <div className="relative min-h-0 flex-1 max-[900px]:max-h-[40vh] max-[900px]:flex-none max-[900px]:overflow-y-auto">
+            {/* Both panels stay mounted (visibility toggled) so switching tabs
+                never remounts the Feed — otherwise its live thought typewriters
+                would replay from scratch on every return to the tab. */}
+            <div className={cx("h-full", activeTab === "feed" ? "" : "hidden")}>
               <Feed
                 runs={runs}
                 selected={effectiveSelected}
@@ -208,36 +221,39 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
                 atOutcome={sequencer.atOutcome}
                 isLive={stream.everLive}
               />
-            ) : (
+            </div>
+            <div className={cx("h-full", activeTab === "inspect" ? "" : "hidden")}>
               <Inspect step={selectedStep} />
-            )}
-          </div>
-          <div className="shrink-0">
-            {isPureReplay ? (
-              <div className="glass-deep flex items-center justify-between px-4 py-3">
-                <Badge variant="neutral">REPLAY</Badge>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" onClick={togglePlay}>
-                    {sequencer.isPlaying ? "Pause" : "Play"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={onBack}>
-                    Back to history
-                  </Button>
-                </div>
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pr-5">
+              <div className="pointer-events-auto">
+                {isPureReplay ? (
+                  <div className="glass-raised flex items-center justify-between rounded-card px-4 py-3">
+                    <Badge variant="neutral">REPLAY</Badge>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={togglePlay}>
+                        {sequencer.isPlaying ? "Pause" : "Play"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={onBack}>
+                        Back to history
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Composer
+                    hasPriorRun={runs.length > 0}
+                    exampleQuestions={stream.exampleQuestions}
+                    isRunning={isRunning}
+                    runningQuestion={lastRun?.question}
+                    stepsUsed={lastRun?.steps.size ?? 0}
+                    maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
+                    startedAt={lastRun?.startedAt}
+                    onAsk={handleAsk}
+                    onStop={handleStop}
+                  />
+                )}
               </div>
-            ) : (
-              <Composer
-                hasPriorRun={runs.length > 0}
-                exampleQuestions={stream.exampleQuestions}
-                isRunning={isRunning}
-                runningQuestion={lastRun?.question}
-                stepsUsed={lastRun?.steps.size ?? 0}
-                maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
-                startedAt={lastRun?.startedAt}
-                onAsk={handleAsk}
-                onStop={handleStop}
-              />
-            )}
+            </div>
           </div>
         </div>
       </div>

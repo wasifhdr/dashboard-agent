@@ -2,21 +2,14 @@ import { useEffect, useState } from "react";
 import { cx } from "../../components/ui/cx.js";
 import CrossfadeImage from "../../components/CrossfadeImage.jsx";
 import Button from "../../components/ui/Button.jsx";
-import { Checkbox } from "../../components/ui/Field.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
 
+// Dashboard frame viewport. Playback controls (Prev/Next/Play/Overlays) now
+// live in the StatusBar, so the frame gets the full column height here.
 export default function Stage({
   step,
   showOverlay,
-  onToggleOverlay,
-  onPrev,
-  onNext,
-  canPrev,
-  canNext,
-  isPlaying,
-  onTogglePlay,
-  showPlayButton = true,
   showJumpToLivePill = false,
   onJumpToLive,
   loadingState = null,
@@ -32,27 +25,8 @@ export default function Stage({
   const showingFrame = !loadingState && !!step?.frameUrl;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-      <div className="flex shrink-0 items-center gap-3">
-        <Button size="sm" onClick={onPrev} disabled={!canPrev}>
-          Prev
-        </Button>
-        <Button size="sm" onClick={onNext} disabled={!canNext}>
-          Next
-        </Button>
-        {showPlayButton && (
-          <Button size="sm" onClick={onTogglePlay}>
-            {isPlaying ? "Pause" : "Play"}
-          </Button>
-        )}
-        <label className="flex items-center gap-2 text-sm text-fg/70">
-          <Checkbox checked={showOverlay} onChange={onToggleOverlay} /> Overlays
-        </label>
-        <div className="flex-1" />
-        {step && <div className="font-mono text-xs text-fg/60">step {step.idx}</div>}
-      </div>
-
-      <div className="relative mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col items-center justify-center">
+    <div className="flex min-h-0 flex-1 flex-col p-4">
+      <div className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col items-center justify-center">
         {showJumpToLivePill && (
           <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2">
             <Badge variant="info">Viewing step {step?.idx}</Badge>
@@ -69,7 +43,7 @@ export default function Stage({
                 <img
                   src={loadingState.thumbnailUrl}
                   alt=""
-                  className="max-h-[calc(100dvh-19rem)] w-full object-contain opacity-50"
+                  className="max-h-[calc(100dvh-12rem)] w-full object-contain opacity-50"
                 />
               ) : (
                 <div className="py-24" />
