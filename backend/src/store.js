@@ -90,10 +90,68 @@ if (sessionsTableDef && !sessionsTableDef.sql.includes("'stopped'")) {
   db.pragma(`foreign_keys = ${fkWasOn ? "ON" : "OFF"}`);
 }
 
-export function createSession({ id, dashboard_url, dashboard_name, question, model_id, config_json }) {
+// Migration for the multi-turn "live conversation" feature (docs/LIVE_TAKEOVER_PLAN.md
+// section 4). A conversation groups multiple turns (sessions rows) on one persistent
+// dashboard; a takeover records what a human manually changed between turns.
+// conversations/takeovers are brand-new tables, so CREATE TABLE IF NOT EXISTS covers
+// fresh + pre-existing DBs alike. The two new sessions columns use the same guarded
+// ALTER TABLE idiom as error_message above.
+db.exec(`
+CREATE TABLE IF NOT EXISTS conversations (
+  id           TEXT PRIMARY KEY,
+  created_at   TEXT,
+  closed_at    TEXT,
+  dashboard_url  TEXT,
+  dashboard_name TEXT,
+  status       TEXT CHECK(status IN ('active','closed')),
+  model_id     TEXT,
+  config_json  TEXT
+);
+`);
+
+try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN conversation_id TEXT`);
+} catch (e) {
+  if (!String(e.message).includes("duplicate column")) throw e;
+}
+try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN turn_index INTEGER`);
+} catch (e) {
+  if (!String(e.message).includes("duplicate column")) throw e;
+}
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS takeovers (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id    TEXT REFERENCES conversations(id),
+  after_turn_index   INTEGER,
+  started_at         TEXT,
+  ended_at           TEXT,
+  before_frame_path  TEXT,
+  after_frame_path   TEXT,
+  before_inventory_json TEXT,
+  after_inventory_json  TEXT,
+  event_log_json     TEXT,
+  summary_json       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_conversation ON sessions(conversation_id, turn_index);
+CREATE INDEX IF NOT EXISTS idx_takeovers_conversation ON takeovers(conversation_id, after_turn_index);
+`);
+
+export function createSession({
+  id,
+  dashboard_url,
+  dashboard_name,
+  question,
+  model_id,
+  config_json,
+  conversation_id = null,
+  turn_index = null,
+}) {
   db.prepare(
-    `INSERT INTO sessions (id, created_at, dashboard_url, dashboard_name, question, status, model_id, config_json)
-     VALUES (@id, @created_at, @dashboard_url, @dashboard_name, @question, 'running', @model_id, @config_json)`,
+    `INSERT INTO sessions (id, created_at, dashboard_url, dashboard_name, question, status, model_id, config_json, conversation_id, turn_index)
+     VALUES (@id, @created_at, @dashboard_url, @dashboard_name, @question, 'running', @model_id, @config_json, @conversation_id, @turn_index)`,
   ).run({
     id,
     created_at: new Date().toISOString(),
@@ -102,6 +160,8 @@ export function createSession({ id, dashboard_url, dashboard_name, question, mod
     question,
     model_id,
     config_json,
+    conversation_id,
+    turn_index,
   });
 }
 
@@ -157,6 +217,52 @@ export function latestAnsweredSessionId(dashboardUrl) {
     )
     .get(dashboardUrl);
   return row?.id ?? null;
+}
+
+export function createConversation({ id, dashboard_url, dashboard_name, model_id, config_json }) {
+  db.prepare(
+    `INSERT INTO conversations (id, created_at, dashboard_url, dashboard_name, status, model_id, config_json)
+     VALUES (@id, @created_at, @dashboard_url, @dashboard_name, 'active', @model_id, @config_json)`,
+  ).run({
+    id,
+    created_at: new Date().toISOString(),
+    dashboard_url,
+    dashboard_name: dashboard_name ?? null,
+    model_id,
+    config_json,
+  });
+}
+
+export function closeConversation(id) {
+  db.prepare(`UPDATE conversations SET status = 'closed', closed_at = @closed_at WHERE id = @id`).run({
+    id,
+    closed_at: new Date().toISOString(),
+  });
+}
+
+export function getConversation(id) {
+  return db.prepare(`SELECT * FROM conversations WHERE id = ?`).get(id);
+}
+
+export function listConversations(limit = 50) {
+  return db.prepare(`SELECT * FROM conversations ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
+export function getConversationTurns(conversationId) {
+  return db.prepare(`SELECT * FROM sessions WHERE conversation_id = ? ORDER BY turn_index`).all(conversationId);
+}
+
+export function getTakeovers(conversationId) {
+  return db
+    .prepare(`SELECT * FROM takeovers WHERE conversation_id = ? ORDER BY after_turn_index`)
+    .all(conversationId);
+}
+
+export function insertTakeover(takeover) {
+  db.prepare(
+    `INSERT INTO takeovers (conversation_id, after_turn_index, started_at, ended_at, before_frame_path, after_frame_path, before_inventory_json, after_inventory_json, event_log_json, summary_json)
+     VALUES (@conversation_id, @after_turn_index, @started_at, @ended_at, @before_frame_path, @after_frame_path, @before_inventory_json, @after_inventory_json, @event_log_json, @summary_json)`,
+  ).run(takeover);
 }
 
 export default db;

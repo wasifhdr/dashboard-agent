@@ -80,10 +80,42 @@ export async function runSession({
   onEvent = () => {},
   sessionId: providedSessionId,
   shouldStop = () => false,
+  // Conversation reuse opts (docs/LIVE_TAKEOVER_PLAN.md Phase B0). All
+  // optional and default to today's standalone-session behavior:
+  // - page: an already-open Playwright page to reuse. When provided,
+  //   openSession() is skipped and this page is used directly.
+  // - ownsPage: when false, the browser context is NOT closed at the end
+  //   (the conversation runtime owns it instead). Defaults to true, i.e.
+  //   every existing caller keeps closing its own context as today.
+  // - conversationId / turnIndex: passed through to store.createSession so
+  //   this session row can be attributed to a conversation + turn. Omitted
+  //   (null) for standalone sessions, exactly as before this change.
+  page: providedPage = null,
+  ownsPage = true,
+  conversationId = null,
+  turnIndex = null,
 }) {
   // Allows a caller (the server, for POST /api/sessions) to generate and
   // return the id synchronously before the run completes; the CLI just lets
   // one be generated here.
+  // Guard the reuse-page opts' pairing (docs/LIVE_TAKEOVER_PLAN.md B0 review
+  // fix): `page` and `ownsPage` must be passed together consistently, or a
+  // future caller silently gets the wrong context-lifecycle behavior - a
+  // provided page with ownsPage left at its true default would get its
+  // context closed out from under the caller who still owns it, while
+  // ownsPage:false with no page would open a context here that nobody ever
+  // closes. This is a pure validation addition; every existing call site
+  // (CLI: neither opt passed; server.js: always page + ownsPage:false)
+  // already satisfies it, so behavior is unchanged for all current callers.
+  if (providedPage && ownsPage) {
+    throw new Error(
+      "runSession: a `page` was provided without `ownsPage: false` - pass ownsPage:false when reusing an externally-owned page, or runSession will close a context the caller still needs.",
+    );
+  }
+  if (!providedPage && !ownsPage) {
+    throw new Error("runSession: `ownsPage: false` requires an explicit `page` - otherwise the context opened here would never be closed.");
+  }
+
   const sessionId = providedSessionId ?? crypto.randomUUID();
   const framesDir = path.join(FRAMES_DIR, sessionId);
   fs.mkdirSync(framesDir, { recursive: true });
@@ -95,6 +127,8 @@ export async function runSession({
     question,
     model_id: config.modelName,
     config_json: JSON.stringify(config),
+    conversation_id: conversationId,
+    turn_index: turnIndex,
   });
   onEvent({ type: "session_started", sessionId, dashboardUrl, question });
 
@@ -175,8 +209,15 @@ export async function runSession({
 
   let page;
   try {
-    const opened = await openSession(browser, config.hostPageOrigin, dashboardUrl, { firstLoadTimeoutMs: 90000 });
-    page = opened.page;
+    if (providedPage) {
+      // Reuse mode: the conversation runtime already opened this page.
+      // Still run the settle gate before the loop - the user (or the tail
+      // end of the prior turn) may have left the dashboard mid-animation.
+      page = providedPage;
+    } else {
+      const opened = await openSession(browser, config.hostPageOrigin, dashboardUrl, { firstLoadTimeoutMs: 90000 });
+      page = opened.page;
+    }
     await waitForSettle(page, config.settleGate);
   } catch (e) {
     const errorMessage = `Dashboard failed to load: ${e.message}`;
@@ -506,7 +547,9 @@ export async function runSession({
     error: sessionOutcome.error ?? null,
   });
 
-  await page.context().close();
+  if (ownsPage) {
+    await page.context().close();
+  }
 
   return {
     sessionId,

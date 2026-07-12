@@ -15,6 +15,13 @@
     "diffThresholdPct": 0.5,
     "timeoutMs": 12000
   },
+  "screencast": {
+    "quality": 90,
+    "maxWidth": 1920,
+    "maxHeight": 1200,
+    "everyNthFrame": 1,
+    "vizboxPollMs": 1000
+  },
   "dashboards": [
     {
       "name": "Zillow Home Value Index (April 2019)",

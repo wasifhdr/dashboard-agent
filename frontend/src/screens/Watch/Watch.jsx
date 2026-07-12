@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSessionStream } from "./useSessionStream.js";
+import { useLiveChannel } from "./useLiveChannel.js";
 import { useBeatSequencer } from "./useBeatSequencer.js";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 import { stopSession } from "../../api.js";
 import StatusBar from "./StatusBar.jsx";
 import Stage from "./Stage.jsx";
+import LiveStage from "./LiveStage.jsx";
 import Filmstrip from "./Filmstrip.jsx";
 import Feed from "./Feed.jsx";
 import Inspect from "./Inspect.jsx";
@@ -34,6 +36,9 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
     dashboardName: dashboardTarget?.name,
   });
   const { dashboard, runs, loadError } = stream;
+  // Live, read-only screencast of the agent's browser (Phase B1). Connects
+  // once the conversation exists (after the first turn's dashboard load).
+  const live = useLiveChannel(stream.conversationId);
   const sequencer = useBeatSequencer(runs);
   const [manualSelected, setManualSelected] = useState(null);
   const [followLive, setFollowLive] = useState(mode === "live");
@@ -124,7 +129,11 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
   }
 
   async function handleStop() {
-    if (lastRun) await stopSession(lastRun.sessionId);
+    // lastRun.sessionId is briefly null for the very first turn's placeholder
+    // run (it exists to drive the loading UI while POST /api/conversations
+    // is still opening the dashboard - see useSessionStream's startQuestion),
+    // so there's no session yet to stop.
+    if (lastRun?.sessionId) await stopSession(lastRun.sessionId);
   }
 
   if (mode === "replay" && loadError) {
@@ -134,18 +143,23 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
     return <div className="p-6 text-sm text-fg/60">Loading session…</div>;
   }
 
+  // B0: only the conversation's first turn actually opens the dashboard
+  // (POST /api/conversations); every later turn reuses that already-open
+  // page, so it's fast and doesn't need the big loading overlay.
   const loadingState =
-    lastRun?.status === "loading"
+    lastRun?.status === "loading" && runs.length <= 1
       ? {
           thumbnailUrl: stream.thumbnailUrl,
-          message:
-            runs.length > 1
-              ? "Reloading the dashboard for your new question…"
-              : "Opening the live dashboard… first load can take up to a minute.",
+          message: "Opening the live dashboard… first load can take up to a minute.",
         }
       : null;
 
   const showConnectionBanner = stream.connectionError && isRunning;
+
+  // Show the live screencast when following the running/idle conversation and
+  // the WS is connected; scrubbing a past step or replaying falls back to the
+  // per-step Stage frame (which is what's persisted).
+  const showLive = !isPureReplay && followLive && live.connected;
 
   return (
     <div className="flex h-full flex-col">
@@ -175,15 +189,26 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
 
       <div className="grid min-h-0 flex-1 grid-cols-1 min-[901px]:grid-cols-[1fr_400px]">
         <div className="relative flex min-h-0 flex-col overflow-hidden bg-canvas-edge/40">
-          <Stage
-            step={selectedStep}
-            showOverlay={showOverlay}
-            showJumpToLivePill={stream.everLive && !followLive && isRunning}
-            onJumpToLive={jumpToLive}
-            loadingState={loadingState}
-            previewUrl={stream.thumbnailUrl}
-            dashboardName={dashboard?.name}
-          />
+          {showLive ? (
+            <LiveStage
+              liveFrameUrl={live.liveFrameUrl}
+              vizBox={live.vizBox}
+              viewport={live.viewport}
+              mode={live.mode}
+              connected={live.connected}
+              dashboardName={dashboard?.name}
+            />
+          ) : (
+            <Stage
+              step={selectedStep}
+              showOverlay={showOverlay}
+              showJumpToLivePill={stream.everLive && !followLive && isRunning}
+              onJumpToLive={jumpToLive}
+              loadingState={loadingState}
+              previewUrl={stream.thumbnailUrl}
+              dashboardName={dashboard?.name}
+            />
+          )}
           {/* Step thumbnails now live in a floating history bubble (bottom-left),
               overlaid on the Stage rather than a docked bottom strip. */}
           <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />

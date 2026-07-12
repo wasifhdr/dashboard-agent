@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getSession, getConfig, getDashboardsMeta, startSession, subscribeToSession } from "../../api.js";
+import { getSession, getConfig, getDashboardsMeta, createConversation, postTurn, subscribeToSession } from "../../api.js";
 
 const DEFAULT_MAX_STEPS = 15;
 
@@ -150,6 +150,14 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
   // its status became terminal.
   const [everLive, setEverLive] = useState(mode === "live");
   const unsubscribeRef = useRef(null);
+  // The one conversation this live Watch instance drives, shared across all
+  // its turns (B0: turns reuse the same persistent dashboard page). Created
+  // lazily on the first startQuestion() call; stays null in replay mode.
+  // The ref is read synchronously within startQuestion (same tick, before a
+  // re-render); the state mirror is what the live-view channel (B1) subscribes
+  // to, so it must trigger a re-render when the conversation is created.
+  const conversationIdRef = useRef(null);
+  const [conversationId, setConversationId] = useState(null);
 
   function applyEvent(runSessionId, evt) {
     setRuns((prev) => {
@@ -177,22 +185,63 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
   }
 
   async function startQuestion(question) {
-    const { id } = await startSession({ dashboardUrl: dashboard.url, dashboardName: dashboard.name, question });
-    const newRun = {
-      sessionId: id,
-      question,
-      status: "loading",
-      finalAnswer: null,
-      confidence: null,
-      error: null,
-      warnings: [],
-      steps: new Map(),
-      startedAt: Date.now(),
-      maxSteps,
-    };
-    setRuns((prev) => [...prev, newRun]);
-    subscribeLive(id);
-    return id;
+    const isFirstTurn = !conversationIdRef.current;
+    if (isFirstTurn) {
+      // POST /api/conversations itself blocks until the dashboard has opened
+      // and settled (up to ~90s on first load) - push a placeholder run
+      // *before* that await so `runs`/`lastRun` are non-empty for the whole
+      // wait, not just after it. Without this, Watch.jsx's loadingState gate
+      // and Composer's isRunning branch both stay inactive for the entire
+      // open, making the first question of a conversation look hung (B0
+      // review fix).
+      setRuns([
+        {
+          sessionId: null,
+          question,
+          status: "loading",
+          finalAnswer: null,
+          confidence: null,
+          error: null,
+          warnings: [],
+          steps: new Map(),
+          startedAt: Date.now(),
+          maxSteps,
+        },
+      ]);
+    }
+    // Both awaits below can fail independently (conversation creation, then
+    // the turn POST). Either failure must clear the placeholder pushed above
+    // rather than leave a run stuck at status:"loading" forever - matching
+    // the pre-fix behavior where a failure left `runs` untouched.
+    try {
+      if (isFirstTurn) {
+        const { conversation_id } = await createConversation({
+          dashboardUrl: dashboard.url,
+          dashboardName: dashboard.name,
+        });
+        conversationIdRef.current = conversation_id;
+        setConversationId(conversation_id);
+      }
+      const { session_id } = await postTurn(conversationIdRef.current, question);
+      const newRun = {
+        sessionId: session_id,
+        question,
+        status: "loading",
+        finalAnswer: null,
+        confidence: null,
+        error: null,
+        warnings: [],
+        steps: new Map(),
+        startedAt: Date.now(),
+        maxSteps,
+      };
+      setRuns((prev) => (isFirstTurn ? [newRun] : [...prev, newRun]));
+      subscribeLive(session_id);
+      return session_id;
+    } catch (err) {
+      if (isFirstTurn) setRuns([]);
+      throw err;
+    }
   }
 
   // Dashboard thumbnail (for Stage's loading state) + global maxSteps.
@@ -271,6 +320,7 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
     everLive,
     maxSteps,
     exampleQuestions,
+    conversationId,
     startQuestion,
     reconnect,
   };

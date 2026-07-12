@@ -4,12 +4,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { WebSocketServer } from "ws";
 
 import { BACKEND_ROOT, FRAMES_DIR } from "./paths.js";
 import { launchBrowser } from "./perception.js";
 import { runSession } from "./orchestrator.js";
 import * as store from "./store.js";
 import * as bus from "./sessionBus.js";
+import * as conversationRuntime from "./conversationRuntime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -73,11 +75,12 @@ app.get("/api/sessions", (req, res) => {
   res.json(store.listSessions(50));
 });
 
-app.get("/api/sessions/:id", (req, res) => {
-  const session = store.getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: "Session not found." });
-
-  const steps = store.getSteps(req.params.id).map((s) => ({
+// Builds the { session, steps } trajectory shape for one session (== one
+// conversation "turn", or a legacy standalone session). Shared by
+// GET /api/sessions/:id and GET /api/conversations/:id (turns[]) so both
+// return turns in exactly the same shape.
+function buildSessionTrajectory(session) {
+  const steps = store.getSteps(session.id).map((s) => ({
     idx: s.step_idx,
     thought: s.thought,
     action: s.action_json ? JSON.parse(s.action_json) : null,
@@ -91,7 +94,14 @@ app.get("/api/sessions/:id", (req, res) => {
     duration_ms: s.duration_ms,
   }));
 
-  res.json({ session, steps });
+  return { session, steps };
+}
+
+app.get("/api/sessions/:id", (req, res) => {
+  const session = store.getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found." });
+
+  res.json(buildSessionTrajectory(session));
 });
 
 // Translates the orchestrator's onEvent payloads into the SSE event shapes
@@ -161,47 +171,203 @@ function adaptAndPublish(sessionId, evt) {
 }
 
 let sharedBrowser;
-let isRunning = false;
+// Replaces the old single-session `isRunning` boolean: `turnRunning` tracks
+// whether an agent turn is in flight on the currently active conversation.
+// There is still only ever one turn running at a time (one active
+// conversation, per docs/LIVE_TAKEOVER_PLAN.md section 5/7).
+let turnRunning = false;
+// Guards the async dashboard-open+settle window inside
+// createConversationInternal. `turnRunning` alone doesn't cover this window
+// (it's only set once a conversation already exists), so without this flag
+// two overlapping POST /api/conversations calls could both proceed
+// concurrently and leak a Playwright context (B0 review fix).
+let conversationOpening = false;
 const stopRequests = new Set();
 
-app.post("/api/sessions", (req, res) => {
-  const { dashboard_url, dashboard_name, question } = req.body ?? {};
-  if (!dashboard_url || !question) {
-    return res.status(400).json({ error: "dashboard_url and question are required." });
+// Shared by POST /api/conversations and the POST /api/sessions shim (#6):
+// opens a fresh conversation runtime and registers it as active, closing
+// whatever conversation was previously active (if any) - but only *after*
+// the new one has successfully opened. This ordering matters: if the new
+// dashboard fails to load, the previous (healthy) conversation must survive
+// untouched rather than being torn down for nothing (B0 review fix). Caller
+// is responsible for checking `turnRunning` (409) before calling this;
+// `conversationOpening` (checked/set here, synchronously, before the first
+// await) protects against two overlapping calls racing each other.
+async function createConversationInternal({ dashboardUrl, dashboardName }) {
+  if (conversationOpening) {
+    throw Object.assign(new Error("A conversation is already being opened. Try again in a moment."), { statusCode: 409 });
   }
-  if (isRunning) {
-    return res.status(409).json({ error: "A session is already running. This system runs one session at a time." });
+  conversationOpening = true;
+  try {
+    const conversationId = crypto.randomUUID();
+    const runtime = await conversationRuntime.createRuntime({
+      browser: sharedBrowser,
+      config,
+      conversationId,
+      dashboardUrl,
+      dashboardName: dashboardName ?? null,
+    });
+
+    const prev = conversationRuntime.getActiveRuntime();
+    conversationRuntime.setActiveRuntime(runtime);
+    if (prev) {
+      await prev.close();
+    }
+    return runtime;
+  } finally {
+    conversationOpening = false;
   }
+}
 
-  const sessionId = crypto.randomUUID();
-  bus.createBus(sessionId);
-  isRunning = true;
-
-  res.json({ id: sessionId });
+// Shared by POST /api/conversations/:id/turns and the POST /api/sessions
+// shim (#6): starts one agent turn (== one `sessions` row) on the given
+// runtime's already-open page, fire-and-forget, mirroring the existing
+// "respond before the run finishes" / safety-net catch+finally pattern from
+// the old POST /api/sessions handler.
+function startTurn({ conversationId, activeRuntime, question }) {
+  const turnId = crypto.randomUUID();
+  const turnIndex = store.getConversationTurns(conversationId).length;
+  bus.createBus(turnId);
+  turnRunning = true;
+  // Live-view lock: tell any WS watchers the agent is now driving (veil on).
+  activeRuntime.setMode("agent");
 
   runSession({
     browser: sharedBrowser,
     config,
-    dashboardUrl: dashboard_url,
-    dashboardName: dashboard_name ?? null,
+    dashboardUrl: activeRuntime.dashboardUrl,
+    dashboardName: activeRuntime.dashboardName,
     question,
-    sessionId,
-    onEvent: (evt) => adaptAndPublish(sessionId, evt),
-    shouldStop: () => stopRequests.has(sessionId),
+    sessionId: turnId,
+    page: activeRuntime.page,
+    ownsPage: false,
+    conversationId,
+    turnIndex,
+    onEvent: (evt) => adaptAndPublish(turnId, evt),
+    shouldStop: () => stopRequests.has(turnId),
   })
     .catch((err) => {
-      console.error(`Session ${sessionId} failed:`, err);
+      console.error(`Turn ${turnId} (conversation ${conversationId}) failed:`, err);
       // Safety net for a bug that escapes runSession's own error handling -
       // without this the session row would stay stuck at status='running'
       // forever and look like a hang in the History list.
       const errorMessage = `Unexpected error: ${err.message}`;
-      store.finishSession(sessionId, { status: "error", error_message: errorMessage });
-      bus.publish(sessionId, { type: "session_done", status: "error", final_answer: null, confidence: null, error: errorMessage });
+      store.finishSession(turnId, { status: "error", error_message: errorMessage });
+      bus.publish(turnId, { type: "session_done", status: "error", final_answer: null, confidence: null, error: errorMessage });
     })
     .finally(() => {
-      isRunning = false;
-      stopRequests.delete(sessionId);
+      turnRunning = false;
+      stopRequests.delete(turnId);
+      // Live-view unlock (veil off) - but only if THIS conversation is still
+      // the active one. If the runtime was closed/replaced mid-turn, there's
+      // nothing to unlock and setMode on a stale runtime would be wrong.
+      const current = conversationRuntime.getActiveRuntime();
+      if (current && current.conversationId === conversationId) {
+        current.setMode("idle");
+      }
     });
+
+  return { turnId, turnIndex };
+}
+
+app.post("/api/conversations", async (req, res) => {
+  const { dashboard_url, dashboard_name } = req.body ?? {};
+  if (!dashboard_url) {
+    return res.status(400).json({ error: "dashboard_url is required." });
+  }
+  if (turnRunning) {
+    return res.status(409).json({ error: "A turn is already running. This system runs one turn at a time." });
+  }
+
+  try {
+    const runtime = await createConversationInternal({ dashboardUrl: dashboard_url, dashboardName: dashboard_name });
+    res.json({ conversation_id: runtime.conversationId });
+  } catch (err) {
+    const status = err.statusCode ?? 500;
+    if (status !== 409) console.error("Failed to create conversation:", err);
+    res.status(status).json({ error: err.message });
+  }
+});
+
+app.post("/api/conversations/:id/turns", (req, res) => {
+  const { question } = req.body ?? {};
+  if (!question) {
+    return res.status(400).json({ error: "question is required." });
+  }
+
+  const activeRuntime = conversationRuntime.getActiveRuntime();
+  if (!activeRuntime || activeRuntime.conversationId !== req.params.id) {
+    return res.status(404).json({ error: "Conversation not found or not active." });
+  }
+  if (turnRunning) {
+    return res.status(409).json({ error: "A turn is already running. This system runs one turn at a time." });
+  }
+
+  const { turnId, turnIndex } = startTurn({ conversationId: req.params.id, activeRuntime, question });
+  res.json({ session_id: turnId, turn_index: turnIndex });
+});
+
+app.post("/api/conversations/:id/close", async (req, res) => {
+  const conversation = store.getConversation(req.params.id);
+  if (!conversation) return res.status(404).json({ error: "Conversation not found." });
+
+  const activeRuntime = conversationRuntime.getActiveRuntime();
+  if (activeRuntime && activeRuntime.conversationId === req.params.id) {
+    // Don't tear the Playwright context out from under a turn that is still
+    // running on it - the in-flight runSession would hit a "context closed"
+    // error on its next page call instead of stopping cleanly (B0 review
+    // fix). Caller should wait for the turn to finish (or POST the turn's
+    // /stop endpoint first) and retry.
+    if (turnRunning) {
+      return res.status(409).json({ error: "A turn is currently running on this conversation. Wait for it to finish before closing." });
+    }
+    await activeRuntime.close();
+    conversationRuntime.setActiveRuntime(null);
+  }
+  res.json({ ok: true });
+});
+
+app.get("/api/conversations", (req, res) => {
+  res.json(store.listConversations(50));
+});
+
+app.get("/api/conversations/:id", (req, res) => {
+  const conversation = store.getConversation(req.params.id);
+  if (!conversation) return res.status(404).json({ error: "Conversation not found." });
+
+  const turns = store.getConversationTurns(req.params.id).map(buildSessionTrajectory);
+  const takeovers = store.getTakeovers(req.params.id);
+  res.json({ conversation, turns, takeovers });
+});
+
+// Backward-compatible shim (docs/LIVE_TAKEOVER_PLAN.md section 9, Phase B0
+// item 6): internally creates a one-turn conversation and immediately starts
+// a turn on it, but keeps responding with today's exact shape, {id}, so
+// existing callers (frontend pre-migration, and anything else hitting this
+// endpoint directly) don't break. Unlike the old handler, the dashboard load
+// (inside createConversationInternal -> conversationRuntime.createRuntime)
+// is awaited before responding - that's an inherent consequence of reusing
+// the conversation-creation path, not a behavior this shim tries to hide.
+app.post("/api/sessions", async (req, res) => {
+  const { dashboard_url, dashboard_name, question } = req.body ?? {};
+  if (!dashboard_url || !question) {
+    return res.status(400).json({ error: "dashboard_url and question are required." });
+  }
+  if (turnRunning) {
+    return res.status(409).json({ error: "A session is already running. This system runs one session at a time." });
+  }
+
+  let runtime;
+  try {
+    runtime = await createConversationInternal({ dashboardUrl: dashboard_url, dashboardName: dashboard_name });
+  } catch (err) {
+    const status = err.statusCode ?? 500;
+    if (status !== 409) console.error("Failed to create conversation for /api/sessions:", err);
+    return res.status(status).json({ error: err.message });
+  }
+
+  const { turnId } = startTurn({ conversationId: runtime.conversationId, activeRuntime: runtime, question });
+  res.json({ id: turnId });
 });
 
 app.post("/api/sessions/:id/stop", (req, res) => {
@@ -224,15 +390,73 @@ app.get("/api/sessions/:id/events", (req, res) => {
   req.on("close", () => bus.unsubscribe(req.params.id, res));
 });
 
+// Live-view WebSocket (docs/LIVE_TAKEOVER_PLAN.md section 6.2): streams the
+// active conversation's CDP screencast frames + viz geometry + lock/unlock to
+// the viewer. `ws` has no Express-style path params, so we match
+// /api/conversations/:id/live manually on the HTTP upgrade event. Receive-only
+// in B1 (inbound messages ignored; user input forwarding is Phase B2).
+const LIVE_PATH_RE = /^\/api\/conversations\/([^/]+)\/live$/;
+
+function attachLiveWebSocket(httpServer) {
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    let pathname;
+    try {
+      pathname = new URL(req.url, "http://localhost").pathname;
+    } catch {
+      socket.destroy();
+      return;
+    }
+    const match = LIVE_PATH_RE.exec(pathname);
+    if (!match) {
+      // Not our endpoint - let it die cleanly rather than hanging the socket.
+      socket.destroy();
+      return;
+    }
+    const conversationId = decodeURIComponent(match[1]);
+    const runtime = conversationRuntime.getActiveRuntime();
+    if (!runtime || runtime.conversationId !== conversationId) {
+      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req, conversationId);
+    });
+  });
+
+  wss.on("connection", (ws, req, conversationId) => {
+    // The runtime can be torn down between upgrade and connection; re-check.
+    const runtime = conversationRuntime.getActiveRuntime();
+    if (!runtime || runtime.conversationId !== conversationId) {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // Bind cleanup to THIS runtime instance, not a later getActiveRuntime():
+    // if the conversation is swapped while this socket is still open, the
+    // socket must remove itself from the runtime it actually joined.
+    runtime.addClient(ws).catch(() => {});
+    ws.on("close", () => runtime.removeClient(ws).catch(() => {}));
+    ws.on("error", () => runtime.removeClient(ws).catch(() => {}));
+    ws.on("message", () => {}); // B1 is receive-only; input forwarding is B2.
+  });
+}
+
 const PORT = config.backendPort ?? 8788;
 
 launchBrowser()
   .then((browser) => {
     sharedBrowser = browser;
-    app.listen(PORT, "127.0.0.1", () => {
+    const httpServer = app.listen(PORT, "127.0.0.1", () => {
       console.log(`dashboard-agent backend listening on http://127.0.0.1:${PORT}`);
       console.log(`host page: http://127.0.0.1:${PORT}/host?viz=<tableau-public-view-url>`);
     });
+    attachLiveWebSocket(httpServer);
   })
   .catch((err) => {
     console.error("Failed to launch shared browser:", err);

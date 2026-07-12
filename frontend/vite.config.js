@@ -16,6 +16,9 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:8788",
         changeOrigin: true,
+        // Proxy WebSocket upgrades too, for the live-view channel at
+        // /api/conversations/:id/live (Phase B1). SSE keeps working as before.
+        ws: true,
       },
       "/frames": {
         target: "http://127.0.0.1:8788",
