@@ -302,6 +302,13 @@ app.post("/api/conversations/:id/turns", (req, res) => {
   if (turnRunning) {
     return res.status(409).json({ error: "A turn is already running. This system runs one turn at a time." });
   }
+  // A conversation is mid-open/replace: the runtime that is "active" right now
+  // is the OLD one, about to be torn down. Starting a turn on it would let
+  // createConversationInternal's prev.close() pull the context out from under
+  // a running turn. Reject until the swap completes.
+  if (conversationOpening) {
+    return res.status(409).json({ error: "A conversation is currently being opened. Try again in a moment." });
+  }
 
   const { turnId, turnIndex } = startTurn({ conversationId: req.params.id, activeRuntime, question });
   res.json({ session_id: turnId, turn_index: turnIndex });
@@ -321,8 +328,11 @@ app.post("/api/conversations/:id/close", async (req, res) => {
     if (turnRunning) {
       return res.status(409).json({ error: "A turn is currently running on this conversation. Wait for it to finish before closing." });
     }
+    // runtime.close() self-clears the active-runtime singleton, but only if
+    // this is still the active one - so an explicit setActiveRuntime(null)
+    // here would clobber a runtime that a concurrent POST /api/conversations
+    // registered during the await. Let close() handle it.
     await activeRuntime.close();
-    conversationRuntime.setActiveRuntime(null);
   }
   res.json({ ok: true });
 });
@@ -427,6 +437,10 @@ function attachLiveWebSocket(httpServer) {
   });
 
   wss.on("connection", (ws, req, conversationId) => {
+    // Attach an 'error' handler immediately: Node throws on an unhandled
+    // socket 'error' event (crashing the process), and the close handshake in
+    // the early-return branch below can emit one. Needed on ALL paths.
+    ws.on("error", () => {});
     // The runtime can be torn down between upgrade and connection; re-check.
     const runtime = conversationRuntime.getActiveRuntime();
     if (!runtime || runtime.conversationId !== conversationId) {

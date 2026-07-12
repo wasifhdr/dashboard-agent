@@ -27,6 +27,7 @@ export function useLiveChannel(conversationId) {
     let channel = null;
     let reconnectTimer = null;
     let backoff = 1000;
+    let failedAttempts = 0; // consecutive (re)connects that never opened
 
     // Reset per-conversation view state so a new conversation doesn't briefly
     // show the previous one's last frame/box.
@@ -56,7 +57,13 @@ export function useLiveChannel(conversationId) {
         onOpen: () => {
           if (disposed) return;
           backoff = 1000;
+          failedAttempts = 0;
           setConnected(true);
+          // Reset the veil baseline on every (re)connect: if a turn really is
+          // running, the server's addClient re-primes 'lock' right after; if
+          // not, we must not stay stuck on a 'lock' whose matching 'unlock' we
+          // missed while disconnected mid-turn.
+          setMode("idle");
         },
         onFrame: (data) => setFrame(data),
         onVizBox: (box, vp) => {
@@ -77,6 +84,12 @@ export function useLiveChannel(conversationId) {
           if (disposed) return;
           setConnected(false);
           if (serverClosed) return; // conversation really gone - no reconnect
+          failedAttempts += 1;
+          // Stop after enough consecutive failures with no successful open
+          // (onOpen resets this to 0). Otherwise a socket whose upgrade keeps
+          // 404ing - e.g. the conversation was replaced/closed while this
+          // client was disconnected - would retry forever at the backoff cap.
+          if (failedAttempts > 6) return;
           reconnectTimer = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 8000);
         },

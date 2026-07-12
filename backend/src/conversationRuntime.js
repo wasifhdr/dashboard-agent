@@ -241,7 +241,10 @@ export async function createRuntime({ browser, config, conversationId, dashboard
       } catch {
         /* ignore */
       }
-      lastVizBoxKey = vizBoxKey(vb);
+      // Do NOT set lastVizBoxKey here: it's the poll loop's shared dedup key,
+      // and suppressing its next broadcast would leave already-connected
+      // clients cropping to stale geometry. Priming this one socket is enough;
+      // a redundant re-broadcast to it on the next tick is harmless.
     }
     if (mode === "agent" && ws.readyState === WS_OPEN) {
       try {

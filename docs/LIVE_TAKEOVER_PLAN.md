@@ -242,7 +242,7 @@ Deliver keep-alive multi-turn with **no** screencast and **no** takeover yet.
 ### Phase B2 — Post-completion takeover (input + lock + persistence)
 1. Runtime: `mode` state machine; `dispatchInput` with coord mapping (§5); `beginAgentTurn`/`endAgentTurn` broadcasting `lock`/`unlock`.
 2. Runtime: takeover capture — on unlock snapshot before-frame/inventory + eventLog index; on next turn start (or close) snapshot after-frame/inventory + eventLog slice, compute `summary_json` diff, `insertTakeover`.
-3. `server.js`/WS: accept input messages; enforce lock (ignore input when `mode==='agent'`).
+3. `server.js`/WS: accept input messages; enforce lock (ignore input when `mode==='agent'`). **Add WebSocket Origin validation to the `/api/conversations/:id/live` upgrade handler here** — mirror the Express CORS allowlist (`http://localhost:5173`). Deferred from B1 (the socket was receive-only then, so cross-site hijacking was harmless), but B2 promotes it to an *input* channel, so an Origin check is required before inbound handling lands to prevent cross-site WebSocket hijacking (CSWSH) driving the agent's browser.
 4. Frontend: input-capture layer in `LiveStage` (mouse move/click/drag/wheel + keyboard), throttled; veil when locked; takeover cards in `Feed`.
 
 **Accept when:** After the agent answers, you click a filter / switch a tab **in the viewer** and it takes effect on the live dashboard; ask a follow-up and the agent answers **from your modified state**; the takeover appears in the thread and its before/after + diff are in the DB. While the agent is working, your clicks are ignored (veil shown).
