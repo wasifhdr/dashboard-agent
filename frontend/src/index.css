@@ -40,7 +40,10 @@
   --t-shadow-glass-sm: 0 2px 10px rgba(23, 32, 43, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   --t-shadow-glass: 0 8px 28px rgba(23, 32, 43, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   --t-shadow-glass-lg: 0 16px 48px rgba(23, 32, 43, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --t-shadow-panel: 0 2px 10px rgba(23, 32, 43, 0.06);
+  /* Same inset offset as shadow-glass-lg, alpha 0 - box-shadow only interpolates
+     smoothly when both sides have the same number of layers; this lets
+     clickable-card hovers (panel -> glass-lg) animate instead of snapping. */
+  --t-shadow-panel: 0 2px 10px rgba(23, 32, 43, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0);
   --t-shadow-teal-glow: 0 4px 24px rgba(43, 168, 162, 0.3);
   --t-shadow-coral-glow: 0 4px 24px rgba(212, 82, 51, 0.3);
   --t-shadow-gold-glow: 0 4px 24px rgba(230, 184, 0, 0.35);
@@ -82,7 +85,7 @@
   --t-shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   --t-shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   --t-shadow-glass-lg: 0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  --t-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --t-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0);
   --t-shadow-teal-glow: 0 4px 28px rgba(62, 217, 207, 0.38);
   --t-shadow-coral-glow: 0 4px 28px rgba(255, 122, 92, 0.38);
   --t-shadow-gold-glow: 0 4px 28px rgba(255, 210, 63, 0.4);

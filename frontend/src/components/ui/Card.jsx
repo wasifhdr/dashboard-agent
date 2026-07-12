@@ -31,9 +31,18 @@ const ACCENT_BORDER_L = {
   coral: "border-l-4 border-l-coral",
 };
 
+// Animating box-shadow directly forces the browser to re-rasterize the blur
+// every frame, which reads as choppy no matter the duration/easing. Instead
+// the hover shadow lives on a ::after overlay (same box, transparent fill) and
+// only its opacity crossfades in - opacity is compositor-only, so it's always
+// smooth regardless of how large the blur is. The real element only animates
+// transform (also compositor-only) for the lift.
 const CLICKABLE_EXTRA =
-  "block w-full text-left transition-[transform,box-shadow,background-color] duration-200 ease-glass " +
-  "hover:-translate-y-1 hover:shadow-glass-lg " +
+  "relative block w-full text-left transition-[transform,background-color] duration-1000 ease-glass " +
+  "hover:-translate-y-1 " +
+  "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:content-[''] " +
+  "after:opacity-0 after:shadow-glass-lg after:transition-opacity after:duration-1000 after:ease-glass " +
+  "hover:after:opacity-100 " +
   "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2";
 
 export default function Card({ variant = "standard", accent, onClick, className, children, ...props }) {

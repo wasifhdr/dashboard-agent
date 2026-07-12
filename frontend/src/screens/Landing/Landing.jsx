@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 import { getConfig, getDashboardsMeta } from "../../api.js";
 import { scoreDashboards, looksLikeUrl } from "./search.js";
-import HeroBand from "./HeroBand.jsx";
-import GalleryBand from "./GalleryBand.jsx";
-import HowItWorksBand from "./HowItWorksBand.jsx";
-import FeatureBand from "./FeatureBand.jsx";
-import StatBand from "./StatBand.jsx";
+import Field from "../../components/ui/Field.jsx";
+import Button from "../../components/ui/Button.jsx";
+import StepFlow from "./StepFlow.jsx";
+import DashboardCarousel from "./DashboardCarousel.jsx";
 import Footer from "./Footer.jsx";
+
+gsap.registerPlugin(useGSAP);
 
 const DEBOUNCE_MS = 150;
 
@@ -14,6 +17,9 @@ export default function Landing({ onOpenWatch, onOpenHistory }) {
   const [dashboards, setDashboards] = useState([]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [urlValue, setUrlValue] = useState("");
+  const [urlError, setUrlError] = useState("");
+  const heroRef = useRef(null);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query), DEBOUNCE_MS);
@@ -63,25 +69,92 @@ export default function Landing({ onOpenWatch, onOpenHistory }) {
     }
   }
 
+  function handleUrlSubmit(e) {
+    e.preventDefault();
+    const trimmed = urlValue.trim();
+    if (!trimmed.toLowerCase().startsWith("http")) {
+      setUrlError("Paste a full Tableau Public view URL.");
+      return;
+    }
+    setUrlError("");
+    openDashboard(trimmed, null);
+  }
+
+  // One-shot entrance for the hero headline + search column (the StepFlow and
+  // carousel run their own GSAP intros). Skipped under reduced-motion.
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia();
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        gsap.from(".hero-rise", {
+          y: 18,
+          opacity: 0,
+          duration: 0.6,
+          stagger: 0.08,
+          ease: "power3.out",
+        });
+      });
+      return () => mm.revert();
+    },
+    { scope: heroRef },
+  );
+
   return (
     <div>
-      <HeroBand
-        query={query}
-        onQueryChange={setQuery}
-        onEnterSearch={handleEnterSearch}
-        onOpenUrl={(url) => openDashboard(url, null)}
-      />
-      <GalleryBand
-        dashboards={dashboards}
-        matches={matches}
-        query={debouncedQuery}
-        isUrlQuery={isUrlQuery}
-        onOpenDashboard={openDashboard}
-        onOpenUrl={(url) => openDashboard(url, null)}
-      />
-      <HowItWorksBand />
-      <FeatureBand />
-      <StatBand />
+      <section ref={heroRef}>
+        <div className="mx-auto grid max-w-6xl gap-x-12 gap-y-12 px-6 py-16 md:grid-cols-2 md:items-start">
+          {/* Left: headline + the loop, as a vertical sequence */}
+          <div>
+            <h1 className="hero-rise font-sans text-display font-extrabold text-fg">
+              Ask a question. Watch the agent <span className="text-teal-ink">work the dashboard.</span>
+            </h1>
+            <div className="hero-rise mt-10">
+              <StepFlow />
+            </div>
+          </div>
+
+          {/* Right: find a dashboard, then browse matches in the carousel */}
+          <div className="md:pt-2">
+            <div className="hero-rise space-y-5">
+              <Field
+                label="Find a dashboard"
+                placeholder='Try "home values", "infectious diseases", "state revenue"…'
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleEnterSearch();
+                }}
+              />
+              <div>
+                <label className="mb-1.5 block text-label uppercase text-fg/70">Or open a Tableau Public link</label>
+                <form onSubmit={handleUrlSubmit} className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <Field
+                      placeholder="https://public.tableau.com/views/Workbook/Sheet"
+                      value={urlValue}
+                      onChange={(e) => setUrlValue(e.target.value)}
+                      error={urlError || undefined}
+                    />
+                  </div>
+                  <Button type="submit" variant="primary" className="shrink-0">
+                    Open dashboard
+                  </Button>
+                </form>
+              </div>
+            </div>
+
+            <div className="hero-rise mt-8">
+              <DashboardCarousel
+                matches={matches}
+                isUrlQuery={isUrlQuery}
+                query={query}
+                onOpenDashboard={openDashboard}
+                onOpenUrl={(url) => openDashboard(url, null)}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
       <Footer onOpenHistory={onOpenHistory} />
     </div>
   );

@@ -13,6 +13,8 @@ export default function Stage({
   showJumpToLivePill = false,
   onJumpToLive,
   loadingState = null,
+  previewUrl = null,
+  dashboardName = null,
 }) {
   const [naturalSize, setNaturalSize] = useState(null);
 
@@ -23,6 +25,11 @@ export default function Stage({
   const overlay = step?.overlay;
 
   const showingFrame = !loadingState && !!step?.frameUrl;
+  // Idle (no run yet): show the dashboard's default view - the step-1 frame
+  // from a prior run - as a static preview. The user's browser can't embed the
+  // live Tableau canvas, so this cached screenshot is the best "default view"
+  // we can render before a question kicks off a real Playwright session.
+  const showingPreview = !loadingState && !step?.frameUrl && !!previewUrl;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
@@ -36,7 +43,7 @@ export default function Stage({
           </div>
         )}
 
-        <div className={cx("glass shadow-teal-glow relative overflow-hidden rounded-card-lg", showingFrame ? "w-fit max-w-full" : "w-full")}>
+        <div className={cx("glass shadow-teal-glow relative overflow-hidden rounded-card-lg", showingFrame || showingPreview ? "w-fit max-w-full" : "w-full")}>
           {loadingState ? (
             <div className="relative">
               {loadingState.thumbnailUrl ? (
@@ -54,7 +61,25 @@ export default function Stage({
               </div>
             </div>
           ) : !step?.frameUrl ? (
-            <div className="py-24 text-center text-sm text-fg/60">No frame yet.</div>
+            showingPreview ? (
+              <div className="relative">
+                <img
+                  src={previewUrl}
+                  alt={dashboardName ? `Default view of ${dashboardName}` : "Dashboard default view"}
+                  className="max-h-[calc(100dvh-12rem)] w-full object-contain"
+                />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
+                  <Badge variant="neutral">Default view · ask a question to begin</Badge>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 py-24 text-center">
+                {dashboardName && (
+                  <span className="font-sans text-display-sm font-extrabold text-fg/20">{dashboardName.charAt(0)}</span>
+                )}
+                <p className="text-sm text-fg/60">Ask a question to open this dashboard's live view.</p>
+              </div>
+            )
           ) : (
             <>
               <CrossfadeImage

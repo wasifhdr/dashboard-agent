@@ -50,7 +50,7 @@ export default function AppShell({ view, onNavigate, children }) {
     <div className={cx("flex min-h-screen flex-col", view === "watch" && "min-[901px]:h-dvh min-[901px]:overflow-hidden")}>
       <div className="bg-orbs" aria-hidden="true" />
       <header className="glass-deep sticky top-0 z-40">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
+        <div className="flex h-14 items-center justify-between px-6">
           <button
             type="button"
             onClick={() => onNavigate("landing")}

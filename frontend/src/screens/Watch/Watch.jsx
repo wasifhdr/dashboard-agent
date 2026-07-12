@@ -181,6 +181,8 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
             showJumpToLivePill={stream.everLive && !followLive && isRunning}
             onJumpToLive={jumpToLive}
             loadingState={loadingState}
+            previewUrl={stream.thumbnailUrl}
+            dashboardName={dashboard?.name}
           />
           {/* Step thumbnails now live in a floating history bubble (bottom-left),
               overlaid on the Stage rather than a docked bottom strip. */}

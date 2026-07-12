@@ -122,7 +122,7 @@ needed) with two amendments:
 |---|---|---|---|
 | Glass chrome | `glass` / `glass-raised` / `glass-deep` | yes | app header, Watch status bar + composer + filmstrip rail + feed container, stage frame, modals, hero feature card |
 | Panel | `panel` | no | nested cards, tables, code blocks, inputs, inspect panel, thumbnails |
-| Tinted panel | `panel-tint-{teal,coral,gold,sky,green,violet}` | no | the colorful zones: question cards (teal), outcome cards (green/gold/coral), loop/feature cards (rotating), StatChips |
+| Tinted panel | `panel-tint-{teal,coral,gold,sky,green,violet}` | no | the colorful zones: question cards (teal), outcome cards (green/gold/coral), loop/feature cards (rotating), landing step-flow nodes |
 
 **Blur budget: ≤6 blurred surfaces per screen.** Blur-inside-blur is banned — a panel inside a
 glass container never blurs. If a new surface needs blur, something else on the screen should
@@ -132,7 +132,7 @@ give it up.
 (`border-t-4 border-t-{accent}` on feature cards, `border-l-4` on callouts/outcomes) layer on top.
 
 **Elevation:** `shadow-glass*` on glass tiers; `shadow-panel` on standard cards;
-`shadow-{accent}-glow` on primary/danger buttons, live dots, the stage frame, StatChips. Panels
+`shadow-{accent}-glow` on primary/danger buttons, live dots, the stage frame. Panels
 in dense/quiet zones carry no shadow. panel/panel-tint utilities deliberately do NOT set
 box-shadow — compose it with a shadow utility so glows don't fight the base shadow.
 
@@ -156,8 +156,6 @@ Shared components in `src/components/ui/` are the source of truth; highlights:
 - **Card** — `feature` = `rounded-card-lg glass-raised p-6` (hero only); `standard` =
   `rounded-card panel p-5 shadow-panel`; `accent` prop swaps panel → `panel-tint-{accent}` (+
   `border-t-4`); `callout` = `rounded-control panel p-4 border-l-4`; clickable adds lift.
-- **StatChip** — `panel-tint-{accent} shadow-{accent}-glow rounded-card px-5 py-3`, value in
-  `text-2xl font-extrabold tabular-nums text-fg`.
 - **Field** — `panel rounded-control`, placeholder `text-fg/40`, error = `border-coral/60` +
   `text-coral-ink` message.
 - **Table** — wrapper `panel rounded-card`; th `text-label uppercase text-fg/50` over

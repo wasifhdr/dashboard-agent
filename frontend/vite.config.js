@@ -6,6 +6,10 @@ import tailwindcss from "@tailwindcss/vite";
 // relative URLs (including for EventSource/SSE) with no CORS to think about.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Keep a single React instance across pre-bundled deps (e.g. @gsap/react's
+  // useGSAP hook) so hooks don't trip the "more than one copy of React" guard.
+  resolve: { dedupe: ["react", "react-dom"] },
+  optimizeDeps: { include: ["gsap", "@gsap/react"] },
   server: {
     port: 5173,
     proxy: {
