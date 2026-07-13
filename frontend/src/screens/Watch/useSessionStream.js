@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { getSession, getConfig, getDashboardsMeta, createConversation, postTurn, subscribeToSession } from "../../api.js";
+import {
+  getSession,
+  getConversation,
+  getConfig,
+  getDashboardsMeta,
+  createConversation,
+  postTurn,
+  subscribeToSession,
+} from "../../api.js";
 
 const DEFAULT_MAX_STEPS = 15;
 
@@ -158,10 +166,17 @@ function reduceEvent(run, evt) {
 // fetches a finished (or in-progress, for live re-attach) session once;
 // `live` starts brand-new sessions via startQuestion and reduces their SSE
 // stream incrementally. Both share the same Run/Step state shape.
-export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName }) {
+export function useSessionStream(mode, { sessionId, conversationId: replayConversationId, dashboardUrl, dashboardName }) {
   const [dashboard, setDashboard] = useState(mode === "live" ? { url: dashboardUrl, name: dashboardName } : null);
   const [runs, setRuns] = useState([]);
   const [loadError, setLoadError] = useState(null);
+  // A takeover captured after the LAST turn of a replayed conversation (e.g.
+  // right as it was closed), with no further turn ever asked to attach it to
+  // as a run's `precedingTakeover` - see docs/LIVE_TAKEOVER_PLAN.md §9 Phase
+  // B2's documented scope boundary and Phase B3's replay requirements. Stays
+  // null for the sessionId (legacy single-session) replay path and for live
+  // mode, where it never applies.
+  const [trailingTakeover, setTrailingTakeover] = useState(null);
   const [connectionError, setConnectionError] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [maxSteps, setMaxSteps] = useState(DEFAULT_MAX_STEPS);
@@ -172,6 +187,15 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
   // from the live rendering path to the replay one mid-session just because
   // its status became terminal.
   const [everLive, setEverLive] = useState(mode === "live");
+  // Session ids that have actually been driven by a live SSE subscription at
+  // least once - unlike `everLive` (sticky for the whole Watch instance),
+  // this is per-run. Needed so Feed renders only the run(s) that were truly
+  // live via LiveStepCard, instead of applying that to every run when
+  // reattaching to the running last turn of a replayed multi-turn
+  // conversation, which would spuriously re-typewriter earlier, already-
+  // resolved turns' thoughts on load (review fix; see
+  // docs/LIVE_TAKEOVER_PLAN.md §9 Phase B3).
+  const [liveSessionIds, setLiveSessionIds] = useState(() => new Set());
   const unsubscribeRef = useRef(null);
   // The one conversation this live Watch instance drives, shared across all
   // its turns (B0: turns reuse the same persistent dashboard page). Created
@@ -195,6 +219,7 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
   function subscribeLive(runSessionId) {
     setConnectionError(false);
     setEverLive(true);
+    setLiveSessionIds((prev) => (prev.has(runSessionId) ? prev : new Set(prev).add(runSessionId)));
     unsubscribeRef.current?.();
     unsubscribeRef.current = subscribeToSession(runSessionId, {
       onEvent: (evt) => applyEvent(runSessionId, evt),
@@ -299,41 +324,107 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
     setDashboard(null);
     setRuns([]);
     setLoadError(null);
+    setTrailingTakeover(null);
 
     let cancelled = false;
-    getSession(sessionId)
-      .then(({ session, steps }) => {
-        if (cancelled) return;
-        setDashboard({ url: session.dashboard_url, name: session.dashboard_name });
-        const stepMap = new Map(steps.map((s) => [s.idx, mapStoredStepToStep(s)]));
-        setRuns([
-          {
-            sessionId: session.id,
-            question: session.question,
-            status: session.status,
-            finalAnswer: session.final_answer,
-            confidence: session.confidence,
-            error: session.error_message,
-            warnings: [],
-            steps: stepMap,
-            startedAt: session.created_at,
-            maxSteps: parseMaxSteps(session.config_json),
-          },
-        ]);
-        if (session.status === "running") {
-          // Live re-attach: the bus replays its buffer; the idempotent
-          // reducer lands those events on top of the state above safely.
-          subscribeLive(session.id);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setLoadError(e.message);
-      });
+
+    // Full-conversation replay (docs/LIVE_TAKEOVER_PLAN.md §9 Phase B3) takes
+    // precedence over the legacy single-session path below when both were
+    // somehow passed - see useSessionStream's Watch/App callers, which never
+    // do this in practice, but branch order keeps it deterministic if they did.
+    if (replayConversationId) {
+      getConversation(replayConversationId)
+        .then(({ conversation, turns, takeovers }) => {
+          if (cancelled) return;
+          if (turns.length === 0) {
+            // A conversation row is persisted as soon as the dashboard opens,
+            // before any turn is ever posted (conversationRuntime.js) - if the
+            // first postTurn never completes (tab closed, dropped network, a
+            // 409), a real zero-turn conversation is left behind. There is no
+            // run to replay and no in-panel UI for "ask a first question" in
+            // pure-replay mode, so surface this as a load error instead of
+            // leaving `runs` empty forever (Watch's !primaryRun branch would
+            // otherwise spin on "Loading session…" indistinguishably from a
+            // still-in-flight fetch - review fix).
+            setLoadError("This conversation has no turns yet — there is nothing to replay.");
+            return;
+          }
+          setDashboard({ url: conversation.dashboard_url, name: conversation.dashboard_name });
+
+          const turnIndices = new Set(turns.map((t) => t.session.turn_index));
+          const newRuns = turns.map((t) => {
+            const preceding = takeovers.find((tk) => tk.after_turn_index + 1 === t.session.turn_index);
+            return {
+              sessionId: t.session.id,
+              question: t.session.question,
+              status: t.session.status,
+              finalAnswer: t.session.final_answer,
+              confidence: t.session.confidence,
+              error: t.session.error_message,
+              warnings: [],
+              steps: new Map(t.steps.map((s) => [s.idx, mapStoredStepToStep(s)])),
+              startedAt: t.session.created_at,
+              maxSteps: parseMaxSteps(t.session.config_json),
+              precedingTakeover: toPrecedingTakeover(preceding),
+            };
+          });
+          setRuns(newRuns);
+
+          // The takeover (if any) whose after_turn_index+1 matches no turn in
+          // this conversation was captured after the LAST turn and never got
+          // a following turn to attach to as `precedingTakeover` - Feed renders
+          // it after the last run instead (see the state comment above).
+          const trailing = takeovers.find((tk) => !turnIndices.has(tk.after_turn_index + 1));
+          setTrailingTakeover(toPrecedingTakeover(trailing));
+
+          const lastTurn = turns[turns.length - 1];
+          if (lastTurn && lastTurn.session.status === "running") {
+            // Live re-attach: only one turn can ever be running at a time
+            // system-wide, so this mirrors the sessionId path below exactly -
+            // the bus replays its buffer; the idempotent reducer lands those
+            // events on top of the state above safely.
+            subscribeLive(lastTurn.session.id);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) setLoadError(e.message);
+        });
+    } else if (sessionId) {
+      getSession(sessionId)
+        .then(({ session, steps }) => {
+          if (cancelled) return;
+          setDashboard({ url: session.dashboard_url, name: session.dashboard_name });
+          const stepMap = new Map(steps.map((s) => [s.idx, mapStoredStepToStep(s)]));
+          setRuns([
+            {
+              sessionId: session.id,
+              question: session.question,
+              status: session.status,
+              finalAnswer: session.final_answer,
+              confidence: session.confidence,
+              error: session.error_message,
+              warnings: [],
+              steps: stepMap,
+              startedAt: session.created_at,
+              maxSteps: parseMaxSteps(session.config_json),
+            },
+          ]);
+          if (session.status === "running") {
+            // Live re-attach: the bus replays its buffer; the idempotent
+            // reducer lands those events on top of the state above safely.
+            subscribeLive(session.id);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) setLoadError(e.message);
+        });
+    }
+
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sessionId]);
+  }, [mode, sessionId, replayConversationId]);
 
   useEffect(() => {
     return () => unsubscribeRef.current?.();
@@ -346,9 +437,11 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
     connectionError,
     thumbnailUrl,
     everLive,
+    liveSessionIds,
     maxSteps,
     exampleQuestions,
     conversationId,
+    trailingTakeover,
     startQuestion,
     reconnect,
   };

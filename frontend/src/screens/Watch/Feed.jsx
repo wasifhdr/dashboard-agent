@@ -289,7 +289,7 @@ function OutcomeCard({ run }) {
   );
 }
 
-export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive }) {
+export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive, liveSessionIds, trailingTakeover }) {
   const scrollRef = useRef(null);
   const userScrolledUpRef = useRef(false);
 
@@ -335,7 +335,13 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
               const isSelected = selected?.runIdx === runIdx && selected?.stepIdx === stepIdx;
               const onSelect = () => onSelectStep({ runIdx, stepIdx });
 
-              if (isLive && !playback) {
+              // Scoped to the run(s) that were actually driven by a live SSE
+              // subscription (liveSessionIds), not every run in the thread -
+              // otherwise reattaching live to the running last turn of a
+              // replayed multi-turn conversation would also render earlier,
+              // already-resolved turns through LiveStepCard, spuriously
+              // re-typewriting their thoughts on load (review fix).
+              if (isLive && !playback && liveSessionIds?.has(run.sessionId)) {
                 return <LiveStepCard key={stepIdx} step={step} isSelected={isSelected} onSelect={onSelect} />;
               }
               const revealMode = revealModeFor(runIdx, stepIdx, playback, atOutcome);
@@ -346,6 +352,11 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
           </div>
         );
       })}
+      {/* A takeover captured after the LAST turn (e.g. right as a conversation
+          was closed, with no further turn ever asked) has no run to attach to
+          as `precedingTakeover` - render it as the final thread item instead
+          (docs/LIVE_TAKEOVER_PLAN.md §9 Phase B3). */}
+      {trailingTakeover && <TakeoverCard takeover={trailingTakeover} />}
     </div>
   );
 }

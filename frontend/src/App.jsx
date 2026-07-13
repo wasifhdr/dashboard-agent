@@ -7,7 +7,10 @@ import History from "./screens/History/History.jsx";
 export default function App() {
   const [view, setView] = useState("landing");
   const [watchTarget, setWatchTarget] = useState(null);
-  const [replaySessionId, setReplaySessionId] = useState(null);
+  // { kind: "conversation", id } | { kind: "session", id } | null. Discriminates
+  // whether Watch below gets a conversationId or a sessionId prop - constructed
+  // by History.jsx's row click handler, consumed only here.
+  const [replayTarget, setReplayTarget] = useState(null);
   const [watchHasActiveRun, setWatchHasActiveRun] = useState(false);
 
   function navigate(nextView) {
@@ -20,13 +23,13 @@ export default function App() {
 
   function openWatch(target) {
     setWatchTarget(target);
-    setReplaySessionId(null);
+    setReplayTarget(null);
     setWatchHasActiveRun(false);
     setView("watch");
   }
 
-  function openReplay(sessionId) {
-    setReplaySessionId(sessionId);
+  function openReplay(target) {
+    setReplayTarget(target);
     setWatchTarget(null);
     setWatchHasActiveRun(false);
     setView("watch");
@@ -35,15 +38,23 @@ export default function App() {
   return (
     <AppShell view={view} onNavigate={navigate}>
       {view === "landing" && <Landing onOpenWatch={openWatch} onOpenHistory={() => navigate("history")} />}
-      {view === "watch" && replaySessionId && (
+      {view === "watch" && replayTarget?.kind === "conversation" && (
         <Watch
           mode="replay"
-          sessionId={replaySessionId}
+          conversationId={replayTarget.id}
           onBack={() => navigate("history")}
           onActiveRunChange={setWatchHasActiveRun}
         />
       )}
-      {view === "watch" && !replaySessionId && watchTarget && (
+      {view === "watch" && replayTarget?.kind === "session" && (
+        <Watch
+          mode="replay"
+          sessionId={replayTarget.id}
+          onBack={() => navigate("history")}
+          onActiveRunChange={setWatchHasActiveRun}
+        />
+      )}
+      {view === "watch" && !replayTarget && watchTarget && (
         <Watch mode="live" dashboardTarget={watchTarget} onActiveRunChange={setWatchHasActiveRun} />
       )}
       {view === "history" && <History onOpenReplay={openReplay} onGoToLanding={() => navigate("landing")} />}

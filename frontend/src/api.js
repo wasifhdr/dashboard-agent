@@ -19,6 +19,12 @@ export async function listSessions() {
   return res.json();
 }
 
+export async function listStandaloneSessions() {
+  const res = await fetch("/api/sessions/standalone");
+  if (!res.ok) throw new Error(`GET /api/sessions/standalone failed: ${res.status}`);
+  return res.json();
+}
+
 export async function getSession(id) {
   const res = await fetch(`/api/sessions/${id}`);
   if (!res.ok) throw new Error(`GET /api/sessions/${id} failed: ${res.status}`);

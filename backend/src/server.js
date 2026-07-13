@@ -80,6 +80,20 @@ app.get("/api/sessions", (req, res) => {
   res.json(store.listSessions(50));
 });
 
+// Legacy standalone sessions only (never part of a conversation) - for the
+// History screen (docs/LIVE_TAKEOVER_PLAN.md Phase B3) to merge with the
+// enriched GET /api/conversations list without re-fetching turns that already
+// belong to a listed conversation. A literal path segment ("standalone"), not
+// a query param. IMPORTANT: this must stay registered BEFORE
+// GET /api/sessions/:id below - Express tries routes in registration order
+// and :id would otherwise greedily match "standalone" as an id (verified: a
+// param route registered first DOES swallow a literal route registered
+// after it - registration order matters in Express's default router, it is
+// not literal-before-param by default).
+app.get("/api/sessions/standalone", (req, res) => {
+  res.json(store.listStandaloneSessions(50));
+});
+
 // Builds the { session, steps } trajectory shape for one session (== one
 // conversation "turn", or a legacy standalone session). Shared by
 // GET /api/sessions/:id and GET /api/conversations/:id (turns[]) so both
@@ -366,7 +380,7 @@ app.post("/api/conversations/:id/close", async (req, res) => {
 });
 
 app.get("/api/conversations", (req, res) => {
-  res.json(store.listConversations(50));
+  res.json(store.listConversationsWithSummary(50));
 });
 
 app.get("/api/conversations/:id", (req, res) => {

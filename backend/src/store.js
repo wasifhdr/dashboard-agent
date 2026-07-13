@@ -197,6 +197,20 @@ export function listSessions(limit = 50) {
   return db.prepare(`SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?`).all(limit);
 }
 
+// Legacy standalone sessions only (conversation_id IS NULL) - i.e. turns that
+// were never part of a conversation (created before Phase B0, or by any
+// future caller that bypasses the conversation endpoints). Used by the
+// History screen (docs/LIVE_TAKEOVER_PLAN.md Phase B3) to merge with
+// listConversationsWithSummary() without re-fetching turns that already
+// belong to a listed conversation. listSessions() above is unchanged and
+// still returns every sessions row (conversations' turns included) for
+// existing callers like GET /api/sessions.
+export function listStandaloneSessions(limit = 50) {
+  return db
+    .prepare(`SELECT * FROM sessions WHERE conversation_id IS NULL ORDER BY created_at DESC LIMIT ?`)
+    .all(limit);
+}
+
 export function latestStep1ForDashboard(dashboardUrl) {
   return db
     .prepare(
@@ -246,6 +260,34 @@ export function getConversation(id) {
 
 export function listConversations(limit = 50) {
   return db.prepare(`SELECT * FROM conversations ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
+// Same rows as listConversations() plus per-conversation summary fields for
+// the History screen (docs/LIVE_TAKEOVER_PLAN.md Phase B3), computed via
+// correlated subqueries against sessions so the caller doesn't have to fetch
+// every conversation's turns just to show a row (avoids an N+1 fetch from the
+// frontend). This is a small local demo database (at most a handful of
+// conversations, each with a handful of turns), so a few correlated
+// subqueries per row is plenty - not worth a JOIN+GROUP BY here.
+// last_turn_at is the created_at of the most recent turn (null for a
+// zero-turn conversation) - History.jsx sorts/displays by this, falling back
+// to the conversation's own created_at, so a conversation doesn't look stale
+// just because it was first opened a while ago (review fix).
+export function listConversationsWithSummary(limit = 50) {
+  return db
+    .prepare(
+      `SELECT
+         c.*,
+         (SELECT COUNT(*) FROM sessions s WHERE s.conversation_id = c.id) AS turn_count,
+         (SELECT s.question FROM sessions s WHERE s.conversation_id = c.id ORDER BY s.turn_index DESC LIMIT 1) AS last_question,
+         (SELECT s.final_answer FROM sessions s WHERE s.conversation_id = c.id ORDER BY s.turn_index DESC LIMIT 1) AS last_answer,
+         (SELECT s.status FROM sessions s WHERE s.conversation_id = c.id ORDER BY s.turn_index DESC LIMIT 1) AS last_status,
+         (SELECT s.created_at FROM sessions s WHERE s.conversation_id = c.id ORDER BY s.turn_index DESC LIMIT 1) AS last_turn_at
+       FROM conversations c
+       ORDER BY c.created_at DESC
+       LIMIT ?`,
+    )
+    .all(limit);
 }
 
 export function getConversationTurns(conversationId) {

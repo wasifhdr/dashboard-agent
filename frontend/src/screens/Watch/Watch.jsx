@@ -29,13 +29,14 @@ function flattenSteps(runs) {
 // follow-up) questions on `dashboardTarget` via the Composer; `mode ===
 // "replay"` loads a historical session (live re-attaching automatically if
 // it's still running - see useSessionStream's replay branch).
-export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActiveRunChange }) {
+export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onActiveRunChange }) {
   const stream = useSessionStream(mode, {
     sessionId,
+    conversationId,
     dashboardUrl: dashboardTarget?.url,
     dashboardName: dashboardTarget?.name,
   });
-  const { dashboard, runs, loadError } = stream;
+  const { dashboard, runs, loadError, trailingTakeover } = stream;
   // Live, read-only screencast of the agent's browser (Phase B1). Connects
   // once the conversation exists (after the first turn's dashboard load).
   const live = useLiveChannel(stream.conversationId);
@@ -248,6 +249,8 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
                 playback={sequencer.playback}
                 atOutcome={sequencer.atOutcome}
                 isLive={stream.everLive}
+                liveSessionIds={stream.liveSessionIds}
+                trailingTakeover={trailingTakeover}
               />
             </div>
             <div className={cx("h-full", activeTab === "inspect" ? "" : "hidden")}>
