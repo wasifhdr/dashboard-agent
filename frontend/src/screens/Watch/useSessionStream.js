@@ -205,6 +205,14 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   // to, so it must trigger a re-render when the conversation is created.
   const conversationIdRef = useRef(null);
   const [conversationId, setConversationId] = useState(null);
+  // Holds the in-flight createConversation() promise for the window between
+  // startQuestion's first call and that POST resolving - conversationIdRef is
+  // still null for that whole window (up to ~90s: the dashboard is opening),
+  // so a caller that needs the id right now (e.g. Watch's End-session button,
+  // which can be clicked during that window) can await this instead of
+  // silently treating "no id yet" as "no conversation exists" - see
+  // getConversationId below.
+  const pendingConversationRef = useRef(null);
 
   function applyEvent(runSessionId, evt) {
     setRuns((prev) => {
@@ -264,10 +272,13 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
     // the pre-fix behavior where a failure left `runs` untouched.
     try {
       if (isFirstTurn) {
-        const { conversation_id } = await createConversation({
+        const createPromise = createConversation({
           dashboardUrl: dashboard.url,
           dashboardName: dashboard.name,
         });
+        pendingConversationRef.current = createPromise;
+        const { conversation_id } = await createPromise;
+        pendingConversationRef.current = null;
         conversationIdRef.current = conversation_id;
         setConversationId(conversation_id);
       }
@@ -292,9 +303,30 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
       subscribeLive(session_id);
       return session_id;
     } catch (err) {
-      if (isFirstTurn) setRuns([]);
+      if (isFirstTurn) {
+        setRuns([]);
+        pendingConversationRef.current = null;
+      }
       throw err;
     }
+  }
+
+  // Resolves to the conversation id this Watch instance is driving, waiting
+  // out an in-flight createConversation() call if one is still pending
+  // (rather than the caller treating a not-yet-populated conversationIdRef as
+  // "no conversation exists" - see pendingConversationRef above). Resolves to
+  // null only when no conversation was ever created (or its creation failed).
+  async function getConversationId() {
+    if (conversationIdRef.current) return conversationIdRef.current;
+    if (pendingConversationRef.current) {
+      try {
+        const { conversation_id } = await pendingConversationRef.current;
+        return conversation_id;
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   // Dashboard thumbnail (for Stage's loading state) + global maxSteps.
@@ -444,5 +476,6 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
     trailingTakeover,
     startQuestion,
     reconnect,
+    getConversationId,
   };
 }

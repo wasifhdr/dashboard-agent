@@ -23,6 +23,26 @@ import { cx } from "../../components/ui/cx.js";
 // string the WS contract (and Playwright's page.mouse API) expects.
 const BUTTON_NAMES = { 0: "left", 1: "middle", 2: "right" };
 
+// Maps the server's terminal {type:"closed", reason} strings (see
+// conversationRuntime.js / docs/LIVE_TAKEOVER_PLAN.md §9 Phase B4) to a
+// short, human-readable line. This is a LiveStage-local sibling of
+// warningLabels.js's WARNING_LABEL - same lookup-object pattern, but for the
+// live-connection error surface (a different, transport-level concept from
+// the orchestrator-level `run.warnings` StatusBar renders). Any reason not
+// listed here - including a missing/unrecognized one - falls back to the
+// generic message rather than being left unhandled.
+const CLOSED_REASON_LABEL = {
+  idle_timeout: "This session was closed after being idle.",
+  browser_crashed: "The dashboard browser crashed. Start a new conversation to continue.",
+  screencast_failed:
+    "The live view failed to start. Per-step frames are still available; try a new conversation for the live view.",
+  conversation_closed: "This session has ended.",
+};
+
+function closedReasonMessage(reason) {
+  return CLOSED_REASON_LABEL[reason] ?? "This session has ended.";
+}
+
 // Keys that would otherwise have an unwanted side effect *inside* this
 // focused capture layer (move focus away, scroll the containing page) if
 // left to the browser's default handling - preventDefault only for these,
@@ -156,6 +176,7 @@ export default function LiveStage({
   viewport,
   mode,
   connected,
+  closedReason = null,
   sendInput = () => {},
   dashboardName = null,
 }) {
@@ -245,6 +266,19 @@ export default function LiveStage({
           {interactive && (
             <div className="pointer-events-none absolute right-3 top-3">
               <Badge variant="success">Yours — click to interact</Badge>
+            </div>
+          )}
+
+          {/* Terminal-close overlay: the server ended the live channel for
+              good (idle timeout, crash, screencast failure, explicit close) -
+              distinct from a transient reconnect-in-progress drop, which
+              leaves closedReason null and keeps showing the ordinary
+              Connecting…/Waiting… spinner state below. Covers whatever was
+              last on screen (a frozen last frame, or nothing yet). */}
+          {closedReason && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-canvas/90 p-6 text-center backdrop-blur-sm">
+              <Badge variant="neutral">Live view ended</Badge>
+              <p className="max-w-sm text-sm text-fg/70">{closedReasonMessage(closedReason)}</p>
             </div>
           )}
         </div>

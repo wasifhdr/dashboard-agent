@@ -8,6 +8,12 @@ import { openLiveChannel } from "../../api.js";
 //   - vizBox / viewport: normalized viz rectangle for cropping the frame
 //   - mode: 'agent' while a turn is running (veil), else 'idle'
 //   - connected: socket open?
+//   - closedReason: the `reason` string from the server's terminal
+//     {type:"closed", reason} message (e.g. "idle_timeout", "browser_crashed",
+//     "screencast_failed", "conversation_closed"), or null while the channel
+//     hasn't received one yet. Purely informational - storing/exposing it
+//     does not change reconnect behavior, which still stops for good on any
+//     {type:"closed"} exactly as before.
 //   - sendInput(msg): forwards one mouse/key message (B2 WS contract) to the
 //     server; a no-op before the first connection, and throttled for
 //     {type:"mouse", event:"move"} messages only (~30fps) - down/up/click/
@@ -22,6 +28,7 @@ export function useLiveChannel(conversationId) {
   const [viewport, setViewport] = useState(null);
   const [mode, setMode] = useState("idle");
   const [connected, setConnected] = useState(false);
+  const [closedReason, setClosedReason] = useState(null);
 
   const frameUrlRef = useRef(null);
   // Set inside the effect below (per conversationId/channel) so sendInput -
@@ -51,6 +58,7 @@ export function useLiveChannel(conversationId) {
     setViewport(null);
     setMode("idle");
     setConnected(false);
+    setClosedReason(null);
 
     // Forwards one input message through whichever channel is currently open
     // (or no-ops if none is). Only outbound mouse-move is throttled - it's
@@ -106,8 +114,9 @@ export function useLiveChannel(conversationId) {
         onUnlock: () => {
           if (!disposed) setMode("idle");
         },
-        onClosed: () => {
+        onClosed: (reason) => {
           serverClosed = true;
+          if (!disposed) setClosedReason(reason || "conversation_closed");
         },
         onClose: () => {
           if (disposed) return;
@@ -144,5 +153,5 @@ export function useLiveChannel(conversationId) {
   // depend on it without re-subscribing to anything.
   const sendInput = useCallback((msg) => sendInputRef.current(msg), []);
 
-  return { liveFrameUrl, vizBox, viewport, mode, connected, sendInput };
+  return { liveFrameUrl, vizBox, viewport, mode, connected, closedReason, sendInput };
 }

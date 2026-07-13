@@ -35,6 +35,18 @@ export default function App() {
     setView("watch");
   }
 
+  // Explicit "End session" on a live conversation (Watch's StatusBar, Phase
+  // B4). Only fires after the conversation has actually been closed
+  // server-side (or never existed), so — unlike navigate() — there's no
+  // still-running conversation left behind to confirm about. Goes to
+  // "history" to mirror the replay branches' own onBack, which land there too.
+  function endLiveWatch() {
+    setWatchTarget(null);
+    setReplayTarget(null);
+    setWatchHasActiveRun(false);
+    setView("history");
+  }
+
   return (
     <AppShell view={view} onNavigate={navigate}>
       {view === "landing" && <Landing onOpenWatch={openWatch} onOpenHistory={() => navigate("history")} />}
@@ -55,7 +67,12 @@ export default function App() {
         />
       )}
       {view === "watch" && !replayTarget && watchTarget && (
-        <Watch mode="live" dashboardTarget={watchTarget} onActiveRunChange={setWatchHasActiveRun} />
+        <Watch
+          mode="live"
+          dashboardTarget={watchTarget}
+          onActiveRunChange={setWatchHasActiveRun}
+          onEnd={endLiveWatch}
+        />
       )}
       {view === "history" && <History onOpenReplay={openReplay} onGoToLanding={() => navigate("landing")} />}
     </AppShell>

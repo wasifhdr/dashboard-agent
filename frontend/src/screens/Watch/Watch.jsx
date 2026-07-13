@@ -3,7 +3,7 @@ import { useSessionStream } from "./useSessionStream.js";
 import { useLiveChannel } from "./useLiveChannel.js";
 import { useBeatSequencer } from "./useBeatSequencer.js";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
-import { stopSession } from "../../api.js";
+import { closeConversation, stopSession } from "../../api.js";
 import StatusBar from "./StatusBar.jsx";
 import Stage from "./Stage.jsx";
 import LiveStage from "./LiveStage.jsx";
@@ -29,17 +29,21 @@ function flattenSteps(runs) {
 // follow-up) questions on `dashboardTarget` via the Composer; `mode ===
 // "replay"` loads a historical session (live re-attaching automatically if
 // it's still running - see useSessionStream's replay branch).
-export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onActiveRunChange }) {
+export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onEnd, onActiveRunChange }) {
   const stream = useSessionStream(mode, {
     sessionId,
     conversationId,
     dashboardUrl: dashboardTarget?.url,
     dashboardName: dashboardTarget?.name,
   });
-  const { dashboard, runs, loadError, trailingTakeover } = stream;
+  // Renamed on destructure: `conversationId` above is the incoming replay
+  // prop; `stream.conversationId` is the live conversation this Watch
+  // instance itself created (null until the first turn, and always null in
+  // replay mode) - the one the End-session control and live channel need.
+  const { dashboard, runs, loadError, trailingTakeover, conversationId: liveConversationId } = stream;
   // Live, read-only screencast of the agent's browser (Phase B1). Connects
   // once the conversation exists (after the first turn's dashboard load).
-  const live = useLiveChannel(stream.conversationId);
+  const live = useLiveChannel(liveConversationId);
   const sequencer = useBeatSequencer(runs);
   const [manualSelected, setManualSelected] = useState(null);
   const [followLive, setFollowLive] = useState(mode === "live");
@@ -137,6 +141,27 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
     if (lastRun?.sessionId) await stopSession(lastRun.sessionId);
   }
 
+  // Explicit "End session" (Phase B4). If a turn is currently running, the
+  // backend's close endpoint 409s with a clear message ("A turn is currently
+  // running on this conversation...") - StatusBar surfaces that rather than
+  // this hook guarding against it, per docs/LIVE_TAKEOVER_PLAN.md §9 Phase
+  // B4 item 2's turn-while-locked error-taxonomy requirement. When no
+  // conversation has been created yet (mode==="live" but no question asked),
+  // there's nothing server-side to close, so this just navigates away.
+  //
+  // stream.getConversationId() (rather than reading liveConversationId
+  // directly) matters for the very first turn: clicking this while the first
+  // turn's dashboard is still opening would otherwise see liveConversationId
+  // still null (createConversation's POST hasn't resolved yet) and skip the
+  // close entirely, leaking the conversation the moment it finishes opening
+  // server-side - getConversationId awaits that in-flight creation instead of
+  // treating "not known yet" as "doesn't exist".
+  async function handleEndSession() {
+    const id = await stream.getConversationId();
+    if (id) await closeConversation(id);
+    onEnd?.();
+  }
+
   if (mode === "replay" && loadError) {
     return <div className="p-6 text-sm text-coral-ink">Failed to load session: {loadError}</div>;
   }
@@ -159,8 +184,15 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
 
   // Show the live screencast when following the running/idle conversation and
   // the WS is connected; scrubbing a past step or replaying falls back to the
-  // per-step Stage frame (which is what's persisted).
-  const showLive = !isPureReplay && followLive && live.connected;
+  // per-step Stage frame (which is what's persisted). Also keep showing it
+  // once live.closedReason is set even though live.connected has since
+  // flipped false: the server's close() sequence broadcasts {type:"closed"}
+  // and THEN closes the socket, so `connected` goes false moments after
+  // `closedReason` is set for 3 of the 4 terminal reasons (idle_timeout,
+  // browser_crashed, conversation_closed) - without this, LiveStage (the only
+  // place that renders the "why did this end" overlay) would get swapped out
+  // for the frozen last-step Stage before the user can read it.
+  const showLive = !isPureReplay && followLive && (live.connected || !!live.closedReason);
 
   return (
     <div className="flex h-full flex-col">
@@ -177,6 +209,9 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
         isPlaying={sequencer.isPlaying}
         onTogglePlay={togglePlay}
         showPlayButton={canPlay}
+        showEndSession={mode === "live"}
+        isRunning={isRunning}
+        onEndSession={handleEndSession}
       />
 
       {showConnectionBanner && (
@@ -197,6 +232,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               viewport={live.viewport}
               mode={live.mode}
               connected={live.connected}
+              closedReason={live.closedReason}
               sendInput={live.sendInput}
               dashboardName={dashboard?.name}
             />

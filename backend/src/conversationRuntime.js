@@ -79,6 +79,11 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     everyNthFrame: sc.everyNthFrame ?? 1,
     vizboxPollMs: sc.vizboxPollMs ?? 1000,
   };
+  // Idle-timeout tuning, with the same guarded-fallback pattern as SC above so
+  // an older config.json (no `conversationIdleMs`) never crashes the runtime.
+  // 30 minutes is a reasonable default for an unattended, no-turn-running
+  // conversation on a single-user local demo box.
+  const IDLE_TIMEOUT_MS = config.conversationIdleMs ?? 30 * 60 * 1000;
 
   let context;
   let page;
@@ -95,6 +100,17 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     }
     throw new Error(`Dashboard failed to load: ${e.message}`);
   }
+
+  // Phase B4: a page that opened successfully can still die later (renderer
+  // crash, OOM, etc.) - Playwright surfaces that as a one-shot "crash" event.
+  // There is no recovery path for a crashed page; close the conversation
+  // cleanly (same close()/broadcast machinery as any other close, so the
+  // frontend gets a distinguishable {type:"closed", reason:"browser_crashed"})
+  // so the user can start a fresh conversation. Fire-and-forget, like every
+  // other close() call site triggered from an event handler in this file.
+  page.once("crash", () => {
+    close("browser_crashed").catch(() => {});
+  });
 
   store.createConversation({
     id,
@@ -116,6 +132,7 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   let openTakeover = null; // { afterTurnIndex, startedAt, beforeFramePath, beforeInventory, eventLogStartLength } | null
   const heldMouseButtons = new Set(); // buttons dispatchInput has pressed but not yet released
   const heldKeys = new Set(); // keys dispatchInput has pressed but not yet released
+  let idleTimer = null; // self-managed idle-auto-close timer (Phase B4) - see scheduleIdleTimer/cancelIdleTimer
 
   function broadcast(msg) {
     const payload = JSON.stringify(msg);
@@ -209,6 +226,16 @@ export async function createRuntime({ browser, config, conversationId, dashboard
       });
     } catch {
       screencasting = false;
+      // The connected client(s) would otherwise never learn the live view
+      // failed to start - they'd just see no frames, indistinguishable from
+      // a slow-starting one. Reuse the existing "closed" message type
+      // deliberately: a screencast that failed to start can't recover on its
+      // own (retrying won't help without restarting the whole page), so this
+      // is closer to "this live session is over" than a transient drop. Only
+      // the screencast subsystem failed though - do NOT call close() here,
+      // the page/conversation may still be perfectly usable for turns, just
+      // without a live view.
+      broadcast({ type: "closed", reason: "screencast_failed" });
       return;
     }
     scheduleVizbox();
@@ -231,6 +258,11 @@ export async function createRuntime({ browser, config, conversationId, dashboard
 
   // Ref-counted by client count: encode frames only while someone is watching.
   async function addClient(ws) {
+    // A client connecting means someone is watching - not idle, regardless
+    // of what happens further below (including the early-return for an
+    // already-closed runtime, where this is a harmless no-op since close()
+    // already cancelled the timer for good).
+    cancelIdleTimer();
     if (closed) {
       try {
         ws.close();
@@ -273,6 +305,13 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     clients.delete(ws);
     if (clients.size === 0) {
       await stopScreencast();
+      // The last watcher just left. Only start the idle clock if the agent
+      // isn't mid-turn (a turn in flight already has its own reason not to
+      // be idle-closed, and setMode('idle') will schedule it when the turn
+      // ends anyway).
+      if (mode !== "agent") {
+        scheduleIdleTimer();
+      }
     }
   }
 
@@ -299,6 +338,33 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     heldKeys.clear();
   }
 
+  // --- Idle-timeout auto-close (Phase B4) ---------------------------------
+  //
+  // The conversation is "unattended" - and only then should the clock be
+  // running - exactly when nobody is connected to the live channel AND no
+  // agent turn is in flight (clients.size === 0 && mode !== 'agent'). Every
+  // call site that can change either of those two conditions is responsible
+  // for cancelling/rescheduling: addClient, removeClient, and setMode below.
+  function cancelIdleTimer() {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function scheduleIdleTimer() {
+    if (closed) return; // close() already tore down this runtime - never re-arm after that
+    cancelIdleTimer();
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      // Re-check on fire in case something raced the timeout (defensive -
+      // every mutating call site already cancels/reschedules correctly, but
+      // this keeps the check self-contained rather than trust-only).
+      if (closed || clients.size !== 0 || mode === "agent") return;
+      close("idle_timeout").catch(() => {});
+    }, IDLE_TIMEOUT_MS);
+  }
+
   // server.js calls this at turn start ('agent') and turn end ('idle').
   function setMode(newMode) {
     if (newMode === "agent" && mode !== "agent") {
@@ -310,6 +376,15 @@ export async function createRuntime({ browser, config, conversationId, dashboard
       // first, mutex-establishing statement in server.js's startTurn, and
       // must not become async itself.
       releaseHeldInput().catch(() => {});
+    }
+    if (newMode === "agent") {
+      // A turn starting means the conversation is in active use - not idle,
+      // regardless of how many clients are connected.
+      cancelIdleTimer();
+    } else if (clients.size === 0) {
+      // A turn just ended (or mode was already non-agent) and still nobody
+      // is watching - the idle clock should be running.
+      scheduleIdleTimer();
     }
     mode = newMode;
     broadcast({ type: newMode === "agent" ? "lock" : "unlock" });
@@ -563,6 +638,11 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   async function close(reason = "conversation_closed") {
     if (closed) return;
     closed = true;
+    // Always cancel the idle timer here too, alongside the openTakeover
+    // backstop below - close() must remain safe to call from any path
+    // (explicit close, idle firing itself, a crash listener, a replaced
+    // conversation) without a stray timer firing after teardown.
+    cancelIdleTimer();
     // Backstop: if the user took over and the conversation is closed (or
     // replaced) without another question ever being asked, still finalize
     // and persist that takeover window here - before any teardown, since it
@@ -644,6 +724,14 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     captureTakeoverStart,
     captureTakeoverEnd,
   };
+
+  // Start the idle clock immediately: at this point clients.size === 0 and
+  // mode === 'idle' (nobody has connected or started a turn yet), which is
+  // exactly the "unattended" condition the timer exists to catch. This is
+  // what makes a conversation that's created but never gets a first turn (or
+  // a first viewer) eligible for automatic idle reclaim, same as any other
+  // quiet period - not a special case, just the timer's normal start state.
+  scheduleIdleTimer();
 
   return runtime;
 }

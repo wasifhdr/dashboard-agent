@@ -2,7 +2,7 @@
 
 Local VLM agent that answers questions about interactive Tableau Public dashboards by operating them (filters, parameters, tabs) through the Tableau Embedding API v3, with every step (reasoning, action, screenshot) recorded and viewable in a trajectory viewer.
 
-See [AGENT_PLAN.md](../AGENT_PLAN.md) (one level up) for the full build plan, architecture, and contracts. All 4 planned phases are complete - see [Setup](#setup) to run it, or the phase-by-phase history below for how it got here.
+See [docs/AGENT_PLAN.md](docs/AGENT_PLAN.md) for the original agent build plan, architecture, and contracts - all 4 phases are complete. See [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md) for the live, multi-turn conversation & takeover system built on top of it (Phases B0-B4, also complete, with one regression check still pending - see the Status entry below). [Setup](#setup) gets it running; the phase-by-phase history below covers how it got here.
 
 ## Status
 
@@ -52,27 +52,51 @@ Verified end-to-end in a real browser (Chrome via the preview tool, not just cur
 - **Batch eval harness** (`eval.js`, `eval/questions.json`): runs a list of questions sequentially against one shared browser, writes `eval/results.csv` (id, question, dashboard, answer, status, steps, duration, session id, error). Each question runs in its own try/catch so one crashing question can't take down the batch. 10 questions span all 5 dashboards and exercise every action type, including `set_range_filter`, which no earlier question had covered.
 - **Model A/B** (`scripts/start-llama-stock.ps1`, `eval/reading/`, `eval/reading-bench.js`): a 10-crop chart-reading micro-benchmark built from real, already-visually-verified session frames, comparing the Jackrong Claude-Opus-reasoning distill against the stock `Qwen3.5-4B` base it was fine-tuned from (same base family; the stock build available locally is Q6_K rather than Q4_K_M, a minor quantization mismatch worth noting). See [Model A/B results](#model-ab-results) below.
 
+**Phases B0-B4 complete.** The live, multi-turn conversation & takeover system - see [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md) for the full build plan, data model, and transport contracts. This turns "one question = one fresh Playwright page, reset to the dashboard's default state" into "one **conversation** = one persistent browser context the user can watch live and briefly drive between turns":
+
+- **`src/conversationRuntime.js`** (new) - the single owner of a conversation's long-lived Playwright context+page. `createRuntime()` opens the dashboard once (not per question) and keeps it alive across every turn; it exposes `addClient`/`removeClient`/`broadcast` for the live WebSocket, `setMode("idle"|"agent")` as the turn-based input lock, `dispatchInput()` for forwarded mouse/keyboard, and `captureTakeoverStart()`/`captureTakeoverEnd()` for before/after takeover bookkeeping. `close(reason)` tears everything down on an explicit close, an idle timeout, or an unrecoverable page crash.
+- **`store.js`** gained a `conversations` table, `sessions.conversation_id`/`turn_index` columns (a "session" row is now one turn inside a conversation - legacy rows with `conversation_id IS NULL` still replay standalone exactly as before), and a `takeovers` table (before/after frame paths, inventory JSON, a slice of the bridge's event log, and a computed diff) - all additive migrations, the same guarded-`ALTER TABLE` idiom as Phase 3's `error_message` column.
+- **`orchestrator.js`**'s `runSession` gained reuse-page options (`page`, `ownsPage:false`, `conversationId`, `turnIndex`) that all default to today's behavior, so `run.js` and the batch harness are untouched - a turn is the identical perceive→inventory→prompt→validate→execute→settle→persist loop, it just runs on a page the conversation runtime already opened instead of opening (and closing) its own.
+- **Live view.** The runtime starts a CDP `Page.startScreencast` session and streams frames plus viz-geometry (`vizbox`) updates over a new per-conversation `WS /api/conversations/:id/live` (Origin-checked in `server.js`'s `attachLiveWebSocket()` against the same allowlist the Express CORS config uses). `frontend/src/screens/Watch/useLiveChannel.js` consumes it and exposes `{liveFrameUrl, vizBox, mode, connected, closedReason}`; `LiveStage.jsx` renders the live frame with a lock veil while `mode==="agent"`.
+- **Takeover.** Between turns, `mode` flips so forwarded mouse/keyboard actually reaches the page - the user can click a filter, drag a range slider, or switch tabs directly on the live dashboard, and the *next* turn resumes from whatever state that leaves (the agent's own reasoning history/loop-guard/inventory IDs still reset per turn; only the dashboard's physical state carries over). A `lock`/`unlock` broadcast ensures only one actor drives at a time. Each takeover's before/after frame + inventory diff is persisted and rendered as a card in the thread.
+- **`server.js`** replaced the old one-session boolean with conversation-aware state (`turnRunning`, `conversationOpening`, `stopRequests`) and added `POST /api/conversations`, `POST /api/conversations/:id/turns`, `POST /api/conversations/:id/close`, `GET /api/conversations`, `GET /api/conversations/:id` (full multi-turn + takeover replay). `POST /api/sessions` is kept as a backward-compatible shim; the CLI still calls `runSession` directly and never touches HTTP.
+- **Replay + History.** `GET /api/conversations/:id` returns every turn's full trajectory plus takeovers in order, replayed with no live processes running. `store.listConversationsWithSummary()` backs a unified History list (turn count, dashboard, last question/answer/status) alongside legacy standalone sessions.
+- **Lifecycle hardening (B4).** An idle timer (`conversationIdleMs` in `config.json`, 30 minutes) auto-closes an unattended conversation; a `page.once("crash", ...)` listener closes the runtime on an unrecoverable browser crash instead of leaving it hung forever; a screencast-start failure now broadcasts `{type:"closed", reason:"screencast_failed"}` instead of silently leaving the live view blank (per-turn frames still work either way). A new "End session" control in `StatusBar.jsx` closes the conversation explicitly from the UI (shows an inline error and stays put if a turn is running), and `useLiveChannel.js`/`LiveStage.jsx` now surface *why* a live connection ended - idle timeout, browser crash, screencast failure, or an explicit close - instead of a generic "disconnected" state.
+
+**Not yet done:** the frozen-core regression re-run called for in `LIVE_TAKEOVER_PLAN.md` §9 Phase B4 item 5 - re-running the smoke set and `npm run eval -- eval/questions.json` against a baseline captured before B0, to confirm the reuse-page changes to `orchestrator.js` didn't shift any answers. The [Model A/B results](#model-ab-results) and [Batch eval harness results](#batch-eval-harness-results) below predate this refactor; `orchestrator.js`'s reuse-page changes are additive and default-preserving and the CLI path still runs fine by hand, but the full comparison hasn't been re-run against a pre-B0 baseline yet - that's a pending, separate step, not a completed one.
+
 See [Setup](#setup), [Demo script](#demo-script), and [Troubleshooting](#troubleshooting) below.
 
 ## Architecture
 
 ```
-                    ┌───────────── React Trajectory Viewer (Vite, :5173) ─────────────┐
-                    │  Launcher · StepTimeline · Stage (SVG overlays) · DetailsPanel   │
-                    └───────────▲──────────────────────────────▲──────────────────────┘
-                                │ REST (start/list/replay)      │ SSE (live steps)
-                    ┌───────────┴──────────────────────────────┴──────────────────────┐
-                    │            Node backend (Express, ESM, :8788)                    │
-                    │  Orchestrator: agent loop, step budget, loop guard, settle gate   │
-                    │    ├─ Perception:  Playwright → screenshot of embedded viz        │
-                    │    ├─ Grounding:   control inventory via Embedding API bridge     │
-                    │    ├─ Actuation:   bridge calls (filters/params/sheets)           │
-                    │    ├─ VLM client:  llama-server (OpenAI-compatible, :8080)        │
-                    │    └─ Store:       better-sqlite3 (sessions/steps) + PNG frames   │
-                    │  sessionBus.js fans live events out over SSE                      │
-                    └───────────┬─────────────────────────────────────────────────────┘
-                                │ Playwright drives one shared long-lived browser
-                    ┌───────────┴────────────────────────────┐   ┌───────────────────┐
+                    ┌────────── React "Docent" Viewer (Vite, :5173) ───────────────────┐
+                    │  Landing · Watch (LiveStage + Stage + StatusBar) · History        │
+                    └───────▲───────────────────────▲────────────────────▲─────────────┘
+                            │ REST (conversations /  │ SSE (per-turn      │ WS (live
+                            │ turns / replay)        │ step events)       │ screencast + input)
+                    ┌───────┴───────────────────────┴────────────────────┴─────────────┐
+                    │            Node backend (Express, ESM, :8788)                     │
+                    │  conversationRuntime.js: ONE persistent Playwright context+page    │
+                    │  per conversation - opened once, kept alive across every turn,     │
+                    │  torn down on explicit close / idle timeout / page crash           │
+                    │    ├─ CDP screencast + vizbox geometry → broadcast over live WS     │
+                    │    ├─ dispatchInput(): forwarded mouse/keyboard, turn-based lock     │
+                    │    └─ captureTakeoverStart/End(): before/after frame+inventory diff  │
+                    │  Orchestrator: a "turn" runs the same agent loop (step budget,       │
+                    │  loop guard, settle gate) on the runtime's already-open page          │
+                    │  instead of opening/closing its own                                  │
+                    │    ├─ Perception:  Playwright → screenshot of embedded viz            │
+                    │    ├─ Grounding:   control inventory via Embedding API bridge          │
+                    │    ├─ Actuation:   bridge calls (filters/params/sheets)                │
+                    │    ├─ VLM client:  llama-server (OpenAI-compatible, :8080)              │
+                    │    └─ Store:       better-sqlite3 (conversations/sessions/takeovers/     │
+                    │                    steps) + PNG frames, never deleted                   │
+                    │  sessionBus.js fans per-turn step events out over SSE                    │
+                    └───────┬───────────────────────────────────────────────────────────────┘
+                            │ Playwright drives ONE shared long-lived browser
+                            │ (one persistent context+page per active conversation)
+                    ┌───────┴────────────────────────────────┐   ┌───────────────────┐
                     │ host.html (served by backend, loaded    │   │ llama-server        │
                     │ in the Playwright browser, NOT the       │   │ (:8080)              │
                     │ user's): <tableau-viz> + window.         │   │ Qwen3.5-4B distill    │
@@ -80,20 +104,24 @@ See [Setup](#setup), [Demo script](#demo-script), and [Troubleshooting](#trouble
                     └──────────────────────────────────────────┘   └───────────────────┘
 ```
 
-The user's browser never embeds the Tableau viz directly - Tableau renders marks to canvas inside a cross-origin iframe, which the user's own page JS can't screenshot or introspect. Playwright, operating at the browser-automation level, can. The React viewer only ever displays frames/events streamed from the backend.
+The user's browser never embeds the Tableau viz directly - Tableau renders marks to canvas inside a cross-origin iframe, which the user's own page JS can't screenshot or introspect. Playwright, operating at the browser-automation level, can.
+
+A **conversation** now owns one persistent Playwright context+page for its whole lifetime (`conversationRuntime.js`); a **question** is a **turn** within that conversation, running the identical perceive→act→settle agent loop but resuming into whatever state the previous turn - or a user takeover in between - left the dashboard in, instead of reloading it from scratch. The React viewer consumes two independent streams from the backend: the persisted per-step trajectory (frames/events over REST+SSE, exactly as before Phase B0) and, while a conversation is live, a real-time CDP screencast plus a forwarded-input channel over WebSocket, for watching and briefly driving the actual browser between turns.
 
 ## Layout
 
 ```
 backend/    Node ESM backend (Express, Playwright, better-sqlite3, VLM client, orchestrator)
-  src/            core modules (perception, inventory, vlmClient, actuator, orchestrator, store, server, sessionBus)
+  src/            core modules (perception, inventory, vlmClient, actuator, orchestrator, store, server, sessionBus,
+                   conversationRuntime - persistent per-conversation Playwright context/page + live screencast/input, B0-B4)
   public/         host.html (the Tableau embed page Playwright loads)
   scripts/        llama-server launchers + vision smoke test
   eval/           questions.json, smoke-questions.json, reading/ (micro-benchmark), results.csv
   run.js          CLI: node run.js <tableau-url> "<question>"
   probe.js        Phase-0-style manual dashboard validator
   eval.js         batch harness: node eval.js [questions.json]
-frontend/   Vite + React trajectory viewer (dark theme, no UI framework)
+frontend/   Vite + React "Docent" UI - Landing (marketing/picker), Watch (live view + step replay), History (unified list)
+docs/       AGENT_PLAN.md + LIVE_TAKEOVER_PLAN.md (build plans) and DESIGN.md (design system)
 ```
 
 ## Setup
@@ -136,7 +164,20 @@ Open `http://localhost:5173`.
 
 ## Demo script
 
-For a live audience, **the Zillow Rent Index tab-switch question is the strongest single demo**: it's fast (2 steps, ~15-20s total), it visibly exercises a *real* multi-tab workbook switch (not just a filter), and the final answer is easy for an audience to verify against the screenshot themselves.
+**With live conversations (B0-B4) in place, lead with the two-turn Zillow conversation that includes a manual takeover in between** - it's the demo that actually shows off what this phase built, rather than just the per-step agent loop the earlier demos below already covered: the dashboard stays open across turns, the audience watches the agent work in the **live** view (not just per-step frames), then the presenter takes the wheel for a few seconds before handing it back.
+
+```
+Dashboard:  Zillow Home Value Index (April 2019)
+Turn 1:     What is the ZHVI (median home value) for Boston, MA according to the dashboard?
+Turn 1 →    $465,000 (agent answers live; the lock veil then lifts)
+Takeover:   click the ZRI dashboard tab yourself, directly in the live view
+Turn 2:     Report the current Zillow Rent Index (ZRI) value shown for the United States.
+Turn 2 →    $1,477 (agent reads the tab you switched to - it never reloads or re-picks the tab itself)
+```
+
+Narrate it as: ask the first question and watch Docent answer live, the same as before; once it finishes, the lock veil disappears and the "Yours" badge appears - switch to the ZRI tab yourself instead of asking the agent to; then ask the follow-up and watch it answer from the state *you* left it in. That last beat - a turn resuming into a human's manual edit, on the same live page, with no reload - is the concrete payoff of the whole persistent-conversation system and the one moment worth building the demo around.
+
+For a **quick single-turn fallback** (if the live WebSocket isn't cooperating, or time is short): the Zillow Rent Index tab-switch question on its own is still fast (2 steps, ~15-20s total) and visibly exercises a *real* multi-tab workbook switch, with the agent doing the tab switch itself.
 
 ```
 Dashboard: Zillow Home Value Index (April 2019)
@@ -144,7 +185,7 @@ Question:  Switch to the ZRI dashboard tab and report the current Zillow Rent In
 Expected:  $1,477
 ```
 
-For a **second, richer demo** that shows the system recovering from a mistake (a good "look how it handles a hard case" moment): the Boston ZHVI question. This dashboard has a decoy parameter that isn't wired to anything, so the agent tries it, gets rejected by the loop guard, and self-corrects to the real filter within a few steps - a genuinely interesting trajectory to narrate live.
+For a **richer single-turn demo** that shows the system recovering from a mistake (a good "look how it handles a hard case" moment): the Boston ZHVI question on its own. This dashboard has a decoy parameter that isn't wired to anything, so the agent tries it, gets rejected by the loop guard, and self-corrects to the real filter within a few steps - a genuinely interesting trajectory to narrate live, and also exactly what happens inside Turn 1 of the lead demo above if you want to call attention to it there instead.
 
 ```
 Dashboard: Zillow Home Value Index (April 2019)
@@ -188,7 +229,6 @@ Full per-crop results: `eval/reading/results-jackrong_distill.json`, `eval/readi
 
 Intentionally out of scope for the frontend revamp (see `../FRONTEND_PLAN.md`) - not built, not started:
 
-- **Keep-alive dashboard preview + stateful follow-ups.** Each question currently opens a fresh Playwright page and resets the dashboard to its default state (`FRONTEND_PLAN.md` D7). A version that keeps one page alive across a whole conversation, letting follow-ups build on the *current* filtered state instead of resetting, is a bigger architectural change (page lifecycle spans multiple sessions) deferred until the fresh-reset model proves insufficient in practice.
 - **Token streaming.** Thoughts are revealed via a client-side typewriter, not real token-by-token streaming from the VLM - the prompt caps thoughts at ≤2 sentences and the call uses `response_format: json_object`, so there's no meaningful token stream to forward, and streaming would also break the JSON-repair retry logic.
 - **Voice (STT/TTS).** Deferred per the original project plan pending the core step-by-step answering being solid first. The Watch screen's feed is built from discrete, narratable step strings (thought, action label, outcome) specifically so TTS can be layered on without restructuring the data model later.
 - **Open-web dashboard search with probe-gating.** The landing page's search is client-side keyword scoring over the 5 curated, `probe.js`-validated dashboards only (D8) - arbitrary Tableau Public URLs are supported via direct paste, but there's no "search the whole internet and validate what comes back" flow.

@@ -9,6 +9,7 @@
   "vlmCallTimeoutMs": 120000,
   "actionTimeoutMs": 30000,
   "sessionWallClockMs": 900000,
+  "conversationIdleMs": 1800000,
   "settleGate": {
     "postActionWaitMs": 400,
     "compareIntervalMs": 500,
