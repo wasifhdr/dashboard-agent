@@ -216,6 +216,53 @@ function LiveStepCard({ step, isSelected, onSelect }) {
   );
 }
 
+// Renders one summary_json entry (see conversationRuntime.js's
+// diffInventories / docs/LIVE_TAKEOVER_PLAN.md §4.1) as a short human line.
+function formatFilterValue(v) {
+  if (v == null) return "none";
+  if (Array.isArray(v.appliedValues)) {
+    return v.appliedValues.length ? v.appliedValues.join(", ") : "(cleared)";
+  }
+  if (v.min != null || v.max != null) return `${v.min ?? "…"}–${v.max ?? "…"}`;
+  if ("min" in v || "max" in v) return "any"; // range filter present, no bounds set
+  return String(v);
+}
+
+function formatScalar(v) {
+  return v == null ? "none" : String(v);
+}
+
+function takeoverLineFor(entry) {
+  switch (entry.kind) {
+    case "filter":
+      return `Changed ${entry.field}: ${formatFilterValue(entry.from)} → ${formatFilterValue(entry.to)}`;
+    case "parameter":
+      return `Set ${entry.field} to ${formatScalar(entry.to)}`;
+    case "sheet":
+      return `Switched to the ${formatScalar(entry.to)} tab`;
+    default:
+      return null;
+  }
+}
+
+// Compact, muted card for a user takeover between two turns (Phase B2) -
+// deliberately smaller/quieter than QuestionCard/OutcomeCard since it's a
+// side-note in the thread, not a turn of its own.
+function TakeoverCard({ takeover }) {
+  const lines = (takeover.summary ?? []).map(takeoverLineFor).filter(Boolean);
+  if (lines.length === 0) return null;
+  return (
+    <div className="panel-tint-violet rounded-control border-l-4 border-l-violet px-3 py-1.5">
+      <CapsLabel className="text-violet-ink">YOU EXPLORED THE DASHBOARD</CapsLabel>
+      <ul className="mt-1 space-y-0.5 text-xs text-fg/70">
+        {lines.map((line, i) => (
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function QuestionCard({ index, question }) {
   return (
     <div className="panel-tint-teal rounded-control p-3">
@@ -273,10 +320,9 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
         return (
           <div key={run.sessionId} className="flex flex-col gap-2">
             {runIdx > 0 && (
-              <div className="my-1 text-center font-mono text-xs text-fg/50">
-                — new question · the dashboard resets to its default state —
-              </div>
+              <div className="my-1 text-center font-mono text-xs text-fg/50">— new question —</div>
             )}
+            {runIdx > 0 && run.precedingTakeover && <TakeoverCard takeover={run.precedingTakeover} />}
             <QuestionCard index={runIdx + 1} question={run.question} />
             {run.status === "loading" ? (
               <div className="font-mono text-xs text-fg/60">→ opening dashboard…</div>

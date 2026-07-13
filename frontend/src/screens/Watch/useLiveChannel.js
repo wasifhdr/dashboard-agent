@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openLiveChannel } from "../../api.js";
 
-// Read-only live screencast channel for the active conversation (Phase B1).
-// Opens a WebSocket to /api/conversations/:id/live and exposes:
+// Live screencast + input channel for the active conversation (Phases B1 +
+// B2). Opens a WebSocket to /api/conversations/:id/live and exposes:
 //   - liveFrameUrl: object URL of the latest JPEG frame (previous URL revoked
 //     each time, and on cleanup, to avoid unbounded object-URL growth)
 //   - vizBox / viewport: normalized viz rectangle for cropping the frame
 //   - mode: 'agent' while a turn is running (veil), else 'idle'
 //   - connected: socket open?
+//   - sendInput(msg): forwards one mouse/key message (B2 WS contract) to the
+//     server; a no-op before the first connection, and throttled for
+//     {type:"mouse", event:"move"} messages only (~30fps) - down/up/click/
+//     wheel/key are discrete and always sent immediately.
 // Reconnects on an unexpected drop; stops for good once the server sends
 // {type:"closed"} (the conversation is really gone) or the id changes/unmounts.
+const MOVE_THROTTLE_MS = 33; // ~30fps cap on outbound mouse-move messages
+
 export function useLiveChannel(conversationId) {
   const [liveFrameUrl, setLiveFrameUrl] = useState(null);
   const [vizBox, setVizBox] = useState(null);
@@ -18,9 +24,17 @@ export function useLiveChannel(conversationId) {
   const [connected, setConnected] = useState(false);
 
   const frameUrlRef = useRef(null);
+  // Set inside the effect below (per conversationId/channel) so sendInput -
+  // called from render, outside the effect - always forwards through the
+  // CURRENT channel and throttle state. Defaults to a no-op so calling
+  // sendInput before the first connection (or with no conversationId) is safe.
+  const sendInputRef = useRef(() => {});
 
   useEffect(() => {
-    if (!conversationId) return undefined;
+    if (!conversationId) {
+      sendInputRef.current = () => {};
+      return undefined;
+    }
 
     let disposed = false; // component unmounted / conversationId changed
     let serverClosed = false; // server said {type:"closed"} -> don't reconnect
@@ -28,6 +42,7 @@ export function useLiveChannel(conversationId) {
     let reconnectTimer = null;
     let backoff = 1000;
     let failedAttempts = 0; // consecutive (re)connects that never opened
+    let lastMoveSentAt = 0; // throttle state for mouse-move, local to this effect run
 
     // Reset per-conversation view state so a new conversation doesn't briefly
     // show the previous one's last frame/box.
@@ -36,6 +51,20 @@ export function useLiveChannel(conversationId) {
     setViewport(null);
     setMode("idle");
     setConnected(false);
+
+    // Forwards one input message through whichever channel is currently open
+    // (or no-ops if none is). Only outbound mouse-move is throttled - it's
+    // the only high-frequency message type; down/up/click/wheel/key are
+    // discrete user actions and must always reach the server immediately.
+    sendInputRef.current = (msg) => {
+      if (!channel) return;
+      if (msg?.type === "mouse" && msg.event === "move") {
+        const now = Date.now();
+        if (now - lastMoveSentAt < MOVE_THROTTLE_MS) return;
+        lastMoveSentAt = now;
+      }
+      channel.sendInput(msg);
+    };
 
     function setFrame(base64) {
       try {
@@ -100,6 +129,7 @@ export function useLiveChannel(conversationId) {
 
     return () => {
       disposed = true;
+      sendInputRef.current = () => {};
       if (reconnectTimer) clearTimeout(reconnectTimer);
       channel?.close();
       if (frameUrlRef.current) {
@@ -109,5 +139,10 @@ export function useLiveChannel(conversationId) {
     };
   }, [conversationId]);
 
-  return { liveFrameUrl, vizBox, viewport, mode, connected };
+  // Stable identity across renders (reads the ref, which the effect above
+  // keeps pointed at the current channel/throttle state) so consumers can
+  // depend on it without re-subscribing to anything.
+  const sendInput = useCallback((msg) => sendInputRef.current(msg), []);
+
+  return { liveFrameUrl, vizBox, viewport, mode, connected, sendInput };
 }

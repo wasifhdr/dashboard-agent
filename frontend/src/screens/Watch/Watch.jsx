@@ -196,6 +196,7 @@ export default function Watch({ mode, sessionId, dashboardTarget, onBack, onActi
               viewport={live.viewport}
               mode={live.mode}
               connected={live.connected}
+              sendInput={live.sendInput}
               dashboardName={dashboard?.name}
             />
           ) : (

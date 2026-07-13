@@ -140,14 +140,20 @@ export default function Composer({
   }
 
   const showTabHint = value === "" && exampleQuestions.length > 0;
+  // Between turns the dashboard stays live and clickable (Phase B2 takeover)
+  // - nudge the user toward exploring it before/instead of typing.
+  const showExploreHint = hasPriorRun && !isRunning;
 
   return (
     <div className="glass-raised rounded-card">
+      {showExploreHint && (
+        <div className="px-4 pt-2 text-xs text-fg/50">Explore the dashboard above, then ask a follow-up.</div>
+      )}
       <form onSubmit={handleSubmit} className="flex items-center gap-2 py-2 pl-4 pr-2">
         <input
           ref={inputRef}
           className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-fg placeholder:text-fg/40 focus:outline-none"
-          placeholder={hasPriorRun ? "Ask a follow-up — the dashboard reloads fresh…" : "Ask anything about this dashboard…"}
+          placeholder={hasPriorRun ? "Ask a follow-up…" : "Ask anything about this dashboard…"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}

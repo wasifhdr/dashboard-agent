@@ -259,10 +259,12 @@ export function getTakeovers(conversationId) {
 }
 
 export function insertTakeover(takeover) {
-  db.prepare(
-    `INSERT INTO takeovers (conversation_id, after_turn_index, started_at, ended_at, before_frame_path, after_frame_path, before_inventory_json, after_inventory_json, event_log_json, summary_json)
-     VALUES (@conversation_id, @after_turn_index, @started_at, @ended_at, @before_frame_path, @after_frame_path, @before_inventory_json, @after_inventory_json, @event_log_json, @summary_json)`,
-  ).run(takeover);
+  return db
+    .prepare(
+      `INSERT INTO takeovers (conversation_id, after_turn_index, started_at, ended_at, before_frame_path, after_frame_path, before_inventory_json, after_inventory_json, event_log_json, summary_json)
+       VALUES (@conversation_id, @after_turn_index, @started_at, @ended_at, @before_frame_path, @after_frame_path, @before_inventory_json, @after_inventory_json, @event_log_json, @summary_json)`,
+    )
+    .run(takeover);
 }
 
 export default db;

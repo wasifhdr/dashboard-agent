@@ -19,8 +19,13 @@ const config = JSON.parse(fs.readFileSync(path.join(BACKEND_ROOT, "config.json")
 
 fs.mkdirSync(FRAMES_DIR, { recursive: true });
 
+// Single source of truth for the allowed frontend origin - used by both the
+// Express CORS middleware and the live WebSocket's Origin check (see
+// attachLiveWebSocket below) so the two allowlists can never drift apart.
+const FRONTEND_ORIGIN = "http://localhost:5173";
+
 const app = express();
-app.use(cors({ origin: "http://localhost:5173" }));
+app.use(cors({ origin: FRONTEND_ORIGIN }));
 app.use(express.json());
 
 // Serves the host page that Playwright loads to embed a Tableau viz.
@@ -224,13 +229,28 @@ async function createConversationInternal({ dashboardUrl, dashboardName }) {
 // runtime's already-open page, fire-and-forget, mirroring the existing
 // "respond before the run finishes" / safety-net catch+finally pattern from
 // the old POST /api/sessions handler.
-function startTurn({ conversationId, activeRuntime, question }) {
+//
+// Phase B2 (async): closes out any takeover window left open from the END of
+// the PREVIOUS turn before this one proceeds. Ordering here is load-bearing
+// (B2 review fix) -
+//   1. turnId/turnIndex/bus.createBus/turnRunning=true/setMode("agent") all
+//      run SYNCHRONOUSLY, before any await, so the caller's `if (turnRunning)
+//      return 409` check and this flip stay atomic (a TOCTOU race reopened by
+//      naively awaiting captureTakeoverEnd() first) - and so input is already
+//      locked before the awaited capture work below runs, leaving no gap
+//      where forwarded input is dispatched but recorded by no open window.
+//   2. captureTakeoverEnd() only runs AFTER that lock is in place. On the
+//      first-ever turn of a conversation there is no open window yet, so it
+//      correctly no-ops and resolves to null.
+async function startTurn({ conversationId, activeRuntime, question }) {
   const turnId = crypto.randomUUID();
   const turnIndex = store.getConversationTurns(conversationId).length;
   bus.createBus(turnId);
   turnRunning = true;
   // Live-view lock: tell any WS watchers the agent is now driving (veil on).
   activeRuntime.setMode("agent");
+
+  const takeover = await activeRuntime.captureTakeoverEnd();
 
   runSession({
     browser: sharedBrowser,
@@ -255,19 +275,27 @@ function startTurn({ conversationId, activeRuntime, question }) {
       store.finishSession(turnId, { status: "error", error_message: errorMessage });
       bus.publish(turnId, { type: "session_done", status: "error", final_answer: null, confidence: null, error: errorMessage });
     })
-    .finally(() => {
-      turnRunning = false;
+    .finally(async () => {
       stopRequests.delete(turnId);
       // Live-view unlock (veil off) - but only if THIS conversation is still
       // the active one. If the runtime was closed/replaced mid-turn, there's
       // nothing to unlock and setMode on a stale runtime would be wrong.
       const current = conversationRuntime.getActiveRuntime();
       if (current && current.conversationId === conversationId) {
+        // Open the takeover recording window BEFORE unlocking input - order
+        // matters: the "before" snapshot must exist before the user can
+        // possibly touch anything, never the other way around.
+        await current.captureTakeoverStart(turnIndex);
         current.setMode("idle");
       }
+      // turnRunning stays true through the housekeeping above, not just the
+      // run itself (B2 review fix): releasing it earlier let a rapid next
+      // turn start mid-cleanup and have its "agent" mode clobbered back to
+      // "idle" by this stale callback once it finally resumed.
+      turnRunning = false;
     });
 
-  return { turnId, turnIndex };
+  return { turnId, turnIndex, takeover };
 }
 
 app.post("/api/conversations", async (req, res) => {
@@ -289,7 +317,7 @@ app.post("/api/conversations", async (req, res) => {
   }
 });
 
-app.post("/api/conversations/:id/turns", (req, res) => {
+app.post("/api/conversations/:id/turns", async (req, res) => {
   const { question } = req.body ?? {};
   if (!question) {
     return res.status(400).json({ error: "question is required." });
@@ -310,8 +338,8 @@ app.post("/api/conversations/:id/turns", (req, res) => {
     return res.status(409).json({ error: "A conversation is currently being opened. Try again in a moment." });
   }
 
-  const { turnId, turnIndex } = startTurn({ conversationId: req.params.id, activeRuntime, question });
-  res.json({ session_id: turnId, turn_index: turnIndex });
+  const { turnId, turnIndex, takeover } = await startTurn({ conversationId: req.params.id, activeRuntime, question });
+  res.json({ session_id: turnId, turn_index: turnIndex, takeover });
 });
 
 app.post("/api/conversations/:id/close", async (req, res) => {
@@ -376,7 +404,7 @@ app.post("/api/sessions", async (req, res) => {
     return res.status(status).json({ error: err.message });
   }
 
-  const { turnId } = startTurn({ conversationId: runtime.conversationId, activeRuntime: runtime, question });
+  const { turnId } = await startTurn({ conversationId: runtime.conversationId, activeRuntime: runtime, question });
   res.json({ id: turnId });
 });
 
@@ -402,9 +430,9 @@ app.get("/api/sessions/:id/events", (req, res) => {
 
 // Live-view WebSocket (docs/LIVE_TAKEOVER_PLAN.md section 6.2): streams the
 // active conversation's CDP screencast frames + viz geometry + lock/unlock to
-// the viewer. `ws` has no Express-style path params, so we match
-// /api/conversations/:id/live manually on the HTTP upgrade event. Receive-only
-// in B1 (inbound messages ignored; user input forwarding is Phase B2).
+// the viewer, and (Phase B2) accepts forwarded mouse/keyboard input. `ws` has
+// no Express-style path params, so we match /api/conversations/:id/live
+// manually on the HTTP upgrade event.
 const LIVE_PATH_RE = /^\/api\/conversations\/([^/]+)\/live$/;
 
 function attachLiveWebSocket(httpServer) {
@@ -421,6 +449,16 @@ function attachLiveWebSocket(httpServer) {
     const match = LIVE_PATH_RE.exec(pathname);
     if (!match) {
       // Not our endpoint - let it die cleanly rather than hanging the socket.
+      socket.destroy();
+      return;
+    }
+    // Origin check (B2, deferred from B1): mirrors the Express CORS
+    // allowlist (FRONTEND_ORIGIN, same constant used by `cors({origin:
+    // FRONTEND_ORIGIN})` above) so the two can't drift. Required now that the
+    // socket accepts input, to prevent cross-site WebSocket hijacking (CSWSH)
+    // driving the agent's browser. This also rejects a raw non-browser
+    // WebSocket client with no Origin header - intended hardening, not a bug.
+    if (req.headers.origin !== FRONTEND_ORIGIN) {
       socket.destroy();
       return;
     }
@@ -451,13 +489,30 @@ function attachLiveWebSocket(httpServer) {
       }
       return;
     }
-    // Bind cleanup to THIS runtime instance, not a later getActiveRuntime():
-    // if the conversation is swapped while this socket is still open, the
-    // socket must remove itself from the runtime it actually joined.
+    // Bind cleanup (and input forwarding) to THIS runtime instance, not a
+    // later getActiveRuntime(): if the conversation is swapped while this
+    // socket is still open, the socket must keep talking to the runtime it
+    // actually joined.
     runtime.addClient(ws).catch(() => {});
     ws.on("close", () => runtime.removeClient(ws).catch(() => {}));
     ws.on("error", () => runtime.removeClient(ws).catch(() => {}));
-    ws.on("message", () => {}); // B1 is receive-only; input forwarding is B2.
+    ws.on("message", (raw) => {
+      // Phase B2: forwarded mouse/keyboard input. Malformed JSON is silently
+      // dropped (never throws); dispatchInput is already internally safe
+      // (never throws, self-gates on mode/lastVizBox) but the call is still
+      // wrapped here as defense in depth, matching the rest of this file.
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      try {
+        runtime.dispatchInput(parsed).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+    });
   });
 }
 

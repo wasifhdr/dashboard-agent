@@ -40,6 +40,29 @@ function parseMaxSteps(configJson) {
   }
 }
 
+// takeovers.summary_json -> array of {kind:'filter'|'parameter'|'sheet',
+// field?, from, to} (see docs/LIVE_TAKEOVER_PLAN.md §4.1 and
+// conversationRuntime.js's diffInventories). Tolerates a missing/malformed
+// string the same way parseMaxSteps tolerates a missing/malformed config.
+function parseTakeoverSummary(json) {
+  try {
+    const parsed = JSON.parse(json || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// Shapes the takeover row a turns-POST response piggybacks (or null) into
+// what Feed's takeover card renders. Attached onto the *new* run as
+// `precedingTakeover` (Watch's thread renders one turn per run, so "the
+// takeover between the previous turn and this one" naturally belongs on
+// this run - see docs/LIVE_TAKEOVER_PLAN.md §8/§9 Phase B2).
+function toPrecedingTakeover(takeover) {
+  if (!takeover) return null;
+  return { ...takeover, summary: parseTakeoverSummary(takeover.summary_json) };
+}
+
 function blankStep(idx) {
   return {
     idx,
@@ -206,6 +229,7 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
           steps: new Map(),
           startedAt: Date.now(),
           maxSteps,
+          precedingTakeover: null,
         },
       ]);
     }
@@ -222,7 +246,7 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
         conversationIdRef.current = conversation_id;
         setConversationId(conversation_id);
       }
-      const { session_id } = await postTurn(conversationIdRef.current, question);
+      const { session_id, takeover } = await postTurn(conversationIdRef.current, question);
       const newRun = {
         sessionId: session_id,
         question,
@@ -234,6 +258,10 @@ export function useSessionStream(mode, { sessionId, dashboardUrl, dashboardName 
         steps: new Map(),
         startedAt: Date.now(),
         maxSteps,
+        // Non-null only when the user changed the dashboard (via live
+        // takeover) between the previous turn ending and this one starting -
+        // Feed renders it as a card right before this run.
+        precedingTakeover: toPrecedingTakeover(takeover),
       };
       setRuns((prev) => (isFirstTurn ? [newRun] : [...prev, newRun]));
       subscribeLive(session_id);

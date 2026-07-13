@@ -109,10 +109,12 @@ export async function closeConversation(id) {
   return body; // { ok: true }
 }
 
-// Opens the live-view WebSocket for a conversation (Phase B1). Receive-only:
-// the server streams screencast frames, viz geometry, and lock/unlock; there
-// are no client->server messages in B1 (user input is B2). Dispatches each
-// message to the matching handler by its `type`. Returns { close() }.
+// Opens the live-view WebSocket for a conversation. The server streams
+// screencast frames, viz geometry, and lock/unlock (Phase B1); the channel
+// also accepts forwarded mouse/keyboard input via sendInput() (Phase B2),
+// which the server dispatches against the shared page only while the
+// conversation isn't mid-agent-turn. Dispatches each inbound message to the
+// matching handler by its `type`. Returns { close(), sendInput(msg) }.
 export function openLiveChannel(conversationId, handlers = {}) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/api/conversations/${conversationId}/live`);
@@ -154,6 +156,18 @@ export function openLiveChannel(conversationId, handlers = {}) {
         ws.close();
       } catch {
         /* already closing */
+      }
+    },
+    // Forwards one input message (see docs/LIVE_TAKEOVER_PLAN.md's B2 WS
+    // client->server contract) as JSON. A no-op (never throws) when the
+    // socket isn't open yet/anymore - e.g. mid-(re)connect, or after the
+    // server closed it - matching the fire-and-forget nature of live input.
+    sendInput(msg) {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify(msg));
+      } catch {
+        /* socket closing/erroring mid-send - drop */
       }
     },
   };
