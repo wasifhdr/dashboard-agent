@@ -59,6 +59,7 @@ function formatInventoryForPrompt(inventory) {
 }
 
 function describeActionForHistory(h) {
+  if (h.type === "click") return `(${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
   if (h.values !== undefined) return `${h.target_id}=${JSON.stringify(h.values)}`;
   if (h.value !== undefined) return `${h.target_id}=${JSON.stringify(h.value)}`;
   if (h.min !== undefined || h.max !== undefined) return `${h.target_id}=[${h.min ?? "?"}..${h.max ?? "?"}]`;
@@ -66,9 +67,18 @@ function describeActionForHistory(h) {
   return "";
 }
 
+// For a click, the model cares whether it worked, not the internal step
+// status — so an executed ("ok") click reports "changed" / "no change".
+// Rejected/errored clicks keep their status so the model sees they didn't run.
+function clickOutcome(h) {
+  if (h.status === "ok") return h.changed ? "changed" : "no change";
+  return h.status;
+}
+
 function formatHistoryLine(h) {
   const detail = describeActionForHistory(h);
-  return `#${h.idx} ${h.type}${detail ? " " + detail : ""} -> ${h.status}`;
+  const outcome = h.type === "click" ? clickOutcome(h) : h.status;
+  return `#${h.idx} ${h.type}${detail ? " " + detail : ""} -> ${outcome}`;
 }
 
 const SYSTEM_TEMPLATE = (question) => `You are an agent that answers a question about a live, interactive Tableau dashboard by operating its filters, parameters, and tabs, then answering.
@@ -125,7 +135,7 @@ Rules:
 1. Exactly one action per turn.
 2. To operate a control that opens (a dropdown, a filter list), click it once, then WAIT for the next screenshot and click the value you want.
 3. Prefer "answer" as soon as the screenshot shows everything needed.
-4. If your previous click changed nothing, aim more precisely at the actual control next time.
+4. If a click produces no visible change, you missed the control or it is not on screen — NEVER repeat the same or a nearby click. Move to a clearly different location. If several clicks in a row change nothing, stop targeting that control: answer from what is visible, or fail.
 5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.`;
 
