@@ -103,6 +103,7 @@ export function useLiveChannel(conversationId) {
           // not, we must not stay stuck on a 'lock' whose matching 'unlock' we
           // missed while disconnected mid-turn.
           setMode("idle");
+          setCursor(null);
         },
         onFrame: (data) => setFrame(data),
         onVizBox: (box, vp) => {

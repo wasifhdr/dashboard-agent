@@ -303,14 +303,15 @@ export async function getNextAction({ config, question, inventory, history, imag
     }
 
     const result = StepResponseSchema.safeParse(parsed);
-    if (result.success) {
+    if (result.success && !((config.actuationMode ?? "api") !== "pixel" && result.data.action.type === "click")) {
       return { valid: true, thought: result.data.thought, action: result.data.action, rawText: raw, attempts: attempt };
     }
 
-    feedback =
-      `Your previous response did not match the required schema: ` +
-      `${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. ` +
-      `Return STRICT JSON only, matching the schema exactly.`;
+    feedback = result.success
+      ? `The "click" action is not available in this mode. Use one of the provided action types.`
+      : `Your previous response did not match the required schema: ` +
+        `${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. ` +
+        `Return STRICT JSON only, matching the schema exactly.`;
   }
 
   return {
