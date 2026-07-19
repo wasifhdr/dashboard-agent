@@ -195,6 +195,18 @@ Expected:  $465,000 (typically 4-5 steps, including one rejected decoy attempt)
 
 Avoid leading with `q4` (the CA Infectious Diseases icon-counting question) live - its answer is a genuinely hard, currently-unverified read, which is a fine research talking point but a confusing demo moment if the audience expects a confident right/wrong.
 
+## Pixel-clicking actuation mode
+
+By default, the agent operates dashboards through the Tableau Embedding API v3 (`__agentBridge` — `applyFilterAsync`, parameters, `activateSheetAsync`). A second, config-selected actuation mode is also available: **pixel mode**, where a hosted VLM (CraftX, serving Qwen3-VL-30B-A3B-Instruct) operates the dashboard by clicking on screen coordinates with a visible cursor, instead of calling structured bridge methods. This is useful for demoing/comparing a pixel-grounded actuation path against the API-grounded default.
+
+**How to enable:**
+- Set `"actuationMode": "pixel"` in `backend/config.json` (default is `"api"` — leave it alone unless you want pixel mode). The `config.pixel` block (`vlmEndpoint`, `modelName`, `vlmApiKeyEnv`) already points at the CraftX endpoint and doesn't need editing.
+- Put `CRAFTX_API_KEY=<key>` in the root `.env` (git-ignored) — `resolveVlmTarget` in `vlmClient.js` reads the key from that environment variable at the name given by `vlmApiKeyEnv`, never from `config.json` itself.
+
+**Data-egress note:** In pixel mode, per-step dashboard screenshots are sent to the configured third-party VLM endpoint (CraftX), unlike the default local-only pipeline. The configured dashboards are Tableau Public (public data), so sensitivity is low; no credentials or personal data are sent.
+
+**Running the demo:** enable pixel mode as above, start the three processes (llama-server is not needed for a pixel-mode-only run, but leave the usual startup order otherwise unchanged), then ask the same fastest known-good question — Zillow → "Switch to the ZRI dashboard tab and report the current Zillow Rent Index (ZRI) value for the United States" — and watch the Watch screen: instead of semantic action cards, you'll see a visible cursor click its way across the dashboard toward the answer.
+
 ## Troubleshooting
 
 - **llama-server won't start / OOM on load:** confirm no other llama-server is already holding the GPU (`tasklist` / check `nvidia-smi`). Only one model fits in 6GB at a time. If a model genuinely won't fit, drop `--ctx-size` to 6144 before trying a smaller quant.

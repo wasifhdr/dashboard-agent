@@ -1,6 +1,12 @@
 {
   "llamaEndpoint": "http://127.0.0.1:8080",
   "modelName": "Jackrong-Qwen3.5-4B-Claude-Opus-Reasoning-Distilled-v2-Q4_K_M",
+  "actuationMode": "api",
+  "pixel": {
+    "vlmEndpoint": "https://api.craftx.corecraftsolutions.com/api",
+    "modelName": "Qwen3 VL 30B A3B Instruct",
+    "vlmApiKeyEnv": "CRAFTX_API_KEY"
+  },
   "promptStyle": "constrained_json",
   "maxSteps": 15,
   "imageLongSide": 1280,
