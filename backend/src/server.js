@@ -278,7 +278,13 @@ async function startTurn({ conversationId, activeRuntime, question }) {
     ownsPage: false,
     conversationId,
     turnIndex,
-    onEvent: (evt) => adaptAndPublish(turnId, evt),
+    onEvent: (evt) => {
+      if (evt.type === "agent_cursor") {
+        activeRuntime.broadcastCursor(evt.nx, evt.ny, evt.phase);
+        return;
+      }
+      adaptAndPublish(turnId, evt);
+    },
     shouldStop: () => stopRequests.has(turnId),
   })
     .catch((err) => {

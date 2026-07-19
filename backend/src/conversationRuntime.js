@@ -59,6 +59,11 @@ export function setActiveRuntime(runtime) {
   activeRuntime = runtime;
 }
 
+// WS payload for a synthetic agent cursor position (live view overlay).
+export function cursorMessage(nx, ny, phase) {
+  return { type: "cursor", nx, ny, phase };
+}
+
 // --- Runtime factory -----------------------------------------------------
 
 // Opens the dashboard once (via perception.openSession + waitForSettle -
@@ -715,6 +720,12 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     removeClient,
     broadcast,
     setMode,
+    broadcastCursor(nx, ny, phase) {
+      // Fan the cursor position out to live watchers over the same channel as
+      // frames/vizbox. broadcast() is the module-internal fan-out already used
+      // for frame/lock messages.
+      broadcast(cursorMessage(nx, ny, phase));
+    },
     get mode() {
       return mode;
     },
