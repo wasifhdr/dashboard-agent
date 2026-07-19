@@ -1,6 +1,18 @@
 // Translates a validated action + its resolved inventory entry into a
 // window.__agentBridge call, executed inside the Playwright page.
 
+// Must match id on <tableau-viz id="agentViz"> in public/host.html.
+// Duplicated (not imported) because perception.js is frozen and does not
+// export its VIZ_SELECTOR — same rationale as conversationRuntime.js.
+const VIZ_SELECTOR = "tableau-viz#agentViz";
+
+// Pure transform: a normalized [0,1] point over the viz image -> absolute page
+// pixels, using the viz element's bounding box. Same math family as
+// conversationRuntime.dispatchInput.
+export function vizPointToPagePixels(box, nx, ny) {
+  return { px: box.x + nx * box.width, py: box.y + ny * box.height };
+}
+
 function findCaseInsensitive(domain, value) {
   return domain.find((d) => String(d).toLowerCase() === String(value).toLowerCase());
 }
@@ -101,6 +113,17 @@ async function executeAction(page, resolved, action) {
         return res.ok ? { ok: true } : { ok: false, error: res.error };
       }
 
+      case "click": {
+        const box = await page.locator(VIZ_SELECTOR).boundingBox();
+        if (!box || !box.width || !box.height) {
+          return { ok: false, error: "Viz element not measurable right now (mid-transition); try again." };
+        }
+        const { px, py } = vizPointToPagePixels(box, action.nx, action.ny);
+        await page.mouse.move(px, py, { steps: 12 });
+        await page.mouse.click(px, py);
+        return { ok: true, point: { nx: action.nx, ny: action.ny, px, py } };
+      }
+
       default:
         return { ok: false, error: `Unsupported action type "${action.type}" for direct execution.` };
     }
@@ -137,6 +160,8 @@ export function describeAction(action, resolved) {
       return "Answer";
     case "fail":
       return `Fail${action.reason ? `: ${action.reason}` : ""}`;
+    case "click":
+      return `Click: ${action.target ?? `(${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
     default:
       return action.type;
   }
