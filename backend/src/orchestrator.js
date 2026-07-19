@@ -12,6 +12,7 @@ import { createInventoryTracker } from "./inventory.js";
 import { getNextAction } from "./vlmClient.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
+import { isNearDeadPoint } from "./pixelGuard.js";
 
 function actionKey(action) {
   switch (action.type) {
@@ -144,6 +145,8 @@ export async function runSession({
   // of retrying variations on the same wrong target_id.
   let consecutiveNonProgress = 0;
   let noDiffClicks = 0; // consecutive pixel clicks that produced no visible change
+  const deadClickPoints = []; // {nx,ny} of clicks that produced no change (pixel mode); cleared when a click changes the view
+  const deadClickRadius = config.pixel?.deadClickRadius ?? 0.05; // normalized radius for the repeat guard
 
   function withEscalation(feedback) {
     if (consecutiveNonProgress >= 2) {
@@ -453,7 +456,29 @@ export async function runSession({
         });
         consecutiveNonProgress++;
         correctiveFeedback = withEscalation("This mode does not support click actions. Use the provided action types.");
-        history.push({ idx, key, type: "click", status: "rejected_target" });
+        history.push({ idx, key, type: "click", status: "rejected_target", nx: action.nx, ny: action.ny, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // Enforced self-correction: reject a click near a location that already
+      // produced no change, WITHOUT executing it (no wasted mouse dispatch or
+      // settle cycle). The step budget + consecutiveNonProgress still terminate
+      // a genuinely stuck run.
+      if (isNearDeadPoint({ nx: action.nx, ny: action.ny }, deadClickPoints, deadClickRadius)) {
+        persistAndEmit({
+          idx, thought, action, status: "rejected_loop",
+          errorMsg: `Repeat click near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}), which already produced no change`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: repeat dead click", type: "click" },
+          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback =
+          `You already clicked near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) and nothing changed. Do NOT click there again. ` +
+          `Aim at a clearly different location, or if several spots produce no change, the control may be hidden — answer from what is visible, or fail.`;
+        history.push({ idx, key, type: "click", status: "rejected_loop", nx: action.nx, ny: action.ny, changed: false });
         prevFramePath = framePath;
         continue;
       }
@@ -471,7 +496,7 @@ export async function runSession({
         });
         consecutiveNonProgress++;
         correctiveFeedback = withEscalation(execResult.error);
-        history.push({ idx, key, type: "click", status: "error" });
+        history.push({ idx, key, type: "click", status: "error", nx: action.nx, ny: action.ny, changed: false });
         prevFramePath = framePath;
         continue;
       }
@@ -480,9 +505,9 @@ export async function runSession({
       if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
 
       // Did the click visibly change anything? Diff a fresh post-click frame
-      // against this step's pre-click frame. Used ONLY to drive corrective
-      // feedback; the persisted frame stays the pre-action screenshot, matching
-      // api-mode semantics (an action's visual effect appears in the NEXT frame).
+      // against this step's pre-click frame. Drives the corrective feedback and
+      // the dead-click guard; the persisted frame stays the pre-action
+      // screenshot, matching api-mode semantics.
       const postPath = framePath.replace(/\.png$/, "_post.png");
       let clickChanged = true;
       try {
@@ -501,17 +526,20 @@ export async function runSession({
         actionBadge: { text: describeAction(action, null), type: "click" },
         clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
       });
-      history.push({ idx, key, type: "click", status: "ok" });
+      history.push({ idx, key, type: "click", status: "ok", nx: action.nx, ny: action.ny, changed: clickChanged });
 
       if (!clickChanged) {
+        deadClickPoints.push({ nx: action.nx, ny: action.ny });
         noDiffClicks++;
-        if (noDiffClicks >= 2) {
-          correctiveFeedback = withEscalation(
-            "Your last click produced no visible change. Look carefully at the screenshot and aim your next click at the actual control (a tab, dropdown, or value).",
-          );
-        }
+        const base = `Your click at (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) changed nothing — you missed the control or it is not on screen. Aim at a clearly different location.`;
+        correctiveFeedback =
+          noDiffClicks >= 2
+            ? `${base} You have now clicked with no effect more than once. If several spots produce no change, the control may be hidden — answer from what is visible, or fail.`
+            : base;
         consecutiveNonProgress++;
       } else {
+        // The view moved — prior dead spots are stale and must not over-reject.
+        deadClickPoints.length = 0;
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
       }
