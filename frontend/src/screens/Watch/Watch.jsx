@@ -234,6 +234,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               connected={live.connected}
               closedReason={live.closedReason}
               sendInput={live.sendInput}
+              cursor={live.cursor}
               dashboardName={dashboard?.name}
             />
           ) : (

@@ -29,6 +29,7 @@ export function useLiveChannel(conversationId) {
   const [mode, setMode] = useState("idle");
   const [connected, setConnected] = useState(false);
   const [closedReason, setClosedReason] = useState(null);
+  const [cursor, setCursor] = useState(null);
 
   const frameUrlRef = useRef(null);
   // Set inside the effect below (per conversationId/channel) so sendInput -
@@ -59,6 +60,7 @@ export function useLiveChannel(conversationId) {
     setMode("idle");
     setConnected(false);
     setClosedReason(null);
+    setCursor(null);
 
     // Forwards one input message through whichever channel is currently open
     // (or no-ops if none is). Only outbound mouse-move is throttled - it's
@@ -112,7 +114,13 @@ export function useLiveChannel(conversationId) {
           if (!disposed) setMode("agent");
         },
         onUnlock: () => {
-          if (!disposed) setMode("idle");
+          if (!disposed) {
+            setMode("idle");
+            setCursor(null);
+          }
+        },
+        onCursor: (nx, ny, phase) => {
+          if (!disposed) setCursor({ nx, ny, phase });
         },
         onClosed: (reason) => {
           serverClosed = true;
@@ -153,5 +161,5 @@ export function useLiveChannel(conversationId) {
   // depend on it without re-subscribing to anything.
   const sendInput = useCallback((msg) => sendInputRef.current(msg), []);
 
-  return { liveFrameUrl, vizBox, viewport, mode, connected, closedReason, sendInput };
+  return { liveFrameUrl, vizBox, viewport, mode, connected, closedReason, sendInput, cursor };
 }

@@ -179,6 +179,7 @@ export default function LiveStage({
   closedReason = null,
   sendInput = () => {},
   dashboardName = null,
+  cursor = null,
 }) {
   const canCrop = liveFrameUrl && vizBox && viewport && vizBox.nw > 0 && vizBox.nh > 0;
   // Post-completion takeover (B2): the capture layer and the lock veil are
@@ -221,6 +222,24 @@ export default function LiveStage({
                     maxWidth: "none",
                   }}
                 />
+                {mode === "agent" && cursor && (
+                  <div
+                    className="pointer-events-none absolute z-30 transition-all duration-200 ease-out"
+                    style={{ left: `${cursor.nx * 100}%`, top: `${cursor.ny * 100}%`, transform: "translate(-2px, -2px)" }}
+                  >
+                    {/* pointer glyph */}
+                    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+                      <path d="M2 2 L2 16 L6 12 L9 19 L12 18 L9 11 L15 11 Z" fill="white" stroke="black" strokeWidth="1.2" />
+                    </svg>
+                    {/* click ripple */}
+                    {cursor.phase === "click" && (
+                      <span className="absolute -left-2 -top-2 block h-6 w-6 animate-ping rounded-full bg-teal/60" />
+                    )}
+                    <span className="absolute left-5 top-3 whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      agent
+                    </span>
+                  </div>
+                )}
                 {interactive && <InputCaptureLayer sendInput={sendInput} />}
               </div>
             ) : (

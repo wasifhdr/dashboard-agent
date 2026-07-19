@@ -146,6 +146,9 @@ export function openLiveChannel(conversationId, handlers = {}) {
       case "unlock":
         handlers.onUnlock?.();
         break;
+      case "cursor":
+        handlers.onCursor?.(evt.nx, evt.ny, evt.phase);
+        break;
       case "closed":
         handlers.onClosed?.(evt.reason);
         break;
