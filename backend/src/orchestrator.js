@@ -23,6 +23,8 @@ function actionKey(action) {
       return `set_parameter:${action.target_id}:${action.value}`;
     case "switch_sheet":
       return `switch_sheet:${action.target_id}`;
+    case "click":
+      return `click:${action.nx.toFixed(2)},${action.ny.toFixed(2)}`;
     default:
       return `${action.type}:${action.target_id ?? ""}`;
   }
@@ -141,6 +143,7 @@ export async function runSession({
   // corrective feedback so the model re-scans the whole inventory instead
   // of retrying variations on the same wrong target_id.
   let consecutiveNonProgress = 0;
+  let noDiffClicks = 0; // consecutive pixel clicks that produced no visible change
 
   function withEscalation(feedback) {
     if (consecutiveNonProgress >= 2) {
@@ -170,8 +173,9 @@ export async function runSession({
     durationMs,
     actionBadge = null,
     widgetBbox = null,
+    clickPoint = null,
   }) {
-    const overlay = { action_badge: actionBadge, widget_bbox: widgetBbox, changed_regions: changedRegions };
+    const overlay = { action_badge: actionBadge, widget_bbox: widgetBbox, changed_regions: changedRegions, click_point: clickPoint };
     store.insertStep({
       session_id: sessionId,
       step_idx: idx,
@@ -367,7 +371,10 @@ export async function runSession({
     }
 
     const key = actionKey(action);
-    const dup = action.type !== "wait" ? history.find((h) => h.key === key && h.status === "ok") : null;
+    const dup =
+      action.type !== "wait" && action.type !== "click"
+        ? history.find((h) => h.key === key && h.status === "ok")
+        : null;
 
     if (dup) {
       persistAndEmit({
@@ -433,6 +440,84 @@ export async function runSession({
       continue;
     }
     consecutiveWaits = 0;
+
+    if (action.type === "click") {
+      if ((config.actuationMode ?? "api") !== "pixel") {
+        // Belt-and-suspenders: a click can only be produced in pixel mode.
+        persistAndEmit({
+          idx, thought, action, status: "rejected_target",
+          errorMsg: "click is only valid in pixel actuation mode",
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: click not allowed", type: "click" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation("This mode does not support click actions. Use the provided action types.");
+        history.push({ idx, key, type: "click", status: "rejected_target" });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      onEvent({ type: "agent_cursor", idx, nx: action.nx, ny: action.ny, phase: "move" });
+      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs);
+      onEvent({ type: "agent_cursor", idx, nx: action.nx, ny: action.ny, phase: "click" });
+
+      if (!execResult.ok) {
+        persistAndEmit({
+          idx, thought, action, status: "error", errorMsg: execResult.error,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Error: click", type: "click" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(execResult.error);
+        history.push({ idx, key, type: "click", status: "error" });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      const settleResult = await waitForSettle(page, config.settleGate);
+      if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
+
+      // Did the click visibly change anything? Diff a fresh post-click frame
+      // against this step's pre-click frame. Used ONLY to drive corrective
+      // feedback; the persisted frame stays the pre-action screenshot, matching
+      // api-mode semantics (an action's visual effect appears in the NEXT frame).
+      const postPath = framePath.replace(/\.png$/, "_post.png");
+      let clickChanged = true;
+      try {
+        await screenshotViz(page, postPath);
+        const regions = await computeChangedRegions(framePath, postPath).catch(() => []);
+        clickChanged = regions.length > 0;
+      } finally {
+        fs.rmSync(postPath, { force: true });
+      }
+
+      persistAndEmit({
+        idx, thought, action, status: "ok",
+        framePath, inventory: inv, changedRegions,
+        settleTimeout: settleResult.timedOut,
+        startedAt: stepStartedAt, durationMs,
+        actionBadge: { text: describeAction(action, null), type: "click" },
+        clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+      });
+      history.push({ idx, key, type: "click", status: "ok" });
+
+      if (!clickChanged) {
+        noDiffClicks++;
+        if (noDiffClicks >= 2) {
+          correctiveFeedback = withEscalation(
+            "Your last click produced no visible change. Look carefully at the screenshot and aim your next click at the actual control (a tab, dropdown, or value).",
+          );
+        }
+        consecutiveNonProgress++;
+      } else {
+        noDiffClicks = 0;
+        consecutiveNonProgress = 0;
+      }
+      prevFramePath = framePath;
+      continue;
+    }
 
     const resolved = tracker.resolve(action.target_id);
     if (!resolved) {
