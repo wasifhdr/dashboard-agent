@@ -1,6 +1,7 @@
 // CLI runner: node run.js <tableau-views-url> "<question>"
 // Streams steps to stdout, prints the final answer + session id.
 // Requires: backend server running (npm run dev) and llama-server running.
+import "./src/env.js";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";

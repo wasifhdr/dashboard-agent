@@ -9,11 +9,13 @@
     "dev": "node src/server.js",
     "run-agent": "node run.js",
     "eval": "node eval.js",
-    "reading-bench": "node eval/reading-bench.js"
+    "reading-bench": "node eval/reading-bench.js",
+    "test": "node --test"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "pixelmatch": "^7.1.0",
     "playwright": "^1.58.2",

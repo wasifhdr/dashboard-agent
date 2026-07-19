@@ -164,13 +164,43 @@ async function resizeImageToDataUrl(imagePath, longSide) {
   return `data:image/png;base64,${buf.toString("base64")}`;
 }
 
+// --- provider target resolution (pixel mode adds a hosted endpoint) --------
+
+// Returns the completions URL, model name, and (optional) API-key env-var NAME
+// for the active actuation mode. In "api" mode this is the local llama-server
+// with no auth — identical to the pre-change behavior. In "pixel" mode it is
+// the hosted OpenAI-compatible endpoint from config.pixel.
+function resolveVlmTarget(config) {
+  const mode = config.actuationMode ?? "api";
+  if (mode === "pixel" && config.pixel?.vlmEndpoint) {
+    return {
+      url: `${config.pixel.vlmEndpoint}/v1/chat/completions`,
+      modelName: config.pixel.modelName ?? config.modelName,
+      apiKeyEnv: config.pixel.vlmApiKeyEnv ?? null,
+    };
+  }
+  return {
+    url: `${config.llamaEndpoint}/v1/chat/completions`,
+    modelName: config.modelName,
+    apiKeyEnv: null,
+  };
+}
+
+// Builds the Authorization header from an env-var NAME (never a literal key).
+// Empty/absent env value -> no header (local mode, or a misconfigured key).
+function authHeaders(apiKeyEnv, env) {
+  const value = apiKeyEnv ? env[apiKeyEnv] : null;
+  return value ? { Authorization: `Bearer ${value}` } : {};
+}
+
 // ---- llama-server call --------------------------------------------------
 
 async function callVlm({ config, systemText, userText, imagePath }) {
   const imageDataUrl = await resizeImageToDataUrl(imagePath, config.imageLongSide);
+  const target = resolveVlmTarget(config);
 
   const payload = {
-    model: config.modelName,
+    model: target.modelName,
     messages: [
       { role: "system", content: systemText },
       {
@@ -192,15 +222,15 @@ async function callVlm({ config, systemText, userText, imagePath }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.vlmCallTimeoutMs);
   try {
-    const res = await fetch(`${config.llamaEndpoint}/v1/chat/completions`, {
+    const res = await fetch(target.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders(target.apiKeyEnv, process.env) },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
     const bodyText = await res.text();
     if (!res.ok) {
-      throw new Error(`llama-server error ${res.status}: ${bodyText.slice(0, 800)}`);
+      throw new Error(`VLM endpoint error ${res.status}: ${bodyText.slice(0, 800)}`);
     }
     const json = JSON.parse(bodyText);
     return json?.choices?.[0]?.message?.content ?? "";
@@ -266,4 +296,4 @@ export async function getNextAction({ config, question, inventory, history, imag
   };
 }
 
-export const _internal = { formatInventoryForPrompt, formatHistoryLine, extractLastJsonObject, buildPrompt };
+export const _internal = { formatInventoryForPrompt, formatHistoryLine, extractLastJsonObject, buildPrompt, resolveVlmTarget, authHeaders };

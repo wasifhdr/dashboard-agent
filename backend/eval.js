@@ -5,6 +5,7 @@
 //
 // Usage: node eval.js [path/to/questions.json]   (defaults to eval/questions.json)
 
+import "./src/env.js";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
