@@ -10,7 +10,7 @@
     "run-agent": "node run.js",
     "eval": "node eval.js",
     "reading-bench": "node eval/reading-bench.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
