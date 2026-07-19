@@ -175,7 +175,7 @@ export async function runSession({
     widgetBbox = null,
     clickPoint = null,
   }) {
-    const overlay = { action_badge: actionBadge, widget_bbox: widgetBbox, changed_regions: changedRegions, click_point: clickPoint };
+    const overlay = { action_badge: actionBadge, widget_bbox: widgetBbox, changed_regions: changedRegions, ...(clickPoint ? { click_point: clickPoint } : {}) };
     store.insertStep({
       session_id: sessionId,
       step_idx: idx,
