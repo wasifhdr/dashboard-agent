@@ -44,11 +44,19 @@ const FailAction = z.object({
   reason: z.string().optional(),
 });
 
+const ClickAction = z.object({
+  type: z.literal("click"),
+  nx: z.number().min(0).max(1),
+  ny: z.number().min(0).max(1),
+  target: z.string().optional(),
+});
+
 export const ActionSchema = z.discriminatedUnion("type", [
   SetFilterAction,
   SetRangeFilterAction,
   SetParameterAction,
   SwitchSheetAction,
+  ClickAction,
   WaitAction,
   AnswerAction,
   FailAction,
