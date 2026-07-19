@@ -104,6 +104,25 @@ export default function Stage({
                       height={overlay.widget_bbox.h}
                     />
                   )}
+                  {overlay?.click_point && (
+                    <g>
+                      <circle
+                        cx={overlay.click_point.nx * naturalSize.w}
+                        cy={overlay.click_point.ny * naturalSize.h}
+                        r={Math.max(10, naturalSize.w * 0.012)}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={Math.max(2, naturalSize.w * 0.002)}
+                        className="text-teal"
+                      />
+                      <circle
+                        cx={overlay.click_point.nx * naturalSize.w}
+                        cy={overlay.click_point.ny * naturalSize.h}
+                        r={Math.max(3, naturalSize.w * 0.003)}
+                        className="fill-teal"
+                      />
+                    </g>
+                  )}
                 </svg>
               )}
             </>
