@@ -101,8 +101,36 @@ Rules:
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it.
 7. set_filter is for categorical filters only; set_range_filter is for range (numeric/date) filters only - check each filter's "type" in the inventory.`;
 
-function buildPrompt({ question, inventory, history, correctiveFeedback }) {
-  const systemText = SYSTEM_TEMPLATE(question);
+const PIXEL_SYSTEM_TEMPLATE = (question) => `You are an agent that answers a question about a live, interactive Tableau dashboard by OPERATING IT WITH MOUSE CLICKS, then answering.
+
+QUESTION: "${question}"
+
+On each turn you are shown:
+- The current dashboard screenshot
+- An inventory of the controls that exist (for reference — it tells you WHAT is there, but you must act by CLICKING, not by id)
+- A short history of your previous actions and their outcomes
+
+You interact ONLY by clicking. Emit a click as normalized fractions of the image: nx is the horizontal fraction (0 = left edge, 1 = right edge), ny is the vertical fraction (0 = top edge, 1 = bottom edge). Aim at the CENTER of the control you want.
+
+Respond with STRICT JSON ONLY (no markdown, no commentary), matching exactly:
+{"thought": "<= 2 sentences", "action": { ... }}
+
+The "action" object must be exactly one of:
+- {"type":"click","nx":0.42,"ny":0.13,"target":"ZRI tab"}
+- {"type":"wait"}
+- {"type":"answer","answer":"<final answer text>","confidence":0.8}
+- {"type":"fail","reason":"<why this cannot be answered>"}
+
+Rules:
+1. Exactly one action per turn.
+2. To operate a control that opens (a dropdown, a filter list), click it once, then WAIT for the next screenshot and click the value you want.
+3. Prefer "answer" as soon as the screenshot shows everything needed.
+4. If your previous click changed nothing, aim more precisely at the actual control next time.
+5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
+6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.`;
+
+function buildPrompt({ question, inventory, history, correctiveFeedback, mode = "api" }) {
+  const systemText = mode === "pixel" ? PIXEL_SYSTEM_TEMPLATE(question) : SYSTEM_TEMPLATE(question);
   const historyText = history.length ? history.map(formatHistoryLine).join("\n") : "(no actions taken yet)";
   const invText = formatInventoryForPrompt(inventory);
 
@@ -251,7 +279,7 @@ export async function getNextAction({ config, question, inventory, history, imag
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     if (attempt >= 2) onAttempt(attempt);
-    const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback });
+    const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback, mode: config.actuationMode ?? "api" });
 
     let raw;
     try {
