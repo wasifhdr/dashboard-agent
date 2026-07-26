@@ -202,7 +202,10 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   const unsubscribeRef = useRef(null);
   // The one conversation this live Watch instance drives, shared across all
   // its turns (B0: turns reuse the same persistent dashboard page). Created
-  // lazily on the first startQuestion() call; stays null in replay mode.
+  // eagerly when the screen mounts in live mode (see the openConversation
+  // effect below) so the dashboard is live and clickable before the user has
+  // asked anything; startQuestion() falls back to creating it if that eager
+  // open failed. Stays null in replay mode.
   // The ref is read synchronously within startQuestion (same tick, before a
   // re-render); the state mirror is what the live-view channel (B1) subscribes
   // to, so it must trigger a re-render when the conversation is created.
@@ -222,6 +225,48 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   // opening). Per-call token (not a shared boolean) so a later question isn't
   // wrongly treated as cancelled by an earlier stop.
   const questionTokenRef = useRef(0);
+  // True while a createConversation() POST is in flight (the dashboard is
+  // opening). Drives the Watch stage's "Opening the live dashboard…" state
+  // before any turn exists, which used to be inferable only from a run's
+  // status:"loading".
+  const [conversationOpening, setConversationOpening] = useState(false);
+  // Message from a failed conversation open, so the stage can say so instead
+  // of spinning forever. Cleared on the next attempt.
+  const [conversationError, setConversationError] = useState(null);
+
+  // Single funnel to "this Watch instance's conversation id", creating the
+  // conversation on first call and de-duplicating concurrent callers through
+  // pendingConversationRef (the eager open effect, StrictMode's double-invoke
+  // of it, and a question asked while that open is still in flight all land
+  // here - only one POST /api/conversations is ever sent).
+  async function ensureConversation() {
+    if (conversationIdRef.current) return conversationIdRef.current;
+    if (pendingConversationRef.current) {
+      const { conversation_id } = await pendingConversationRef.current;
+      return conversation_id;
+    }
+    const createPromise = createConversation({
+      dashboardUrl: dashboard.url,
+      dashboardName: dashboard.name,
+    });
+    pendingConversationRef.current = createPromise;
+    setConversationOpening(true);
+    setConversationError(null);
+    try {
+      const { conversation_id } = await createPromise;
+      conversationIdRef.current = conversation_id;
+      setConversationId(conversation_id);
+      return conversation_id;
+    } catch (err) {
+      setConversationError(err.message);
+      throw err;
+    } finally {
+      // Only clear if this call still owns the slot, so a later attempt's
+      // promise isn't dropped by an earlier one's unwinding.
+      if (pendingConversationRef.current === createPromise) pendingConversationRef.current = null;
+      setConversationOpening(false);
+    }
+  }
 
   function applyEvent(runSessionId, evt) {
     setRuns((prev) => {
@@ -252,46 +297,36 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   async function startQuestion(question) {
     const token = ++questionTokenRef.current;
     const isFirstTurn = !conversationIdRef.current;
-    if (isFirstTurn) {
-      // POST /api/conversations itself blocks until the dashboard has opened
-      // and settled (up to ~90s on first load) - push a placeholder run
-      // *before* that await so `runs`/`lastRun` are non-empty for the whole
-      // wait, not just after it. Without this, Watch.jsx's loadingState gate
-      // and Composer's isRunning branch both stay inactive for the entire
-      // open, making the first question of a conversation look hung (B0
-      // review fix).
-      setRuns([
-        {
-          sessionId: null,
-          question,
-          status: "loading",
-          finalAnswer: null,
-          confidence: null,
-          error: null,
-          warnings: [],
-          steps: new Map(),
-          startedAt: Date.now(),
-          maxSteps,
-          precedingTakeover: null,
-        },
-      ]);
-    }
+    // Push a placeholder run for EVERY turn, before any await. Neither await
+    // below is instant: the first turn may still be waiting on the dashboard
+    // open (up to ~90s), and every later turn waits on POST turns, which the
+    // server answers only after captureTakeoverEnd() has snapshotted and
+    // diffed the dashboard - seconds, during which the server has ALREADY
+    // locked input and veiled the live view. Without a run here, `isRunning`
+    // stays false for that whole window, so the Composer keeps showing the
+    // typed question as if nothing happened and the stage pill still claims
+    // "Yours - click to interact" over an already-veiled dashboard.
+    setRuns((prev) => [
+      ...prev,
+      {
+        sessionId: null,
+        question,
+        status: "loading",
+        finalAnswer: null,
+        confidence: null,
+        error: null,
+        warnings: [],
+        steps: new Map(),
+        startedAt: Date.now(),
+        maxSteps,
+        precedingTakeover: null,
+      },
+    ]);
     // Both awaits below can fail independently (conversation creation, then
-    // the turn POST). Either failure must clear the placeholder pushed above
-    // rather than leave a run stuck at status:"loading" forever - matching
-    // the pre-fix behavior where a failure left `runs` untouched.
+    // the turn POST). Either failure must drop the placeholder pushed above
+    // rather than leave a run stuck at status:"loading" forever.
     try {
-      if (isFirstTurn) {
-        const createPromise = createConversation({
-          dashboardUrl: dashboard.url,
-          dashboardName: dashboard.name,
-        });
-        pendingConversationRef.current = createPromise;
-        const { conversation_id } = await createPromise;
-        pendingConversationRef.current = null;
-        conversationIdRef.current = conversation_id;
-        setConversationId(conversation_id);
-      }
+      if (isFirstTurn) await ensureConversation();
       // The user hit Stop / End session while the dashboard was still opening -
       // this question was superseded, so don't start a turn for it (End session
       // separately closes the conversation now that its id is known).
@@ -313,14 +348,18 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
         // Feed renders it as a card right before this run.
         precedingTakeover: toPrecedingTakeover(takeover),
       };
-      setRuns((prev) => (isFirstTurn ? [newRun] : [...prev, newRun]));
+      // Swap the placeholder for the real run rather than appending, so the
+      // turn keeps the one slot it has occupied in the thread since submit.
+      setRuns((prev) =>
+        prev.length && !prev[prev.length - 1].sessionId ? [...prev.slice(0, -1), newRun] : [...prev, newRun],
+      );
       subscribeLive(session_id);
       return session_id;
     } catch (err) {
-      if (isFirstTurn) {
-        setRuns([]);
-        pendingConversationRef.current = null;
-      }
+      // Drop the placeholder pushed above (only if it's still the trailing
+      // run - Stop may have already removed it); ensureConversation owns
+      // clearing pendingConversationRef, so nothing else to unwind here.
+      setRuns((prev) => (prev.length && !prev[prev.length - 1].sessionId ? prev.slice(0, -1) : prev));
       throw err;
     }
   }
@@ -391,6 +430,19 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
       .then((id) => (id ? closeConversation(id) : null))
       .catch(() => {});
   }
+
+  // Open the live dashboard as soon as the Watch screen mounts in live mode,
+  // instead of waiting for the first question: the conversation runtime starts
+  // in mode 'idle', so the screencast connects and the dashboard is the user's
+  // to click straight away, and the first question no longer pays the ~90s
+  // open. Runs once per dashboard url; ensureConversation de-duplicates
+  // StrictMode's double-invoke. A failure is surfaced via conversationError
+  // (and retried by the first question), not thrown into the effect.
+  useEffect(() => {
+    if (mode !== "live" || !dashboard?.url) return;
+    ensureConversation().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, dashboard?.url]);
 
   // Dashboard thumbnail (for Stage's loading state) + global maxSteps.
   useEffect(() => {
@@ -536,6 +588,8 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
     maxSteps,
     exampleQuestions,
     conversationId,
+    conversationOpening,
+    conversationError,
     trailingTakeover,
     startQuestion,
     reconnect,

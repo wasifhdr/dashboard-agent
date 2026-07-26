@@ -58,9 +58,9 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   const [manualSelected, setManualSelected] = useState(null);
   const [followLive, setFollowLive] = useState(mode === "live");
   const showOverlay = true; // step-action overlays are always on now (toggle removed)
-  // Floating conversation dock: open by default, minimizable to a bubble so the
-  // dashboard gets the whole canvas.
-  const [dockOpen, setDockOpen] = useState(true);
+  // Floating conversation dock: minimized to a bubble by default so the
+  // dashboard gets the whole canvas; the bubble expands it on demand.
+  const [dockOpen, setDockOpen] = useState(false);
   // True when a turn finished while the dock was minimized, so the bubble can
   // advertise "Response ready" until the user looks at it.
   const [unread, setUnread] = useState(false);
@@ -193,11 +193,25 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
     return <div className="p-6 text-sm text-fg/60">Loading session…</div>;
   }
 
-  // B0: only the conversation's first turn actually opens the dashboard
-  // (POST /api/conversations); every later turn reuses that already-open
-  // page, so it's fast and doesn't need the big loading overlay.
+  // The dashboard now opens on mount, before any question (useSessionStream's
+  // eager ensureConversation). Hold the loading overlay for that whole window —
+  // through the POST and on until the screencast is actually on screen — so the
+  // thumbnail never flashes "ask a question to begin" in the gap between the
+  // conversation being created and the WS connecting.
+  const openingLive =
+    mode === "live" &&
+    runs.length === 0 &&
+    !stream.conversationError &&
+    !live.connected &&
+    !live.closedReason;
+  // Turns after the first reuse the already-open page, so they're fast and
+  // don't need the big overlay.
+  // The second clause covers a question asked while the eager open is still in
+  // flight (no conversation yet). Once the conversation exists the page is
+  // already open, so a turn's own "loading" must NOT raise the big overlay -
+  // every turn now pushes a placeholder run at submit time.
   const loadingState =
-    lastRun?.status === "loading" && runs.length <= 1
+    openingLive || (!liveConversationId && lastRun?.status === "loading" && runs.length <= 1)
       ? {
           thumbnailUrl: stream.thumbnailUrl,
           message: "Opening the live dashboard… first load can take up to a minute.",
@@ -231,12 +245,19 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   let stageStatus = null;
   if (loadingState) {
     stageStatus = { variant: "info", text: loadingState.message, spinner: true };
+  } else if (stream.conversationError && runs.length === 0) {
+    // The eager open failed — say so instead of showing an idle preview that
+    // looks live. Asking a question retries the open.
+    stageStatus = { variant: "failed", text: `Couldn't open the dashboard: ${stream.conversationError}` };
   } else if (showLive && !live.closedReason) {
     // Keyed to the RUN state, not live.mode: the backend flips the live-view
     // mode back to idle a beat after the turn's session_done, which briefly
     // showed "Docent is working…" next to an already-delivered answer.
     stageStatus = isRunning
-      ? { variant: "info", text: "Docent is working…", pulse: true }
+      ? // The dashboard itself is no longer dimmed while the agent drives, so
+        // this pill carries that signal: same repeating ping ring the minimized
+        // chat bubble uses to announce a ready response.
+        { variant: "info", text: "Docent is working…", pulse: true, className: "relative ready-ping" }
       : { variant: "success", text: "Yours — click to interact" };
   } else if (showingStagePreview) {
     stageStatus = { variant: "neutral", text: "Default view · ask a question to begin" };
@@ -294,7 +315,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
         {/* Dashboard status row — one pill for every dashboard state. */}
         <div className="flex h-7 shrink-0 items-center justify-center gap-2 px-4">
           {stageStatus && (
-            <Badge variant={stageStatus.variant} pulse={stageStatus.pulse}>
+            <Badge variant={stageStatus.variant} pulse={stageStatus.pulse} className={stageStatus.className}>
               {stageStatus.spinner && <Spinner className="size-3 shrink-0" />}
               {stageStatus.text}
             </Badge>
@@ -377,6 +398,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               isLive={stream.everLive}
               liveSessionIds={stream.liveSessionIds}
               trailingTakeover={trailingTakeover}
+              tallComposer={isRunning}
             />
           }
           footer={

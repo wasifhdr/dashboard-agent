@@ -122,6 +122,12 @@ On each turn you are shown:
 
 You interact ONLY by clicking. Emit a click as normalized fractions of the image: nx is the horizontal fraction (0 = left edge, 1 = right edge), ny is the vertical fraction (0 = top edge, 1 = bottom edge). Aim at the CENTER of the control you want.
 
+nx and ny are DECIMAL FRACTIONS between 0 and 1 — never percentages, never pixels. Write 3 decimals. Mind the magnitude: a control tucked against the top edge is at ny ≈ 0.04, NOT 0.4 (0.4 is nearly halfway down the image); a row 5% from the left is nx ≈ 0.05, not 5 or 50.
+
+Estimate that center as accurately as you can. Your point is then checked by zooming into a SMALL window around it: if the thing you named in "target" is found inside that window, your click is snapped to its exact center; if it is NOT found there, the click is REJECTED and you must aim again. A point that is far from the target cannot be rescued, so read the image carefully before answering.
+
+"target" must name the exact element you are clicking — the specific row, bar, tab or button (e.g. "the 'TV Show' row in the open Type list"), never a general area or the parent control.
+
 Respond with STRICT JSON ONLY (no markdown, no commentary), matching exactly:
 {"thought": "<= 2 sentences", "action": { ... }}
 
@@ -233,8 +239,11 @@ function authHeaders(apiKeyEnv, env) {
 
 // ---- llama-server call --------------------------------------------------
 
-async function callVlm({ config, systemText, userText, imagePath, stopSignal }) {
-  const imageDataUrl = await resizeImageToDataUrl(imagePath, config.imageLongSide);
+async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: preparedImage, stopSignal }) {
+  // `preparedImage` lets a caller supply its own already-encoded image (the
+  // zoom-refine pass sends an UPSCALED crop, which resizeImageToDataUrl's
+  // withoutEnlargement would refuse to produce).
+  const imageDataUrl = preparedImage ?? (await resizeImageToDataUrl(imagePath, config.imageLongSide));
   const target = resolveVlmTarget(config);
 
   const payload = {
@@ -278,6 +287,96 @@ async function callVlm({ config, systemText, userText, imagePath, stopSignal }) 
     return json?.choices?.[0]?.message?.content ?? "";
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// ---- public: zoom-refine a click point -----------------------------------
+
+// Fraction of the full frame shown in the zoom crop. 0.22 turns a dropdown row
+// (~2.6% of the frame's height) into ~12% of the crop's height — comfortably
+// inside the model's spatial accuracy, while still showing enough surrounding
+// context to tell neighbouring rows apart.
+const REFINE_WINDOW = 0.22;
+// Long side the crop is upscaled to before sending. Independent of
+// config.imageLongSide: this is a small region, and upscaling is the point.
+const REFINE_LONG_SIDE = 1024;
+
+const REFINE_SYSTEM = (target) => `You are helping a UI agent click precisely.
+
+The image is a ZOOMED-IN CROP of a Tableau dashboard, centered on where the agent intends to click${target ? `: "${target}"` : ""}.
+
+Find that target in THIS CROP and return the normalized coordinates of its CENTER, where nx is the horizontal fraction (0 = left edge of the crop, 1 = right edge) and ny is the vertical fraction (0 = top edge, 1 = bottom edge).
+
+Respond with STRICT JSON ONLY, matching exactly:
+{"found": true, "nx": 0.51, "ny": 0.34}
+
+If the target is NOT visible in this crop, respond exactly:
+{"found": false}
+
+Be precise: rows in an open dropdown list are thin, so aim at the vertical middle of the intended row, not the boundary between rows.`;
+
+// Second pass over a click point: crop a window around the model's coarse aim,
+// upscale it, and ask the model to place the point again within that crop. The
+// refined point is mapped back into full-frame coordinates.
+//
+// Returns one of:
+//   {nx, ny}          - refined point, in full-frame coordinates
+//   {notFound: true}  - the model looked and the named target is NOT in the
+//                       window, i.e. the aim is wrong by more than the window.
+//                       The caller rejects the click instead of firing it at a
+//                       place the target demonstrably isn't (that is what let a
+//                       0.81 aim at a row sitting at 0.087 keep executing, each
+//                       stray click dismissing the dropdown the previous step
+//                       had opened).
+//   null              - refinement itself failed (crop error, bad JSON, network,
+//                       stop). Degrades to the previous single-pass behavior:
+//                       the caller keeps the coarse point. A refine outage must
+//                       never block clicking.
+export async function refineClickPoint({ config, imagePath, nx, ny, target, stopSignal }) {
+  try {
+    const meta = await sharp(imagePath).metadata();
+    const W = meta.width;
+    const H = meta.height;
+    if (!W || !H) return null;
+
+    // Crop window, clamped to stay inside the frame (the clamp shifts the
+    // window rather than shrinking it, so the mapping back stays uniform).
+    const cw = Math.max(1, Math.round(W * REFINE_WINDOW));
+    const ch = Math.max(1, Math.round(H * REFINE_WINDOW));
+    const left = Math.min(Math.max(0, Math.round(nx * W - cw / 2)), W - cw);
+    const top = Math.min(Math.max(0, Math.round(ny * H - ch / 2)), H - ch);
+
+    const buf = await sharp(imagePath)
+      .extract({ left, top, width: cw, height: ch })
+      .resize({ width: REFINE_LONG_SIDE, height: REFINE_LONG_SIDE, fit: "inside" })
+      .png()
+      .toBuffer();
+
+    const raw = await callVlm({
+      config,
+      systemText: REFINE_SYSTEM(target),
+      userText: "Return the JSON object now.",
+      imageDataUrl: `data:image/png;base64,${buf.toString("base64")}`,
+      stopSignal,
+    });
+
+    const parsed = extractLastJsonObject(raw);
+    if (!parsed) return null;
+    // An explicit "not here" is a real verdict, not a failure - pass it up so
+    // the caller can reject the aim. Anything else unparseable stays null.
+    if (parsed.found === false) return { notFound: true };
+    const rnx = Number(parsed.nx);
+    const rny = Number(parsed.ny);
+    if (!Number.isFinite(rnx) || !Number.isFinite(rny) || rnx < 0 || rnx > 1 || rny < 0 || rny > 1) return null;
+
+    return {
+      nx: (left + rnx * cw) / W,
+      ny: (top + rny * ch) / H,
+    };
+  } catch {
+    // Never let refinement break a step - the caller falls back to the
+    // original point (including when the user hits Stop mid-refine).
+    return null;
   }
 }
 

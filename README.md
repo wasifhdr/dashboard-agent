@@ -76,7 +76,7 @@ See [Setup](#setup), [Demo script](#demo-script), and [Troubleshooting](#trouble
                             │ REST (conversations /  │ SSE (per-turn      │ WS (live
                             │ turns / replay)        │ step events)       │ screencast + input)
                     ┌───────┴───────────────────────┴────────────────────┴─────────────┐
-                    │            Node backend (Express, ESM, :8788)                     │
+                    │            Node backend (Express, ESM, :8990)                     │
                     │  conversationRuntime.js: ONE persistent Playwright context+page    │
                     │  per conversation - opened once, kept alive across every turn,     │
                     │  torn down on explicit close / idle timeout / page crash           │
@@ -144,14 +144,14 @@ Wait for `main: server is listening on http://127.0.0.1:8080` and a `{"status":"
 ```bash
 cd backend
 npm install       # first time only
-npm run dev       # launches a shared Playwright browser + Express on :8788
+npm run dev       # launches a shared Playwright browser + Express on :8990
 ```
 
 **3. Start the frontend:**
 ```bash
 cd frontend
 npm install       # first time only
-npm run dev       # Vite on :5173, proxies /api and /frames to :8788
+npm run dev       # Vite on :5173, proxies /api and /frames to :8990
 ```
 Open `http://localhost:5173`.
 

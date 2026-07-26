@@ -190,6 +190,10 @@ export default function LiveStage({
   // viz - the raw-frame fallback below (no vizbox yet) has no such rectangle,
   // so input can't be mapped correctly there and must not be captured.
   const interactive = mode !== "agent" && canCrop;
+  // Pixel dimensions of the viz sub-rectangle, used both for the displayed
+  // box's aspect ratio and for the height-derived width cap below.
+  const aspectW = canCrop ? vizBox.nw * viewport.width : 1;
+  const aspectH = canCrop ? vizBox.nh * viewport.height : 1;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
@@ -206,7 +210,14 @@ export default function LiveStage({
                 className="relative mx-auto overflow-hidden"
                 style={{
                   width: "100%",
-                  aspectRatio: `${vizBox.nw * viewport.width} / ${vizBox.nh * viewport.height}`,
+                  aspectRatio: `${aspectW} / ${aspectH}`,
+                  // Without a height bound this fixed-aspect box overflows the
+                  // overflow-hidden card above it on short windows and the
+                  // bottom of the dashboard is silently clipped (the image is
+                  // sized in % of THIS box, so it doesn't scale down when the
+                  // flex item shrinks). Cap the width by the height budget
+                  // instead, so the box shrinks whole and keeps its aspect.
+                  maxWidth: `calc((100dvh - 14rem) * ${aspectW} / ${aspectH})`,
                 }}
               >
                 <img
@@ -265,14 +276,11 @@ export default function LiveStage({
             </div>
           )}
 
-          {/* Lock veil: the agent is driving, so the view is not interactive
-              and input is not forwarded. The accompanying "Docent is working…"
-              label lives in the status row BELOW the dashboard (Watch.jsx),
-              alongside every other dashboard status, so nothing is written over
-              the frame itself. */}
-          {mode === "agent" && (
-            <div className="pointer-events-none absolute inset-0 bg-black/20 backdrop-blur-[1px]" />
-          )}
+          {/* No lock veil: the dashboard stays at full brightness while the
+              agent drives it. Input is still not forwarded (see `interactive`
+              above); the hands-off signal is carried entirely by the "agent"
+              cursor on the frame and the pinging "Docent is working…" pill in
+              the status row below it (Watch.jsx). */}
 
           {liveFrameUrl && (
             <div className="pointer-events-none absolute left-3 top-3">

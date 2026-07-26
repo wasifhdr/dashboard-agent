@@ -566,7 +566,7 @@ function attachLiveWebSocket(httpServer) {
   });
 }
 
-const PORT = config.backendPort ?? 8788;
+const PORT = config.backendPort ?? 8990;
 
 launchBrowser()
   .then((browser) => {

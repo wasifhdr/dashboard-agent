@@ -42,7 +42,7 @@ Background: the DashboardQA benchmark (EACL 2026 Findings; dataset: `https://hug
 └───────────▲───────────────────────────────▲───────────────────────────┘
             │ REST (start session, list)     │ SSE (step events, frames)
 ┌───────────┴───────────────────────────────┴───────────────────────────┐
-│                Node backend (Express, ESM JS, :8788)                   │
+│                Node backend (Express, ESM JS, :8990)                   │
 │  Orchestrator: agent loop, step budget, loop guard, settle gate        │
 │    ├─ Perception: Playwright Chromium → screenshot of embedded viz     │
 │    ├─ Grounding:  control inventory via Embedding API bridge           │
@@ -68,7 +68,7 @@ Background: the DashboardQA benchmark (EACL 2026 Findings; dataset: `https://hug
 - **Frontend:** Vite + React (JS). Simple hand-rolled CSS, dark theme default. No UI framework needed.
 - **Tableau:** Embedding API v3 ESM from `https://public.tableau.com/javascripts/api/tableau.embedding.3.latest.min.js` (system requires internet anyway for Tableau Public).
 - **VLM runtime:** llama.cpp `llama-server`, OpenAI-compatible `/v1/chat/completions` with base64 `image_url` (owner already runs this pattern).
-- **Ports:** backend 8788, Vite 5173, llama-server 8080.
+- **Ports:** backend 8990, Vite 5173, llama-server 8080.
 - Git repo with `.gitignore` for `node_modules/`, `data/` (frames + sqlite), model files.
 
 ## 5. Model & runtime configuration

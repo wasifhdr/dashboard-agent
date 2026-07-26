@@ -9,7 +9,7 @@ import path from "node:path";
 import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
-import { getNextAction } from "./vlmClient.js";
+import { getNextAction, refineClickPoint } from "./vlmClient.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint } from "./pixelGuard.js";
@@ -376,6 +376,52 @@ export async function runSession({
       });
       sessionOutcome = { status: "failed", answer: null, confidence: null };
       break;
+    }
+
+    // Zoom-refine pass (pixel mode): the model's click is treated as a COARSE
+    // aim, then re-placed inside an upscaled crop around it. Small controls -
+    // an open dropdown's rows are ~2.6% of the frame's height - are below the
+    // model's single-pass accuracy, which is what made it select the row above
+    // the one it had reasoned about. Done here, before the loop key and the
+    // dead-click guard, so every downstream consumer (guard, persistence,
+    // history, cursor overlay, actuator) sees the one point actually clicked.
+    if (action.type === "click" && (config.actuationMode ?? "api") === "pixel") {
+      const refined = await refineClickPoint({
+        config,
+        imagePath: framePath,
+        nx: action.nx,
+        ny: action.ny,
+        target: action.target ?? null,
+        stopSignal,
+      });
+      if (refined?.notFound) {
+        // The zoom check looked around the aim and the named target isn't
+        // there. Firing anyway lands on whatever happens to be under the
+        // point - which is how a stray click kept dismissing the dropdown the
+        // previous step had just opened, alternating forever. Reject without
+        // executing and tell the model what actually happened.
+        persistAndEmit({
+          idx, thought, action, status: "rejected_target",
+          errorMsg: `"${action.target ?? "target"}" is not near (${action.nx.toFixed(2)},${action.ny.toFixed(2)})`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: wrong location", type: "click" },
+          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(
+          `Your click was NOT executed: zooming in around (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) did not show "${action.target ?? "the target"}". ` +
+            `Your coordinates are wrong, not slightly off — look at the screenshot again and read off where that element actually sits, ` +
+            `remembering nx/ny are fractions of the WHOLE image.`,
+        );
+        history.push({ idx, key: actionKey(action), type: "click", status: "rejected_target", nx: action.nx, ny: action.ny, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+      if (refined) {
+        action.nx = refined.nx;
+        action.ny = refined.ny;
+      }
     }
 
     const key = actionKey(action);

@@ -16,7 +16,7 @@ This folder (`dashboard-agent/`) is the project root and working directory. The 
 dashboard-agent/           ← project root / working directory
   .claude/launch.json      Preview-tool config (frontend dev server; runs `npm run dev --prefix frontend`)
   README.md                phase-by-phase build history + setup/demo/troubleshooting
-  backend/                 Node ESM, Express, Playwright, better-sqlite3, VLM client  (:8788)
+  backend/                 Node ESM, Express, Playwright, better-sqlite3, VLM client  (:8990)
     src/                   core modules (see map below)
     public/host.html       Tableau <tableau-viz> embed page + window.__agentBridge (Embedding API v3)
     scripts/               llama-server launchers + vision smoke test
@@ -35,7 +35,7 @@ dashboard-agent/           ← project root / working directory
 ## Architecture & the key insight
 
 ```
-React viewer (:5173) ──REST(start/list/replay)+SSE(live steps)──► Node backend (:8788)
+React viewer (:5173) ──REST(start/list/replay)+SSE(live steps)──► Node backend (:8990)
                                                                      │ Playwright drives ONE shared long-lived browser
                                     ┌────────────────────────────────┴───────────────┐
                           host.html (<tableau-viz> + __agentBridge)          llama-server (:8080, VLM)
@@ -48,7 +48,7 @@ The **user's browser never embeds the Tableau viz** — Tableau renders marks to
 Three processes, ideally in this order (llama first so its ~15–25s load hides behind the others). Windows, PowerShell primary. All paths below are relative to this root.
 
 1. **VLM** — `backend/scripts/start-llama.ps1` → llama-server on `:8080`. Wait for `main: server is listening` / `curl http://127.0.0.1:8080/health` → `{"status":"ok"}`.
-2. **Backend** — from `backend/`: `npm run dev` (= `node src/server.js`) → Express + shared Playwright browser on `:8788`.
+2. **Backend** — from `backend/`: `npm run dev` (= `node src/server.js`) → Express + shared Playwright browser on `:8990`.
 3. **Frontend** — Preview tool `preview_start({name: "frontend"})` (or from `frontend/`: `npm run dev`) → Vite on `:5173`.
 
 Backend/frontend don't need llama-server until a session actually starts. Only one model fits in 6GB VRAM at a time — stop one llama-server before starting another.

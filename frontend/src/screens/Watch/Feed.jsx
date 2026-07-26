@@ -298,7 +298,7 @@ function OutcomeCard({ run }) {
   );
 }
 
-export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive, liveSessionIds, trailingTakeover }) {
+export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive, liveSessionIds, trailingTakeover, tallComposer }) {
   const scrollRef = useRef(null);
   const userScrolledUpRef = useRef(false);
 
@@ -315,14 +315,19 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
     userScrolledUpRef.current = el.scrollTop + el.clientHeight < el.scrollHeight - 24;
   }
 
-  // pt-14/pb-24 clear the panel's overlaid header and composer bars, so messages
-  // come to rest fully visible rather than under the glass.
+  // pt-14/pb-* clear the panel's overlaid header and composer, so messages come
+  // to rest fully visible rather than under the glass. The composer grows a
+  // second row (question + step counter) while a turn runs, so the bottom
+  // clearance follows it instead of being one size that's wrong half the time.
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      className="thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pb-24 pt-14 text-fg"
+      className={cx(
+        "thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pt-14 text-fg",
+        tallComposer ? "pb-36" : "pb-24",
+      )}
     >
       {/* Spacer to push content to the bottom */}
       <div className="flex-1 shrink-0" />

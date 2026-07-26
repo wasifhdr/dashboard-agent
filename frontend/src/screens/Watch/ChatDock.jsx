@@ -114,6 +114,23 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
     else el.setAttribute("inert", "");
   }, [open]);
 
+  // Clicking anywhere outside the panel (the dashboard, the bar below it, the
+  // header) minimizes it. pointerdown rather than click so the panel is already
+  // on its way out as the press lands on the live dashboard, and non-capturing
+  // so a handler that stops propagation can still opt out.
+  // Read through a ref so the listener is bound once per open/close, not on
+  // every parent render - Watch re-renders on every live screencast frame.
+  const onMinimizeRef = useRef(onMinimize);
+  onMinimizeRef.current = onMinimize;
+  useEffect(() => {
+    if (!open) return undefined;
+    function handlePointerDown(e) {
+      if (!panelRef.current?.contains(e.target)) onMinimizeRef.current?.();
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
   return (
     <div
       ref={panelRef}
