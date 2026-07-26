@@ -2,7 +2,7 @@ import { cx } from "./ui/cx.js";
 import { useTheme } from "../hooks/useTheme.js";
 
 const NAV_LINK_BASE =
-  "rounded-pill px-3 py-1.5 text-sm font-bold focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2";
+  "rounded-pill px-3 py-1.5 text-sm font-bold text-white/75 hover:bg-white/15 hover:text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2";
 
 function SunIcon() {
   return (
@@ -30,14 +30,14 @@ function ThemeToggle() {
       onClick={toggleTheme}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      className="grid size-8 place-items-center rounded-pill text-fg/70 hover:bg-glass-hover hover:text-fg focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
+      className="grid size-8 place-items-center rounded-pill text-white/75 hover:bg-white/15 hover:text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
     >
       {isDark ? <SunIcon /> : <MoonIcon />}
     </button>
   );
 }
 
-export default function AppShell({ view, onNavigate, children }) {
+export default function AppShell({ view, onNavigate, headerCenter, children }) {
   // Landing manages its own full-width marketing bands; watch manages its own
   // full-height stage/feed/composer layout. Only history uses the default
   // padded content wrapper (DESIGN.md §6).
@@ -49,25 +49,36 @@ export default function AppShell({ view, onNavigate, children }) {
   return (
     <div className={cx("flex min-h-screen flex-col", view === "watch" && "min-[901px]:h-dvh min-[901px]:overflow-hidden")}>
       <div className="bg-orbs" aria-hidden="true" />
-      <header className="glass-deep sticky top-0 z-40">
-        <div className="flex h-14 items-center justify-between px-6">
+      <header className="sticky top-0 z-40 bg-teal-deep/70 text-white shadow-sm backdrop-blur-xl backdrop-saturate-150 border-b border-white/10">
+        <div className="relative flex h-14 items-center justify-between px-6">
           <button
             type="button"
             onClick={() => onNavigate("landing")}
-            className="rounded-control font-sans text-lg font-extrabold tracking-tight text-fg focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
+            className="rounded-control font-sans text-lg font-extrabold tracking-tight text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
           >
             Docent
           </button>
+          {headerCenter?.name && (
+            <a
+              href={headerCenter.url}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open “${headerCenter.name}” on Tableau Public`}
+              className="absolute left-1/2 max-w-[45%] -translate-x-1/2 truncate rounded-control px-2 text-sm font-bold text-white/90 hover:text-white hover:underline focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
+            >
+              {headerCenter.name}
+            </a>
+          )}
           <nav className="flex items-center gap-2">
             {view === "watch" && (
-              <button type="button" onClick={() => onNavigate("landing")} className={cx(NAV_LINK_BASE, "text-fg/70 hover:bg-glass-hover hover:text-fg")}>
+              <button type="button" onClick={() => onNavigate("landing")} className={NAV_LINK_BASE}>
                 New dashboard
               </button>
             )}
             <button
               type="button"
               onClick={() => onNavigate("history")}
-              className={cx(NAV_LINK_BASE, view === "history" ? "bg-glass-hover text-teal-ink" : "text-fg/70 hover:bg-glass-hover hover:text-fg")}
+              className={cx(NAV_LINK_BASE, view === "history" && "bg-white/15 text-white")}
             >
               History
             </button>

@@ -233,7 +233,7 @@ function authHeaders(apiKeyEnv, env) {
 
 // ---- llama-server call --------------------------------------------------
 
-async function callVlm({ config, systemText, userText, imagePath }) {
+async function callVlm({ config, systemText, userText, imagePath, stopSignal }) {
   const imageDataUrl = await resizeImageToDataUrl(imagePath, config.imageLongSide);
   const target = resolveVlmTarget(config);
 
@@ -259,12 +259,16 @@ async function callVlm({ config, systemText, userText, imagePath }) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.vlmCallTimeoutMs);
+  // Abort the in-flight request on EITHER the per-call timeout OR an external
+  // stop request (the user hitting Stop), so a stop takes effect immediately
+  // instead of waiting for this (slow, in pixel mode) call to finish.
+  const fetchSignal = stopSignal ? AbortSignal.any([controller.signal, stopSignal]) : controller.signal;
   try {
     const res = await fetch(target.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders(target.apiKeyEnv, process.env) },
       body: JSON.stringify(payload),
-      signal: controller.signal,
+      signal: fetchSignal,
     });
     const bodyText = await res.text();
     if (!res.ok) {
@@ -282,18 +286,22 @@ async function callVlm({ config, systemText, userText, imagePath }) {
 // Up to 3 total attempts (1 initial + 2 re-prompts) before giving up
 // (AGENT_PLAN.md 6.2: "up to 2 re-prompts... a 3rd failure records the step
 // as invalid_json").
-export async function getNextAction({ config, question, inventory, history, imagePath, correctiveFeedback, onAttempt = () => {} }) {
+export async function getNextAction({ config, question, inventory, history, imagePath, correctiveFeedback, onAttempt = () => {}, stopSignal }) {
   let feedback = correctiveFeedback;
   let lastRaw = null;
   let lastNetworkError = null;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
+    // A stop requested mid-flight aborts callVlm below; don't burn the
+    // remaining retries re-issuing (immediately-aborting) calls — bail out so
+    // the orchestrator's post-call shouldStop() check ends the run promptly.
+    if (stopSignal?.aborted) break;
     if (attempt >= 2) onAttempt(attempt);
     const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback, mode: config.actuationMode ?? "api" });
 
     let raw;
     try {
-      raw = await callVlm({ config, systemText, userText, imagePath });
+      raw = await callVlm({ config, systemText, userText, imagePath, stopSignal });
     } catch (e) {
       // Network failure / timeout / llama-server down. Distinct from a
       // malformed-but-present response - don't inject a "not valid JSON"

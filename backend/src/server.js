@@ -202,7 +202,26 @@ let turnRunning = false;
 // two overlapping POST /api/conversations calls could both proceed
 // concurrently and leak a Playwright context (B0 review fix).
 let conversationOpening = false;
-const stopRequests = new Set();
+// Per-turn AbortControllers, keyed by turnId. Stop requests abort the
+// controller, which both flips shouldStop() and aborts the in-flight VLM
+// request so a stop takes effect immediately instead of at the next step.
+const stopControllers = new Map();
+
+// Resolves once no turn is running (or after timeoutMs). Used before closing a
+// conversation whose turn we just aborted, so the Playwright context isn't torn
+// out from under an in-flight runSession before it unwinds.
+function waitForTurnToStop(timeoutMs) {
+  if (!turnRunning) return Promise.resolve();
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      if (!turnRunning || Date.now() - start > timeoutMs) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 100);
+  });
+}
 
 // Shared by POST /api/conversations and the POST /api/sessions shim (#6):
 // opens a fresh conversation runtime and registers it as active, closing
@@ -261,6 +280,8 @@ async function startTurn({ conversationId, activeRuntime, question }) {
   const turnId = crypto.randomUUID();
   const turnIndex = store.getConversationTurns(conversationId).length;
   bus.createBus(turnId);
+  const stopController = new AbortController();
+  stopControllers.set(turnId, stopController);
   turnRunning = true;
   // Live-view lock: tell any WS watchers the agent is now driving (veil on).
   activeRuntime.setMode("agent");
@@ -285,7 +306,8 @@ async function startTurn({ conversationId, activeRuntime, question }) {
       }
       adaptAndPublish(turnId, evt);
     },
-    shouldStop: () => stopRequests.has(turnId),
+    shouldStop: () => stopController.signal.aborted,
+    stopSignal: stopController.signal,
   })
     .catch((err) => {
       console.error(`Turn ${turnId} (conversation ${conversationId}) failed:`, err);
@@ -297,7 +319,7 @@ async function startTurn({ conversationId, activeRuntime, question }) {
       bus.publish(turnId, { type: "session_done", status: "error", final_answer: null, confidence: null, error: errorMessage });
     })
     .finally(async () => {
-      stopRequests.delete(turnId);
+      stopControllers.delete(turnId);
       // Live-view unlock (veil off) - but only if THIS conversation is still
       // the active one. If the runtime was closed/replaced mid-turn, there's
       // nothing to unlock and setMode on a stale runtime would be wrong.
@@ -369,13 +391,16 @@ app.post("/api/conversations/:id/close", async (req, res) => {
 
   const activeRuntime = conversationRuntime.getActiveRuntime();
   if (activeRuntime && activeRuntime.conversationId === req.params.id) {
-    // Don't tear the Playwright context out from under a turn that is still
-    // running on it - the in-flight runSession would hit a "context closed"
-    // error on its next page call instead of stopping cleanly (B0 review
-    // fix). Caller should wait for the turn to finish (or POST the turn's
-    // /stop endpoint first) and retry.
+    // If a turn is still running (the user hit Stop / End session mid-turn),
+    // abort it first - this cancels the in-flight VLM call and ends the turn -
+    // then wait for it to unwind before tearing down the Playwright context, so
+    // the in-flight runSession stops cleanly rather than hitting "context
+    // closed" on its next page call. (Previously this rejected with 409 and
+    // left the caller to stop-then-retry; the "stop and leave" flow closes in
+    // one shot instead.)
     if (turnRunning) {
-      return res.status(409).json({ error: "A turn is currently running on this conversation. Wait for it to finish before closing." });
+      for (const controller of stopControllers.values()) controller.abort();
+      await waitForTurnToStop(8000);
     }
     // runtime.close() self-clears the active-runtime singleton, but only if
     // this is still the active one - so an explicit setActiveRuntime(null)
@@ -432,7 +457,11 @@ app.post("/api/sessions", async (req, res) => {
 app.post("/api/sessions/:id/stop", (req, res) => {
   const session = store.getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found." });
-  stopRequests.add(req.params.id);
+  // Abort the in-flight turn (if still running): flips shouldStop() AND cancels
+  // any in-flight VLM request, so the orchestrator ends at the very next check
+  // instead of waiting out a slow pixel-mode call. A no-op if the turn already
+  // finished (controller removed in startTurn's finally).
+  stopControllers.get(req.params.id)?.abort();
   res.json({ ok: true });
 });
 

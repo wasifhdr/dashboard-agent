@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { cx } from "../../components/ui/cx.js";
 import CapsLabel from "../../components/ui/CapsLabel.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
-import { useTypewriter } from "../../hooks/useTypewriter.js";
-import { TYPEWRITER_MS_PER_CHAR } from "./pacing.js";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 
 const OUTCOME_CONFIG = {
@@ -67,11 +65,28 @@ function ElapsedTimer({ since }) {
   );
 }
 
-function ThoughtLine({ text, active }) {
-  const { revealed, done } = useTypewriter(text, TYPEWRITER_MS_PER_CHAR, active);
-  if (!text) return null;
+// Collapsed-by-default reasoning disclosure (Claude/ChatGPT style): a small
+// muted "Thinking…/Thought" label with no box; clicking it reveals the reasoning
+// text in a smaller, quieter type. stopPropagation so toggling it doesn't also
+// select the step's frame in the Stage.
+function ThoughtDisclosure({ text, active }) {
+  const [open, setOpen] = useState(false);
+  if (!text && !active) return null;
   return (
-    <p className={cx("mt-1 text-sm leading-relaxed text-fg", active && !done && "typewriter-caret")}>{revealed}</p>
+    <div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        className="flex items-center gap-1 text-xs text-fg/45 hover:text-fg/70"
+      >
+        <span className={cx("transition-transform", open && "rotate-90")}>›</span>
+        <span className={active ? "animate-pulse" : ""}>{active ? "Thinking…" : "Thought"}</span>
+      </button>
+      {open && text && <p className="mt-1 pl-3.5 text-xs leading-relaxed text-fg/55">{text}</p>}
+    </div>
   );
 }
 
@@ -122,16 +137,11 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
 
   return (
     <div
-      className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
+      className="cursor-pointer py-1"
       onClick={onSelect}
     >
-      <div className="flex items-center justify-between font-mono text-xs text-fg/50">
-        <span>STEP {step.idx}</span>
-        {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
-      </div>
-
       {revealMode === "pending" && (
-        <div className="mt-1 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <Spinner className="border-glass-border border-t-gold-ink" />
           <span className="text-sm text-fg/70">Reading the dashboard…</span>
           {step.attempt && (
@@ -143,7 +153,7 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
       )}
 
       {revealMode !== "pending" && isInvalid && (
-        <div className="mt-1 text-sm">
+        <div className="text-sm">
           {step.actionStatus === "vlm_error" ? (
             <span className="text-coral-ink">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
           ) : (
@@ -154,8 +164,8 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
 
       {revealMode !== "pending" && !isInvalid && (
         <>
-          <ThoughtLine text={step.thought} active={revealMode === "typing"} />
-          {step.planned && (revealMode === "action-pending" || revealMode === "resolved") && (
+          <ThoughtDisclosure text={step.thought} active={revealMode === "typing"} />
+          {step.planned && step.planned.label !== "Answer" && (revealMode === "action-pending" || revealMode === "resolved") && (
             <ActionLine step={step} pending={revealMode === "action-pending"} />
           )}
         </>
@@ -171,20 +181,14 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
 // on raw event data alone would make the typewriter effectively invisible).
 function LiveStepCard({ step, isSelected, onSelect }) {
   const isInvalid = step.actionStatus === "invalid_json" || step.actionStatus === "vlm_error";
-  const { revealed, done } = useTypewriter(step.thought, TYPEWRITER_MS_PER_CHAR, !!step.thought);
 
   return (
     <div
-      className={cx("cursor-pointer rounded-control border px-3 py-2", isSelected ? "border-glass-border-strong" : "border-transparent")}
+      className="cursor-pointer py-1"
       onClick={onSelect}
     >
-      <div className="flex items-center justify-between font-mono text-xs text-fg/50">
-        <span>STEP {step.idx}</span>
-        {step.durationMs != null && <span>{(step.durationMs / 1000).toFixed(1)} s</span>}
-      </div>
-
       {!step.thought && !isInvalid && (
-        <div className="mt-1 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <Spinner className="border-glass-border border-t-gold-ink" />
           <span className="text-sm text-fg/70">Reading the dashboard…</span>
           {step.attempt && (
@@ -197,7 +201,7 @@ function LiveStepCard({ step, isSelected, onSelect }) {
       )}
 
       {isInvalid && (
-        <div className="mt-1 text-sm">
+        <div className="text-sm">
           {step.actionStatus === "vlm_error" ? (
             <span className="text-coral-ink">VLM request failed: {(step.errorMsg ?? "").slice(0, 120)}</span>
           ) : (
@@ -208,8 +212,8 @@ function LiveStepCard({ step, isSelected, onSelect }) {
 
       {step.thought && !isInvalid && (
         <>
-          <p className={cx("mt-1 text-sm leading-relaxed text-fg", !done && "typewriter-caret")}>{revealed}</p>
-          {done && step.planned && <ActionLine step={step} pending={step.actionStatus == null} />}
+          <ThoughtDisclosure text={step.thought} active={!step.planned} />
+          {step.planned && step.planned.label !== "Answer" && <ActionLine step={step} pending={step.actionStatus == null} />}
         </>
       )}
     </div>
@@ -263,11 +267,13 @@ function TakeoverCard({ takeover }) {
   );
 }
 
-function QuestionCard({ index, question }) {
+// User's question — a bubble pushed to the right so it reads as "yours".
+function QuestionCard({ question }) {
   return (
-    <div className="panel-tint-teal rounded-control p-3">
-      <CapsLabel className="text-teal-ink">QUESTION {index}</CapsLabel>
-      <p className="mt-1 text-[15px] font-medium text-fg">{question}</p>
+    <div className="flex justify-end">
+      <div className="panel-tint-teal max-w-[85%] rounded-card rounded-br-sm px-3 py-2">
+        <p className="text-sm font-medium text-fg">{question}</p>
+      </div>
     </div>
   );
 }
@@ -279,12 +285,15 @@ function OutcomeCard({ run }) {
   const body = config.body ?? (run.status === "error" ? run.error : run.finalAnswer);
   const showConfidence = (run.status === "answered" || run.status === "max_steps") && run.confidence != null;
 
+  // Agent's answer — a bubble kept to the left, mirroring the user's right-aligned question.
   return (
-    <div className={cx("rounded-control border-l-4 p-4", config.surface, config.border)}>
-      <div className={cx("text-label uppercase", config.labelColor)}>{config.label}</div>
-      <p className="mt-1 text-base font-bold text-fg">{body}</p>
-      {showConfidence && <div className="mt-1 font-mono text-xs text-fg/60">confidence {run.confidence.toFixed(2)}</div>}
-      {config.subline && <p className="mt-1 text-sm text-fg/70">{config.subline}</p>}
+    <div className="flex justify-start">
+      <div className={cx("max-w-[90%] rounded-card rounded-bl-sm border-l-4 p-4", config.surface, config.border)}>
+        {config.label !== "ANSWER" && <div className={cx("text-label uppercase", config.labelColor)}>{config.label}</div>}
+        <p className={cx("text-sm font-medium text-fg", config.label !== "ANSWER" && "mt-1")}>{body}</p>
+        {showConfidence && <div className="mt-1 font-mono text-xs text-fg/60">confidence {run.confidence.toFixed(2)}</div>}
+        {config.subline && <p className="mt-1 text-sm text-fg/70">{config.subline}</p>}
+      </div>
     </div>
   );
 }
@@ -306,13 +315,17 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
     userScrolledUpRef.current = el.scrollTop + el.clientHeight < el.scrollHeight - 24;
   }
 
+  // pt-14/pb-24 clear the panel's overlaid header and composer bars, so messages
+  // come to rest fully visible rather than under the glass.
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      className="thin-scrollbar glass-deep flex h-full flex-col gap-3 overflow-y-auto p-4 pb-28 text-fg"
+      className="thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pb-24 pt-14 text-fg"
     >
+      {/* Spacer to push content to the bottom */}
+      <div className="flex-1 shrink-0" />
       {runs.map((run, runIdx) => {
         const sortedIdxs = [...run.steps.keys()].sort((a, b) => a - b);
         const runOutcomeVisible = atOutcome ? true : !playback ? true : runIdx < playback.runIdx;
@@ -323,7 +336,7 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
               <div className="my-1 text-center font-mono text-xs text-fg/50">— new question —</div>
             )}
             {runIdx > 0 && run.precedingTakeover && <TakeoverCard takeover={run.precedingTakeover} />}
-            <QuestionCard index={runIdx + 1} question={run.question} />
+            <QuestionCard question={run.question} />
             {run.status === "loading" ? (
               <div className="font-mono text-xs text-fg/60">→ opening dashboard…</div>
             ) : (

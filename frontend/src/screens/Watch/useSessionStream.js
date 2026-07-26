@@ -6,8 +6,11 @@ import {
   getDashboardsMeta,
   createConversation,
   postTurn,
+  stopSession,
+  closeConversation,
   subscribeToSession,
 } from "../../api.js";
+import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 
 const DEFAULT_MAX_STEPS = 15;
 
@@ -213,6 +216,12 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   // silently treating "no id yet" as "no conversation exists" - see
   // getConversationId below.
   const pendingConversationRef = useRef(null);
+  // Monotonic token identifying the current question. stopTurn()/stopAndLeave()
+  // bump it; a startQuestion() call whose token is no longer current bails out
+  // before starting a turn (covers Stop pressed while the dashboard is still
+  // opening). Per-call token (not a shared boolean) so a later question isn't
+  // wrongly treated as cancelled by an earlier stop.
+  const questionTokenRef = useRef(0);
 
   function applyEvent(runSessionId, evt) {
     setRuns((prev) => {
@@ -241,6 +250,7 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   }
 
   async function startQuestion(question) {
+    const token = ++questionTokenRef.current;
     const isFirstTurn = !conversationIdRef.current;
     if (isFirstTurn) {
       // POST /api/conversations itself blocks until the dashboard has opened
@@ -282,6 +292,10 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
         conversationIdRef.current = conversation_id;
         setConversationId(conversation_id);
       }
+      // The user hit Stop / End session while the dashboard was still opening -
+      // this question was superseded, so don't start a turn for it (End session
+      // separately closes the conversation now that its id is known).
+      if (questionTokenRef.current !== token) return null;
       const { session_id, takeover } = await postTurn(conversationIdRef.current, question);
       const newRun = {
         sessionId: session_id,
@@ -327,6 +341,55 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
       }
     }
     return null;
+  }
+
+  // Stop the CURRENT response but stay on the Watch screen (the live dashboard
+  // stays open for a follow-up). Reflects the stop in the UI immediately -
+  // optimistic, so it never waits on the backend - while stopSession aborts the
+  // in-flight VLM call in the background. Bumping the token also cancels a turn
+  // still in its dashboard-opening phase (no session id yet).
+  function stopTurn() {
+    questionTokenRef.current++;
+    const last = runs[runs.length - 1];
+    if (last?.sessionId) stopSession(last.sessionId).catch(() => {});
+    // Stop applying further live events for this run, then reflect the stop now.
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+    setRuns((prev) => {
+      if (prev.length === 0) return prev;
+      const lastRun = prev[prev.length - 1];
+      if (!lastRun.sessionId) return prev.slice(0, -1); // still opening: no turn yet, drop it
+      if (TERMINAL_STATUSES.has(lastRun.status)) return prev; // already finished
+      const stopped = { ...lastRun, status: "stopped" };
+      // Drop a trailing step still stuck on "Reading the dashboard…" (a frame
+      // captured but no thought/action yet) so it doesn't render a spinner that
+      // never resolves next to the STOPPED card.
+      const idxs = [...stopped.steps.keys()].sort((a, b) => a - b);
+      const lastIdx = idxs[idxs.length - 1];
+      const lastStep = lastIdx != null ? stopped.steps.get(lastIdx) : null;
+      if (lastStep && !lastStep.thought && !lastStep.planned) {
+        const steps = new Map(stopped.steps);
+        steps.delete(lastIdx);
+        stopped.steps = steps;
+      }
+      const next = [...prev];
+      next[next.length - 1] = stopped;
+      return next;
+    });
+  }
+
+  // "End session": abort the running turn's in-flight VLM call AND close the
+  // conversation (freeing the live dashboard). Fire-and-forget so the caller
+  // can navigate away this instant regardless of backend latency;
+  // getConversationId() waits out an in-flight dashboard open so the
+  // conversation is still closed even if End session was hit mid-open.
+  function stopAndLeave() {
+    questionTokenRef.current++;
+    const lastSid = runs[runs.length - 1]?.sessionId;
+    if (lastSid) stopSession(lastSid).catch(() => {});
+    getConversationId()
+      .then((id) => (id ? closeConversation(id) : null))
+      .catch(() => {});
   }
 
   // Dashboard thumbnail (for Stage's loading state) + global maxSteps.
@@ -477,5 +540,7 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
     startQuestion,
     reconnect,
     getConversationId,
+    stopTurn,
+    stopAndLeave,
   };
 }

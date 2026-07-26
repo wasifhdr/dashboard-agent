@@ -3,10 +3,9 @@ import { cx } from "../../components/ui/cx.js";
 import CrossfadeImage from "../../components/CrossfadeImage.jsx";
 import Button from "../../components/ui/Button.jsx";
 import Badge from "../../components/ui/Badge.jsx";
-import Spinner from "../../components/ui/Spinner.jsx";
 
-// Dashboard frame viewport. Playback controls (Prev/Next/Play/Overlays) now
-// live in the StatusBar, so the frame gets the full column height here.
+// Dashboard frame viewport. Playback controls (Prev/Next/Play) now live in the
+// thread header ("Ask the Agent" row), so the frame gets the full column height here.
 export default function Stage({
   step,
   showOverlay,
@@ -45,33 +44,26 @@ export default function Stage({
 
         <div className={cx("glass shadow-teal-glow relative overflow-hidden rounded-card-lg", showingFrame || showingPreview ? "w-fit max-w-full" : "w-full")}>
           {loadingState ? (
-            <div className="relative">
-              {loadingState.thumbnailUrl ? (
-                <img
-                  src={loadingState.thumbnailUrl}
-                  alt=""
-                  className="max-h-[calc(100dvh-12rem)] w-full object-contain opacity-50"
-                />
-              ) : (
-                <div className="py-24" />
-              )}
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
-                <Spinner />
-                <p className="text-sm text-fg/70">{loadingState.message}</p>
-              </div>
-            </div>
+            // The loading message itself renders in the caption row BELOW the
+            // dashboard (see Watch.jsx) rather than on top of the frame.
+            loadingState.thumbnailUrl ? (
+              <img
+                src={loadingState.thumbnailUrl}
+                alt=""
+                className="max-h-[calc(100dvh-12rem)] w-full object-contain opacity-50"
+              />
+            ) : (
+              <div className="py-24" />
+            )
           ) : !step?.frameUrl ? (
             showingPreview ? (
-              <div className="relative">
-                <img
-                  src={previewUrl}
-                  alt={dashboardName ? `Default view of ${dashboardName}` : "Dashboard default view"}
-                  className="max-h-[calc(100dvh-12rem)] w-full object-contain"
-                />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
-                  <Badge variant="neutral">Default view · ask a question to begin</Badge>
-                </div>
-              </div>
+              // "Default view · ask a question to begin" likewise lives in the
+              // caption row below the dashboard.
+              <img
+                src={previewUrl}
+                alt={dashboardName ? `Default view of ${dashboardName}` : "Dashboard default view"}
+                className="max-h-[calc(100dvh-12rem)] w-full object-contain"
+              />
             ) : (
               <div className="flex flex-col items-center gap-2 py-24 text-center">
                 {dashboardName && (

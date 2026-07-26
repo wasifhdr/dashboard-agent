@@ -28,7 +28,7 @@ const BUTTON_NAMES = { 0: "left", 1: "middle", 2: "right" };
 // short, human-readable line. This is a LiveStage-local sibling of
 // warningLabels.js's WARNING_LABEL - same lookup-object pattern, but for the
 // live-connection error surface (a different, transport-level concept from
-// the orchestrator-level `run.warnings` StatusBar renders). Any reason not
+// the orchestrator-level `run.warnings` the Watch warnings strip renders). Any reason not
 // listed here - including a missing/unrecognized one - falls back to the
 // generic message rather than being left unhandled.
 const CLOSED_REASON_LABEL = {
@@ -266,25 +266,17 @@ export default function LiveStage({
           )}
 
           {/* Lock veil: the agent is driving, so the view is not interactive
-              and input is not forwarded. */}
+              and input is not forwarded. The accompanying "Docent is working…"
+              label lives in the status row BELOW the dashboard (Watch.jsx),
+              alongside every other dashboard status, so nothing is written over
+              the frame itself. */}
           {mode === "agent" && (
-            <div className="pointer-events-none absolute inset-0 flex items-end justify-center bg-black/20 p-4 backdrop-blur-[1px]">
-              <Badge variant="info">Docent is working…</Badge>
-            </div>
+            <div className="pointer-events-none absolute inset-0 bg-black/20 backdrop-blur-[1px]" />
           )}
 
           {liveFrameUrl && (
             <div className="pointer-events-none absolute left-3 top-3">
               <Badge variant="neutral">● Live</Badge>
-            </div>
-          )}
-
-          {/* Subtle affordance that the view is now clickable - the input
-              layer itself is fully transparent, so without this there's no
-              visual cue the takeover window is open. */}
-          {interactive && (
-            <div className="pointer-events-none absolute right-3 top-3">
-              <Badge variant="success">Yours — click to interact</Badge>
             </div>
           )}
 

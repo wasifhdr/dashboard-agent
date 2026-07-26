@@ -83,6 +83,10 @@ export async function runSession({
   onEvent = () => {},
   sessionId: providedSessionId,
   shouldStop = () => false,
+  // Optional AbortSignal that fires when the user requests a stop. Threaded
+  // into the VLM call so a stop aborts an in-flight (slow, pixel-mode) request
+  // immediately, rather than only being noticed at the next step boundary.
+  stopSignal,
   // Conversation reuse opts (docs/LIVE_TAKEOVER_PLAN.md Phase B0). All
   // optional and default to today's standalone-session behavior:
   // - page: an already-open Playwright page to reuse. When provided,
@@ -283,6 +287,7 @@ export async function runSession({
       imagePath: framePath,
       correctiveFeedback,
       onAttempt: (attempt) => onEvent({ type: "vlm_attempt", idx, attempt }),
+      stopSignal,
     });
 
     if (shouldStop()) {

@@ -18,22 +18,22 @@ test("pixel mode resolves to the pixel endpoint + key env name", () => {
     llamaEndpoint: "http://127.0.0.1:8080",
     modelName: "local",
     pixel: {
-      vlmEndpoint: "https://api.craftx.corecraftsolutions.com/api",
-      modelName: "Qwen3 VL 30B A3B Instruct",
-      vlmApiKeyEnv: "CRAFTX_API_KEY",
+      vlmEndpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
+      modelName: "gemini-flash-lite-latest",
+      vlmApiKeyEnv: "GEMINI_API_KEY",
     },
   };
   const t = resolveVlmTarget(cfg);
-  assert.equal(t.url, "https://api.craftx.corecraftsolutions.com/api/v1/chat/completions");
-  assert.equal(t.modelName, "Qwen3 VL 30B A3B Instruct");
-  assert.equal(t.apiKeyEnv, "CRAFTX_API_KEY");
+  assert.equal(t.url, "https://generativelanguage.googleapis.com/v1beta/openai/v1/chat/completions");
+  assert.equal(t.modelName, "gemini-flash-lite-latest");
+  assert.equal(t.apiKeyEnv, "GEMINI_API_KEY");
 });
 
 test("authHeaders returns {} without a key, Bearer with one", () => {
   assert.deepEqual(authHeaders(null, {}), {});
-  assert.deepEqual(authHeaders("CRAFTX_API_KEY", {}), {});
-  assert.deepEqual(authHeaders("CRAFTX_API_KEY", { CRAFTX_API_KEY: "" }), {});
-  assert.deepEqual(authHeaders("CRAFTX_API_KEY", { CRAFTX_API_KEY: "sk-x" }), {
+  assert.deepEqual(authHeaders("GEMINI_API_KEY", {}), {});
+  assert.deepEqual(authHeaders("GEMINI_API_KEY", { GEMINI_API_KEY: "" }), {});
+  assert.deepEqual(authHeaders("GEMINI_API_KEY", { GEMINI_API_KEY: "sk-x" }), {
     Authorization: "Bearer sk-x",
   });
 });

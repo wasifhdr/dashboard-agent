@@ -26,10 +26,11 @@ function HistoryIcon({ className = "size-5" }) {
   );
 }
 
-// Step-history control: the per-step screenshot thumbnails, tucked into a
-// floating glass bubble at the bottom-left of the Stage. Collapsed by default
-// (a history icon + frame count); click to expand the scrollable thumbnail
-// strip. Renders nothing until the first frame exists.
+// Step-history control: the per-step screenshot thumbnails. Lives inline in the
+// bar under the dashboard (next to the chat dock trigger); collapsed by default
+// to a history icon + frame count, and the scrollable thumbnail strip pops up
+// ABOVE the bar when expanded, so the bar's height never changes. Renders
+// nothing until the first frame exists.
 export default function Filmstrip({ runs, selected, onSelect }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -45,49 +46,48 @@ export default function Filmstrip({ runs, selected, onSelect }) {
 
   if (!items.length) return null;
 
-  if (!expanded) {
-    return (
+  return (
+    <div className="relative">
       <button
         type="button"
-        onClick={() => setExpanded(true)}
-        aria-label={`Show step history (${items.length} frame${items.length === 1 ? "" : "s"})`}
+        onClick={() => setExpanded((v) => !v)}
+        aria-label={`${expanded ? "Hide" : "Show"} step history (${items.length} frame${items.length === 1 ? "" : "s"})`}
+        aria-expanded={expanded}
         title="Step history"
-        className="glass-raised absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-pill px-3 py-2 text-fg/70 transition-transform duration-150 ease-glass hover:scale-[1.03] hover:text-fg active:scale-[0.97]"
+        className="glass-teal flex items-center gap-2 rounded-pill px-3 py-2 text-fg/80 transition-transform duration-150 ease-glass hover:scale-[1.03] hover:text-fg active:scale-[0.97] focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
       >
         <HistoryIcon />
         <span className="font-mono text-xs tabular-nums">{items.length}</span>
       </button>
-    );
-  }
 
-  return (
-    <div className="glass-raised absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col gap-2 rounded-card p-2">
-      <div className="flex items-center justify-between gap-4 px-1">
-        <div className="flex items-center gap-2 text-fg/70">
-          <HistoryIcon className="size-4" />
-          <span className="text-label uppercase">Step history</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          aria-label="Collapse step history"
-          className="rounded-pill p-1 text-fg/60 transition-colors hover:bg-glass-hover hover:text-fg"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="size-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-      </div>
-      <div className="flex gap-2 overflow-x-auto">
+      {expanded && (
+        <div className="glass-raised absolute bottom-full left-0 z-30 mb-2 flex w-max max-w-[min(46rem,calc(100vw-2rem))] flex-col gap-2 rounded-card p-2">
+          <div className="flex items-center justify-between gap-4 px-1">
+            <div className="flex items-center gap-2 text-fg/70">
+              <HistoryIcon className="size-4" />
+              <span className="text-label uppercase">Step history</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              aria-label="Collapse step history"
+              className="rounded-pill p-1 text-fg/60 transition-colors hover:bg-glass-hover hover:text-fg"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="size-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+          <div className="thin-scrollbar flex gap-2 overflow-x-auto">
         {items.map(({ runIdx, stepIdx, step, isRunStart }) => {
           const isSelected = selected && selected.runIdx === runIdx && selected.stepIdx === stepIdx;
           const dotColor = statusDotColor(step.actionStatus);
@@ -108,7 +108,9 @@ export default function Filmstrip({ runs, selected, onSelect }) {
             </button>
           );
         })}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

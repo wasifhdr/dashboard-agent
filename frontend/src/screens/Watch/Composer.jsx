@@ -66,6 +66,15 @@ export default function Composer({
     if (!isRunning) setStopping(false);
   }, [isRunning]);
 
+  // Auto-grow the textarea upward as the question gets longer, capped at ~half
+  // the viewport (the thread bubble is bottom-anchored, so it grows upward).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.45))}px`;
+  }, [value]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     const question = value.trim();
@@ -90,6 +99,12 @@ export default function Composer({
   // an untouched suggestion is showing cycles to the next. Once the user edits
   // it into something of their own, Tab reverts to its normal focus behavior.
   function handleKeyDown(e) {
+    // Enter submits; Shift+Enter inserts a newline (textarea default).
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+      return;
+    }
     if (e.key !== "Tab" || e.shiftKey || exampleQuestions.length === 0) return;
     if (value.trim() === "") {
       e.preventDefault();
@@ -139,20 +154,13 @@ export default function Composer({
     );
   }
 
-  const showTabHint = value === "" && exampleQuestions.length > 0;
-  // Between turns the dashboard stays live and clickable (Phase B2 takeover)
-  // - nudge the user toward exploring it before/instead of typing.
-  const showExploreHint = hasPriorRun && !isRunning;
-
   return (
     <div className="glass-raised rounded-card">
-      {showExploreHint && (
-        <div className="px-4 pt-2 text-xs text-fg/50">Explore the dashboard above, then ask a follow-up.</div>
-      )}
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 py-2 pl-4 pr-2">
-        <input
+      <form onSubmit={handleSubmit} className="flex items-end gap-2 py-2 pl-4 pr-2">
+        <textarea
           ref={inputRef}
-          className="min-w-0 flex-1 bg-transparent py-1.5 text-[15px] text-fg placeholder:text-fg/40 focus:outline-none"
+          rows={1}
+          className="thin-scrollbar min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-relaxed text-fg placeholder:text-fg/40 focus:outline-none"
           placeholder={hasPriorRun ? "Ask a follow-up…" : "Ask anything about this dashboard…"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -169,17 +177,7 @@ export default function Composer({
           <SendIcon />
         </Button>
       </form>
-      {error ? (
-        <div className="px-4 pb-2 text-xs font-medium text-coral-ink">{error}</div>
-      ) : (
-        showTabHint && (
-          <div className="px-4 pb-2 text-right text-xs text-fg/40">
-            Press{" "}
-            <kbd className="rounded border border-glass-border px-1 py-0.5 font-mono text-[11px] text-fg/60">Tab</kbd>{" "}
-            for a suggested question
-          </div>
-        )
-      )}
+      {error && <div className="px-4 pb-2 text-xs font-medium text-coral-ink">{error}</div>}
     </div>
   );
 }

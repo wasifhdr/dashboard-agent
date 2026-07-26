@@ -164,36 +164,36 @@ Open `http://localhost:5173`.
 
 ## Demo script
 
-**With live conversations (B0-B4) in place, lead with the two-turn Zillow conversation that includes a manual takeover in between** - it's the demo that actually shows off what this phase built, rather than just the per-step agent loop the earlier demos below already covered: the dashboard stays open across turns, the audience watches the agent work in the **live** view (not just per-step frames), then the presenter takes the wheel for a few seconds before handing it back.
+**With live conversations (B0-B4) in place, lead with the two-turn Video Game Sales conversation that includes a manual takeover in between** - it's the demo that actually shows off what this phase built, rather than just the per-step agent loop the earlier demos below already covered: the dashboard stays open across turns, the audience watches the agent work in the **live** view (not just per-step frames), then the presenter takes the wheel for a few seconds before handing it back.
 
 ```
-Dashboard:  Zillow Home Value Index (April 2019)
-Turn 1:     What is the ZHVI (median home value) for Boston, MA according to the dashboard?
-Turn 1 →    $465,000 (agent answers live; the lock veil then lifts)
-Takeover:   click the ZRI dashboard tab yourself, directly in the live view
-Turn 2:     Report the current Zillow Rent Index (ZRI) value shown for the United States.
-Turn 2 →    $1,477 (agent reads the tab you switched to - it never reloads or re-picks the tab itself)
+Dashboard:  Video Game Sales
+Turn 1:     In the Top 5 Publishers chart, which publisher has the highest total sales?
+Turn 1 →    Nintendo (agent answers live; the lock veil then lifts)
+Takeover:   click the 'Electronic Arts' bar yourself, directly in the live view, to filter the dashboard to EA
+Turn 2:     Which single game now has the highest global sales in the Top 10 Games chart?
+Turn 2 →    FIFA 15 (agent reads the state you left it in - it never reloads or re-applies the filter itself)
 ```
 
-Narrate it as: ask the first question and watch Docent answer live, the same as before; once it finishes, the lock veil disappears and the "Yours" badge appears - switch to the ZRI tab yourself instead of asking the agent to; then ask the follow-up and watch it answer from the state *you* left it in. That last beat - a turn resuming into a human's manual edit, on the same live page, with no reload - is the concrete payoff of the whole persistent-conversation system and the one moment worth building the demo around.
+Narrate it as: ask the first question and watch Docent answer live, the same as before; once it finishes, the lock veil disappears and the "Yours" badge appears - click the Electronic Arts bar yourself instead of asking the agent to; then ask the follow-up and watch it answer from the state *you* left it in. That last beat - a turn resuming into a human's manual edit, on the same live page, with no reload - is the concrete payoff of the whole persistent-conversation system and the one moment worth building the demo around. (Both turn values are verified: Nintendo tops the unfiltered publishers chart, and FIFA 15 is EA's top game after the filter.)
 
-For a **quick single-turn fallback** (if the live WebSocket isn't cooperating, or time is short): the Zillow Rent Index tab-switch question on its own is still fast (2 steps, ~15-20s total) and visibly exercises a *real* multi-tab workbook switch, with the agent doing the tab switch itself.
-
-```
-Dashboard: Zillow Home Value Index (April 2019)
-Question:  Switch to the ZRI dashboard tab and report the current Zillow Rent Index (ZRI) value shown for the United States.
-Expected:  $1,477
-```
-
-For a **richer single-turn demo** that shows the system recovering from a mistake (a good "look how it handles a hard case" moment): the Boston ZHVI question on its own. This dashboard has a decoy parameter that isn't wired to anything, so the agent tries it, gets rejected by the loop guard, and self-corrects to the real filter within a few steps - a genuinely interesting trajectory to narrate live, and also exactly what happens inside Turn 1 of the lead demo above if you want to call attention to it there instead.
+For a **quick single-turn fallback** (if the live WebSocket isn't cooperating, or time is short): a pure-reading question on the Video Game Sales dashboard is the fastest reliable demo (1 step, ~10s), exercising pixel-mode perception with no click needed.
 
 ```
-Dashboard: Zillow Home Value Index (April 2019)
-Question:  What is the ZHVI (median home value) for Boston, MA according to the dashboard?
-Expected:  $465,000 (typically 4-5 steps, including one rejected decoy attempt)
+Dashboard: Video Game Sales
+Question:  In the Top 5 Publishers chart, which publisher has the highest total sales?
+Expected:  Nintendo   (1 step, verified in pixel mode)
 ```
 
-Avoid leading with `q4` (the CA Infectious Diseases icon-counting question) live - its answer is a genuinely hard, currently-unverified read, which is a fine research talking point but a confusing demo moment if the audience expects a confident right/wrong.
+For a **richer single-turn demo** that shows pixel-click actuation end to end (a good "look, it operates the dashboard" moment): the Electronic Arts filter question on Video Game Sales. The agent pixel-clicks the big EA bar in the Top 5 Publishers chart, the whole dashboard re-filters to EA, and it reads the top game off the updated frame.
+
+```
+Dashboard: Video Game Sales
+Question:  Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart.
+Expected:  FIFA 15   (2 steps, verified in pixel mode)
+```
+
+Pick large, clearly-labeled marks as click targets. Clicking the *small stacked rows* in the "Top Genres" chart instead makes the agent loop (10+ `rejected_loop` steps observed) because the pixel target is too small/ambiguous - a good cautionary note if asked about pixel-mode limits, but not something to demo live.
 
 ## Pixel-clicking actuation mode
 
@@ -205,7 +205,7 @@ By default, the agent operates dashboards through the Tableau Embedding API v3 (
 
 **Data-egress note:** In pixel mode, per-step dashboard screenshots are sent to the configured third-party VLM endpoint (CraftX), unlike the default local-only pipeline. The configured dashboards are Tableau Public (public data), so sensitivity is low; no credentials or personal data are sent.
 
-**Running the demo:** enable pixel mode as above, start the three processes (llama-server is not needed for a pixel-mode-only run, but leave the usual startup order otherwise unchanged), then ask the same fastest known-good question — Zillow → "Switch to the ZRI dashboard tab and report the current Zillow Rent Index (ZRI) value for the United States" — and watch the Watch screen: instead of semantic action cards, you'll see a visible cursor click its way across the dashboard toward the answer.
+**Running the demo:** enable pixel mode as above, start the three processes (llama-server is not needed for a pixel-mode-only run, but leave the usual startup order otherwise unchanged), then ask the verified pixel-click question — Video Game Sales → "Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart" (expect **FIFA 15**, 2 steps) — and watch the Watch screen: instead of semantic action cards, you'll see a visible cursor click the EA bar and the dashboard re-filter before it answers.
 
 ## Troubleshooting
 
@@ -213,7 +213,7 @@ By default, the agent operates dashboards through the Tableau Embedding API v3 (
 - **Session hangs at "Running" forever:** shouldn't happen post-Phase-3 - every stage has a bounded timeout (viz load 90s, VLM call 120s, bridge action 30s, session wall clock 15min). If it does, check `backend` stdout for an unhandled exception; the server's crash safety net should still mark the session `error` in the DB, but a truly stuck Playwright page is the one thing that can't self-recover - restart the backend.
 - **Settle timeout warnings:** shown when a dashboard update takes >12s to visually stabilize (slow Tableau Public rendering, not a bug). The step still completes with a `settle_timeout` flag; occasional ones are normal on heavier dashboards, frequent ones suggest that specific dashboard isn't a good fit for the curated list.
 - **Empty inventory warning:** the dashboard has no API-operable filters/parameters/extra sheets - the agent can only answer from what's visible in the initial screenshot. Not an error, just a capability limit of that specific dashboard.
-- **A dashboard has a "decoy" control:** some real-world workbooks (see Zillow above) have parameters or filters left over from authoring that aren't wired to anything visible. The loop guard + escalating corrective feedback (AGENT_PLAN.md-driven design) handles this automatically, typically converging within 2-3 extra steps - if you see a session burn most of its 15-step budget on this, that's worth investigating as a regression.
+- **A dashboard has a "decoy" control:** some real-world workbooks have parameters or filters left over from authoring that aren't wired to anything visible. The loop guard + escalating corrective feedback (AGENT_PLAN.md-driven design) handles this automatically, typically converging within 2-3 extra steps - if you see a session burn most of its 15-step budget on this, that's worth investigating as a regression.
 - **Image reading seems worse than expected:** check `config.imageLongSide` (1280px) hasn't been lowered, and that the dashboard's actual content isn't being letterboxed with dead margin (the host page auto-sizes to the dashboard's real published size after `FirstInteractive`, but a dashboard with `size.behavior === "automatic"` has no fixed size to snap to and may render at the default 1600x1000 box with wasted space - see the CA Revenue Sources dashboard for an example, its real content only occupies the left ~40% of a wider default canvas).
 
 ## Model A/B results
@@ -251,6 +251,6 @@ Intentionally out of scope for the frontend revamp (see `../FRONTEND_PLAN.md`) -
 - **Tableau's internal iframe reuses `id="viz"`** - the embedded element uses `id="agentViz"` to avoid Playwright locator collisions.
 - **Filter domain enumeration (`getDomainAsync`) works reliably** on every dashboard tested - the `domain: null` fallback path is a true edge case, not the common case.
 - **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field when the active sheet is a dashboard - no manual per-worksheet iteration needed for categorical filters. Range filters have no dashboard-level equivalent and still need per-worksheet `applyRangeFilterAsync`.
-- **Real-world dashboards can have decoy/orphaned controls** - a parameter or filter that sounds relevant by name but isn't wired to anything visible (see Zillow's "Select Region" parameter vs. its real `RegionName` filter). The system recovers via loop-guard rejection + escalating corrective feedback, not by detecting decoys directly (that's not generally knowable).
+- **Real-world dashboards can have decoy/orphaned controls** - a parameter or filter that sounds relevant by name but isn't wired to anything visible (a real workbook may ship a "Select Region" parameter that does nothing while a separate `RegionName` filter is the one that actually works). The system recovers via loop-guard rejection + escalating corrective feedback, not by detecting decoys directly (that's not generally knowable).
 - **Dense, fine-grained charts (many small icons/marks close together) are genuinely hard to verify** even by manual human inspection of a screenshot, not just for the VLM - see the `q4` disease-icon-counting case. Don't treat a model's answer on this class of question as ground truth without independent verification.
 - **A dashboard's screenshot can have significant dead margin** if `sheet.size.behavior === "automatic"` (no fixed published size to auto-snap the host page to) - see CA Revenue Sources, whose real content occupies only the left ~40% of its captured frame.

@@ -12,12 +12,16 @@ export default function App() {
   // by History.jsx's row click handler, consumed only here.
   const [replayTarget, setReplayTarget] = useState(null);
   const [watchHasActiveRun, setWatchHasActiveRun] = useState(false);
+  // The live dashboard {name, url} Watch is currently showing, surfaced in the
+  // top header as a clickable link. Null outside the watch view.
+  const [watchDashboard, setWatchDashboard] = useState(null);
 
   function navigate(nextView) {
     if (view === "watch" && nextView !== "watch" && watchHasActiveRun) {
       if (!window.confirm("The agent is still running. Leave this session?")) return;
     }
     setWatchHasActiveRun(false);
+    if (nextView !== "watch") setWatchDashboard(null);
     setView(nextView);
   }
 
@@ -25,6 +29,7 @@ export default function App() {
     setWatchTarget(target);
     setReplayTarget(null);
     setWatchHasActiveRun(false);
+    setWatchDashboard(target ?? null);
     setView("watch");
   }
 
@@ -32,23 +37,25 @@ export default function App() {
     setReplayTarget(target);
     setWatchTarget(null);
     setWatchHasActiveRun(false);
+    setWatchDashboard(null);
     setView("watch");
   }
 
-  // Explicit "End session" on a live conversation (Watch's StatusBar, Phase
-  // B4). Only fires after the conversation has actually been closed
-  // server-side (or never existed), so — unlike navigate() — there's no
-  // still-running conversation left behind to confirm about. Goes to
-  // "history" to mirror the replay branches' own onBack, which land there too.
+  // Stop / End session on a live conversation (the composer Stop button and the
+  // red stop button in Watch's thread header). Navigates back to the landing
+  // page immediately; Watch has already kicked off the backend cleanup
+  // (abort the turn + close the dashboard) fire-and-forget, so there's nothing
+  // to await here.
   function endLiveWatch() {
     setWatchTarget(null);
     setReplayTarget(null);
     setWatchHasActiveRun(false);
-    setView("history");
+    setWatchDashboard(null);
+    setView("landing");
   }
 
   return (
-    <AppShell view={view} onNavigate={navigate}>
+    <AppShell view={view} onNavigate={navigate} headerCenter={view === "watch" ? watchDashboard : null}>
       {view === "landing" && <Landing onOpenWatch={openWatch} onOpenHistory={() => navigate("history")} />}
       {view === "watch" && replayTarget?.kind === "conversation" && (
         <Watch
@@ -56,6 +63,7 @@ export default function App() {
           conversationId={replayTarget.id}
           onBack={() => navigate("history")}
           onActiveRunChange={setWatchHasActiveRun}
+          onDashboardChange={setWatchDashboard}
         />
       )}
       {view === "watch" && replayTarget?.kind === "session" && (
@@ -64,6 +72,7 @@ export default function App() {
           sessionId={replayTarget.id}
           onBack={() => navigate("history")}
           onActiveRunChange={setWatchHasActiveRun}
+          onDashboardChange={setWatchDashboard}
         />
       )}
       {view === "watch" && !replayTarget && watchTarget && (
@@ -72,6 +81,7 @@ export default function App() {
           dashboardTarget={watchTarget}
           onActiveRunChange={setWatchHasActiveRun}
           onEnd={endLiveWatch}
+          onDashboardChange={setWatchDashboard}
         />
       )}
       {view === "history" && <History onOpenReplay={openReplay} onGoToLanding={() => navigate("landing")} />}

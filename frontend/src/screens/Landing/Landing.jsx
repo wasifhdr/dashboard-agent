@@ -118,7 +118,7 @@ export default function Landing({ onOpenWatch, onOpenHistory }) {
             <div className="hero-rise space-y-5">
               <Field
                 label="Find a dashboard"
-                placeholder='Try "home values", "infectious diseases", "state revenue"…'
+                placeholder='Try "video games", "netflix", "flight delays"…'
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {

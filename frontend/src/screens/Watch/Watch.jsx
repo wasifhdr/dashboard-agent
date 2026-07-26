@@ -3,17 +3,27 @@ import { useSessionStream } from "./useSessionStream.js";
 import { useLiveChannel } from "./useLiveChannel.js";
 import { useBeatSequencer } from "./useBeatSequencer.js";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
-import { closeConversation, stopSession } from "../../api.js";
-import StatusBar from "./StatusBar.jsx";
 import Stage from "./Stage.jsx";
 import LiveStage from "./LiveStage.jsx";
 import Filmstrip from "./Filmstrip.jsx";
 import Feed from "./Feed.jsx";
-import Inspect from "./Inspect.jsx";
 import Composer from "./Composer.jsx";
+import ChatPanel, { ChatDockTrigger } from "./ChatDock.jsx";
+import Spinner from "../../components/ui/Spinner.jsx";
+import { cx } from "../../components/ui/cx.js";
+import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
-import { cx } from "../../components/ui/cx.js";
+import { WARNING_LABEL } from "./warningLabels.js";
+
+// Small square "stop" glyph for the red end-session button in the thread header.
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
 
 function flattenSteps(runs) {
   const flat = [];
@@ -29,7 +39,7 @@ function flattenSteps(runs) {
 // follow-up) questions on `dashboardTarget` via the Composer; `mode ===
 // "replay"` loads a historical session (live re-attaching automatically if
 // it's still running - see useSessionStream's replay branch).
-export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onEnd, onActiveRunChange }) {
+export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange }) {
   const stream = useSessionStream(mode, {
     sessionId,
     conversationId,
@@ -47,8 +57,13 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   const sequencer = useBeatSequencer(runs);
   const [manualSelected, setManualSelected] = useState(null);
   const [followLive, setFollowLive] = useState(mode === "live");
-  const [showOverlay, setShowOverlay] = useState(true);
-  const [activeTab, setActiveTab] = useState("feed");
+  const showOverlay = true; // step-action overlays are always on now (toggle removed)
+  // Floating conversation dock: open by default, minimizable to a bubble so the
+  // dashboard gets the whole canvas.
+  const [dockOpen, setDockOpen] = useState(true);
+  // True when a turn finished while the dock was minimized, so the bubble can
+  // advertise "Response ready" until the user looks at it.
+  const [unread, setUnread] = useState(false);
 
   const primaryRun = runs[0] ?? null;
   const lastRun = runs[runs.length - 1] ?? null;
@@ -59,6 +74,26 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   useEffect(() => {
     onActiveRunChange?.(isRunning);
   }, [isRunning, onActiveRunChange]);
+
+  // Flag "Response ready" on the minimized bubble the moment a running turn
+  // settles while the dock is closed. Opening the dock (below) clears it.
+  const wasRunningRef = useRef(false);
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning && !dockOpen) setUnread(true);
+    wasRunningRef.current = isRunning;
+  }, [isRunning, dockOpen]);
+
+  function openDock() {
+    setDockOpen(true);
+    setUnread(false);
+  }
+
+  // Surface the resolved dashboard {name, url} to the app header (clickable
+  // link). In live mode the stream fills this in once the first turn opens the
+  // dashboard; in replay it comes from the loaded session.
+  useEffect(() => {
+    if (dashboard?.name || dashboard?.url) onDashboardChange?.({ name: dashboard.name, url: dashboard.url });
+  }, [dashboard?.name, dashboard?.url, onDashboardChange]);
 
   useEffect(() => {
     if (manualSelected || followLive || !primaryRun) return;
@@ -133,32 +168,21 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
     setFollowLive(true);
   }
 
-  async function handleStop() {
-    // lastRun.sessionId is briefly null for the very first turn's placeholder
-    // run (it exists to drive the loading UI while POST /api/conversations
-    // is still opening the dashboard - see useSessionStream's startQuestion),
-    // so there's no session yet to stop.
-    if (lastRun?.sessionId) await stopSession(lastRun.sessionId);
+  // Composer "Stop": halt the current response but STAY on the Watch screen -
+  // the live dashboard stays open so the user can ask a follow-up. Reflects
+  // instantly (stream.stopTurn is optimistic) while the backend aborts the
+  // in-flight VLM call in the background.
+  function handleStopTurn() {
+    stream.stopTurn();
   }
 
-  // Explicit "End session" (Phase B4). If a turn is currently running, the
-  // backend's close endpoint 409s with a clear message ("A turn is currently
-  // running on this conversation...") - StatusBar surfaces that rather than
-  // this hook guarding against it, per docs/LIVE_TAKEOVER_PLAN.md §9 Phase
-  // B4 item 2's turn-while-locked error-taxonomy requirement. When no
-  // conversation has been created yet (mode==="live" but no question asked),
-  // there's nothing server-side to close, so this just navigates away.
-  //
-  // stream.getConversationId() (rather than reading liveConversationId
-  // directly) matters for the very first turn: clicking this while the first
-  // turn's dashboard is still opening would otherwise see liveConversationId
-  // still null (createConversation's POST hasn't resolved yet) and skip the
-  // close entirely, leaking the conversation the moment it finishes opening
-  // server-side - getConversationId awaits that in-flight creation instead of
-  // treating "not known yet" as "doesn't exist".
-  async function handleEndSession() {
-    const id = await stream.getConversationId();
-    if (id) await closeConversation(id);
+  // Header red "End session": leave to the landing page IMMEDIATELY (via onEnd)
+  // while the backend cleanup — abort the in-flight VLM call + close the live
+  // dashboard — runs in the background (stream.stopAndLeave is fire-and-forget).
+  // The frontend never waits on the backend, so it's instant even mid-open or
+  // mid-VLM-call.
+  function handleEndSession() {
+    stream.stopAndLeave();
     onEnd?.();
   }
 
@@ -194,25 +218,41 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // for the frozen last-step Stage before the user can read it.
   const showLive = !isPureReplay && followLive && (live.connected || !!live.closedReason);
 
+  const hasFrame = !!selectedStep;
+  const canPrev = selectedFlatIdx > 0;
+  const canNext = selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1;
+  const warningKinds = lastRun ? [...new Set(lastRun.warnings.map((w) => w.kind))] : [];
+
+  // Every dashboard status shares one row BELOW the frame — nothing is written
+  // over the dashboard itself. Rendered as a Badge pill so the agent-working,
+  // yours-to-explore, loading and idle states all read as the same control.
+  // The showingPreview branch mirrors Stage's own condition.
+  const showingStagePreview = !showLive && !loadingState && !selectedStep?.frameUrl && !!stream.thumbnailUrl;
+  let stageStatus = null;
+  if (loadingState) {
+    stageStatus = { variant: "info", text: loadingState.message, spinner: true };
+  } else if (showLive && !live.closedReason) {
+    // Keyed to the RUN state, not live.mode: the backend flips the live-view
+    // mode back to idle a beat after the turn's session_done, which briefly
+    // showed "Docent is working…" next to an already-delivered answer.
+    stageStatus = isRunning
+      ? { variant: "info", text: "Docent is working…", pulse: true }
+      : { variant: "success", text: "Yours — click to interact" };
+  } else if (showingStagePreview) {
+    stageStatus = { variant: "neutral", text: "Default view · ask a question to begin" };
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <StatusBar
-        dashboard={dashboard}
-        run={lastRun}
-        step={selectedStep}
-        showOverlay={showOverlay}
-        onToggleOverlay={() => setShowOverlay((v) => !v)}
-        onPrev={goPrev}
-        onNext={goNext}
-        canPrev={selectedFlatIdx > 0}
-        canNext={selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1}
-        isPlaying={sequencer.isPlaying}
-        onTogglePlay={togglePlay}
-        showPlayButton={canPlay}
-        showEndSession={mode === "live"}
-        isRunning={isRunning}
-        onEndSession={handleEndSession}
-      />
+      {warningKinds.length > 0 && (
+        <div className="glass-deep shrink-0 space-y-2 px-6 py-2">
+          {warningKinds.map((kind) => (
+            <Card key={kind} variant="callout" accent="gold" className="py-2 text-sm text-fg/80">
+              {WARNING_LABEL[kind] ?? kind}
+            </Card>
+          ))}
+        </div>
+      )}
 
       {showConnectionBanner && (
         <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral-ink">
@@ -223,8 +263,9 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 min-[901px]:grid-cols-[1fr_400px]">
-        <div className="relative flex min-h-0 flex-col overflow-hidden bg-canvas-edge/40">
+      {/* Dashboard owns the full canvas; the conversation floats over it. */}
+      <div className="relative flex min-h-0 flex-1 flex-col bg-canvas-edge/40">
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {showLive ? (
             <LiveStage
               liveFrameUrl={live.liveFrameUrl}
@@ -248,82 +289,112 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               dashboardName={dashboard?.name}
             />
           )}
-          {/* Step thumbnails now live in a floating history bubble (bottom-left),
-              overlaid on the Stage rather than a docked bottom strip. */}
-          <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
         </div>
 
-        {/* Right rail: tabs / thread (scrolls internally) / composer pinned at
-            the bottom — the page itself never scrolls on desktop. */}
-        <div className="flex min-h-0 flex-col border-l border-glass-border max-[900px]:border-l-0 max-[900px]:border-t">
-          <div className="glass-deep flex shrink-0 gap-1 px-3 py-2">
-            {["feed", "inspect"].map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={cx(
-                  "rounded-pill px-3 py-1 text-sm font-bold capitalize",
-                  activeTab === tab ? "bg-glass-hover text-gold-ink" : "text-fg/70 hover:bg-glass-hover hover:text-fg",
-                )}
-              >
-                {tab}
-              </button>
-            ))}
+        {/* Dashboard status row — one pill for every dashboard state. */}
+        <div className="flex h-7 shrink-0 items-center justify-center gap-2 px-4">
+          {stageStatus && (
+            <Badge variant={stageStatus.variant} pulse={stageStatus.pulse}>
+              {stageStatus.spinner && <Spinner className="size-3 shrink-0" />}
+              {stageStatus.text}
+            </Badge>
+          )}
+        </div>
+
+        {/* Bar under the dashboard: conversation + step history on the left,
+            step playback centered, session controls on the right. */}
+        <div className="flex shrink-0 items-center gap-2 px-4 py-3">
+          {/* Padding (not transform) so the row actually reflows: the step
+              history slides out from behind the open panel AND pushes the
+              playback controls along, instead of sliding over them. */}
+          <div
+            className={cx(
+              "flex flex-1 items-center gap-2 transition-[padding] duration-300 ease-glass motion-reduce:transition-none",
+              dockOpen && "min-[901px]:pl-[26rem]",
+            )}
+          >
+            {!dockOpen && <ChatDockTrigger isRunning={isRunning} unread={unread} onOpen={openDock} />}
+            <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
           </div>
-          {/* Thread fills the rail; the composer floats over its bottom as a
-              glass bubble, so the last messages scroll behind it (Feed/Inspect
-              carry bottom padding to clear the float). */}
-          <div className="relative min-h-0 flex-1 max-[900px]:max-h-[40vh] max-[900px]:flex-none max-[900px]:overflow-y-auto">
-            {/* Both panels stay mounted (visibility toggled) so switching tabs
-                never remounts the Feed — otherwise its live thought typewriters
-                would replay from scratch on every return to the tab. */}
-            <div className={cx("h-full", activeTab === "feed" ? "" : "hidden")}>
-              <Feed
-                runs={runs}
-                selected={effectiveSelected}
-                onSelectStep={selectStep}
-                playback={sequencer.playback}
-                atOutcome={sequencer.atOutcome}
-                isLive={stream.everLive}
-                liveSessionIds={stream.liveSessionIds}
-                trailingTakeover={trailingTakeover}
-              />
-            </div>
-            <div className={cx("h-full", activeTab === "inspect" ? "" : "hidden")}>
-              <Inspect step={selectedStep} />
-            </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 pr-5">
-              <div className="pointer-events-auto">
-                {isPureReplay ? (
-                  <div className="glass-raised flex items-center justify-between rounded-card px-4 py-3">
-                    <Badge variant="neutral">REPLAY</Badge>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" onClick={togglePlay}>
-                        {sequencer.isPlaying ? "Pause" : "Play"}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={onBack}>
-                        Back to history
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <Composer
-                    hasPriorRun={runs.length > 0}
-                    exampleQuestions={stream.exampleQuestions}
-                    isRunning={isRunning}
-                    runningQuestion={lastRun?.question}
-                    stepsUsed={lastRun?.steps.size ?? 0}
-                    maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
-                    startedAt={lastRun?.startedAt}
-                    onAsk={handleAsk}
-                    onStop={handleStop}
-                  />
+
+          <div className="flex items-center gap-2">
+            {hasFrame && (
+              <>
+                <Button size="sm" variant="ghost" onClick={goPrev} disabled={!canPrev}>
+                  Prev
+                </Button>
+                <Button size="sm" variant="ghost" onClick={goNext} disabled={!canNext}>
+                  Next
+                </Button>
+                {canPlay && (
+                  <Button size="sm" variant="ghost" onClick={togglePlay}>
+                    {sequencer.isPlaying ? "Pause" : "Play"}
+                  </Button>
                 )}
-              </div>
-            </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-1 items-center justify-end gap-2">
+            {isPureReplay ? (
+              <>
+                <Badge variant="neutral">REPLAY</Badge>
+                <Button size="sm" variant="ghost" onClick={onBack}>
+                  Back to history
+                </Button>
+              </>
+            ) : (
+              mode === "live" && (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={handleEndSession}
+                  className="gap-2"
+                  title="End session and return to the landing page (the live dashboard closes in the background)."
+                >
+                  <StopIcon />
+                  End session
+                </Button>
+              )
+            )}
           </div>
         </div>
+
+        {/* Expanded conversation. A sibling of the stage AND the bottom bar (not
+            nested in the stage) so it grows out of exactly where the minimized
+            bubble sits, rising to 10px below the site header. Always mounted so
+            open/close animates both ways and the Feed never remounts mid-run. */}
+        <ChatPanel
+          open={dockOpen}
+          onMinimize={() => setDockOpen(false)}
+          thread={
+            <Feed
+              runs={runs}
+              selected={effectiveSelected}
+              onSelectStep={selectStep}
+              playback={sequencer.playback}
+              atOutcome={sequencer.atOutcome}
+              isLive={stream.everLive}
+              liveSessionIds={stream.liveSessionIds}
+              trailingTakeover={trailingTakeover}
+            />
+          }
+          footer={
+            isPureReplay ? null : (
+              <Composer
+                hasPriorRun={runs.length > 0}
+                exampleQuestions={stream.exampleQuestions}
+                isRunning={isRunning}
+                runningQuestion={lastRun?.question}
+                stepsUsed={lastRun?.steps.size ?? 0}
+                maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
+                startedAt={lastRun?.startedAt}
+                onAsk={handleAsk}
+                onStop={handleStopTurn}
+              />
+            )
+          }
+        />
       </div>
     </div>
   );

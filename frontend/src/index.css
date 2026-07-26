@@ -136,7 +136,7 @@
 /* Static tokens — identical in both themes. */
 @theme {
   /* Fonts */
-  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
   /* Accent palette (Flip7-derived) — same hex in both themes; solid fills
@@ -226,6 +226,16 @@
   backdrop-filter: blur(28px) saturate(140%);
   -webkit-backdrop-filter: blur(28px) saturate(140%);
 }
+/* Teal-tinted glass — same blur/shadow physics as glass-raised, with the brand
+   accent mixed into the fill. Used by the chat dock's minimized states so they
+   read as "the agent" without losing the glassmorphism. */
+@utility glass-teal {
+  background: color-mix(in srgb, var(--color-teal) 20%, var(--t-glass-hover));
+  border: 1px solid color-mix(in srgb, var(--color-teal) 42%, var(--t-glass-border-strong));
+  box-shadow: var(--t-shadow-glass-lg);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
 
 @utility panel {
   background: var(--t-panel);
@@ -297,11 +307,104 @@ body {
   animation: ring-ping 600ms var(--ease-glass) 1;
 }
 
+/* Chat thread edge treatment. The panel's header and composer are glass layers
+   ABOVE the scroll area, so messages pass under them and are blurred by their
+   backdrop-filter; this mask then fades those messages out over the last stretch
+   so they dissolve instead of being chopped off at a hard edge. Keep the fade
+   distances slightly larger than the bars themselves, so the fade starts just
+   before a message slips under the glass. */
+.chat-thread-fade {
+  /* Roughly the header / composer heights: messages stay fully opaque right up
+     to each bar, then fade across it. They must still be PRESENT under the bar,
+     otherwise the bar's backdrop-filter has nothing to blur. The gradual blur
+     that starts before the bar comes from .thread-blur-veil-* below. */
+  --thread-fade-top: 3.5rem;
+  --thread-fade-bottom: 5rem;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--thread-fade-top),
+    #000 calc(100% - var(--thread-fade-bottom)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--thread-fade-top),
+    #000 calc(100% - var(--thread-fade-bottom)),
+    transparent 100%
+  );
+}
+
+/* Agent panel title. Deliberately OFF the Inter/JetBrains pair: the product is
+   "Docent" — a museum guide that talks you through an exhibit — so the one place
+   the agent introduces itself gets an editorial serif voice, against Inter for
+   UI and JetBrains Mono for data. Fraunces is the warm end of that family of
+   faces: SOFT rounds the terminals, WONK swaps in its quirkier letterforms, and
+   a display-range opsz gives it the stroke contrast a title wants. */
+.docent-title {
+  font-family: "Fraunces Variable", Georgia, "Times New Roman", serif;
+  font-variation-settings: "opsz" 48, "SOFT" 45, "WONK" 1;
+  font-weight: 600;
+  font-size: 1.4rem;
+  line-height: 1.15;
+  letter-spacing: -0.005em;
+}
+
+/* Progressive-blur veils. Each is a backdrop-filter layer that reaches further
+   into the thread than its bar does, masked so the blur itself ramps off. That
+   way a message starts softening BEFORE it slips under the header/composer,
+   instead of snapping from sharp to blurred at the bar's edge. */
+.thread-blur-veil-top {
+  -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+}
+.thread-blur-veil-bottom {
+  -webkit-mask-image: linear-gradient(to top, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 50%, transparent 100%);
+}
+
+/* Minimized chat dock, "Thinking" state — three dots fading in sequence. */
+@keyframes thinking-dot {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+.thinking-dot {
+  animation: thinking-dot 1.4s ease-in-out infinite both;
+}
+.thinking-dot:nth-of-type(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-of-type(3) { animation-delay: 0.4s; }
+
+/* Minimized chat dock, "Response ready" state — a repeating outward ping that
+   keeps drawing the eye until the panel is reopened (unlike the one-shot
+   .ring-ping used on a settled answer card). */
+@keyframes ready-ping {
+  0% { opacity: 0.5; transform: scale(0.96); }
+  70%, 100% { opacity: 0; transform: scale(1.35); }
+}
+.ready-ping::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  animation: ready-ping 1.8s var(--ease-glass) infinite;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-glow-pulse {
     animation: none;
   }
   .ring-ping::after {
+    animation: none;
+    display: none;
+  }
+  .thinking-dot {
+    animation: none;
+    opacity: 0.7;
+  }
+  .ready-ping::after {
     animation: none;
     display: none;
   }
@@ -313,9 +416,9 @@ body {
 
 /* Stage crossfade: two stacked frame layers, the incoming one fades in.
    The base layer is height-capped so the Watch page fits the viewport with no
-   page scroll (~12rem = shell header + status bar + stage padding; the playback
-   controls live in the StatusBar and the step thumbnails float over the Stage,
-   so neither takes a docked row); the box shrink-wraps the image (w-fit on the
+   page scroll (~12rem = shell header + stage padding; the playback controls
+   live in the thread header and the step thumbnails float over the Stage, so
+   neither takes a docked row); the box shrink-wraps the image (w-fit on the
    frame), keeping the absolute overlay/incoming layers aligned with the visible
    pixels. */
 .stage-crossfade {
