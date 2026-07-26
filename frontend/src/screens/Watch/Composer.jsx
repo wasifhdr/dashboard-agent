@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "../../components/ui/Button.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
+import { cx } from "../../components/ui/cx.js";
+import { useSpeechRecognition } from "../../hooks/useSpeechRecognition.js";
 
 function useElapsedSeconds(startedAt, active) {
   const [now, setNow] = useState(Date.now());
@@ -18,6 +20,55 @@ function formatElapsed(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function MicIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <line x1="12" y1="18" x2="12" y2="22" />
+    </svg>
+  );
+}
+
+// Speaker with sound waves / speaker with a slash — the read-aloud toggle's
+// two faces.
+function SpeakerIcon({ muted }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      {muted ? (
+        <>
+          <line x1="22" y1="9" x2="16" y2="15" />
+          <line x1="16" y1="9" x2="22" y2="15" />
+        </>
+      ) : (
+        <>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+          <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 function SendIcon() {
@@ -54,6 +105,9 @@ export default function Composer({
   startedAt,
   onAsk,
   onStop,
+  readAloud,
+  onToggleReadAloud,
+  canReadAloud,
 }) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -61,6 +115,28 @@ export default function Composer({
   const [error, setError] = useState("");
   const inputRef = useRef(null);
   const elapsedSeconds = useElapsedSeconds(startedAt, isRunning);
+
+  // Whatever was already typed when the mic opened. Each recognition event
+  // carries the full session transcript, so the field is rebuilt as
+  // base + transcript rather than appended to — that's what lets Chrome revise
+  // an interim guess in place instead of stuttering it twice into the box.
+  const dictationBaseRef = useRef("");
+  const dictation = useSpeechRecognition({
+    onTranscript: useCallback((transcript) => {
+      const base = dictationBaseRef.current;
+      setValue(base && transcript ? `${base} ${transcript}` : base + transcript);
+    }, []),
+  });
+
+  function handleMicClick() {
+    if (dictation.listening) {
+      dictation.stop();
+      return;
+    }
+    dictationBaseRef.current = value.trim();
+    dictation.start();
+    inputRef.current?.focus();
+  }
 
   useEffect(() => {
     if (!isRunning) setStopping(false);
@@ -79,6 +155,7 @@ export default function Composer({
     e.preventDefault();
     const question = value.trim();
     if (!question || submitting) return;
+    dictation.stop(); // sending ends dictation — never leave the mic live
     setError("");
     setSubmitting(true);
     try {
@@ -167,6 +244,40 @@ export default function Composer({
           onKeyDown={handleKeyDown}
           aria-label="Ask a question about this dashboard"
         />
+        {canReadAloud && (
+          <button
+            type="button"
+            onClick={onToggleReadAloud}
+            aria-label={readAloud ? "Turn off reading answers aloud" : "Read answers aloud"}
+            aria-pressed={readAloud}
+            title={readAloud ? "Answers are read aloud" : "Answers are not read aloud"}
+            className={cx(
+              "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
+              "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
+              readAloud ? "bg-teal/15 text-teal-ink" : "text-fg/55 hover:bg-glass-hover hover:text-fg",
+            )}
+          >
+            <SpeakerIcon muted={!readAloud} />
+          </button>
+        )}
+        {dictation.supported && (
+          <button
+            type="button"
+            onClick={handleMicClick}
+            aria-label={dictation.listening ? "Stop dictating" : "Dictate your question"}
+            aria-pressed={dictation.listening}
+            title={dictation.listening ? "Stop dictating" : "Dictate your question"}
+            className={cx(
+              "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
+              "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
+              dictation.listening
+                ? "ready-ping relative bg-coral/15 text-coral-ink"
+                : "text-fg/55 hover:bg-glass-hover hover:text-fg",
+            )}
+          >
+            <MicIcon />
+          </button>
+        )}
         <Button
           type="submit"
           variant="primary"
@@ -177,6 +288,20 @@ export default function Composer({
           <SendIcon />
         </Button>
       </form>
+
+      {/* Transient only — both the mic and the read-aloud toggle live in the
+          row above, so the idle composer stays exactly one line tall. This
+          appears solely while dictating or after a mic failure. */}
+      {(dictation.listening || dictation.error) && (
+        <div className="px-4 pb-2 text-xs text-fg/50">
+          {dictation.error ? (
+            <span className="text-coral-ink">{dictation.error}</span>
+          ) : (
+            "Listening… click the mic to stop."
+          )}
+        </div>
+      )}
+
       {error && <div className="px-4 pb-2 text-xs font-medium text-coral-ink">{error}</div>}
     </div>
   );

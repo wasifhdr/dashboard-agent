@@ -7,6 +7,15 @@
     "modelName": "gemini-flash-lite-latest",
     "vlmApiKeyEnv": "GEMINI_API_KEY"
   },
+  "tts": {
+    "enabled": true,
+    "endpoint": "https://api.groq.com/openai/v1/audio/speech",
+    "modelName": "canopylabs/orpheus-v1-english",
+    "voice": "hannah",
+    "apiKeyEnv": "GROQ_API_KEY",
+    "timeoutMs": 20000,
+    "maxChars": 1200
+  },
   "promptStyle": "constrained_json",
   "maxSteps": 15,
   "imageLongSide": 1920,

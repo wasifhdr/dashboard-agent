@@ -13,6 +13,33 @@ export async function getDashboardsMeta() {
   return res.json();
 }
 
+export async function getTtsConfig() {
+  const res = await fetch("/api/tts/config");
+  if (!res.ok) throw new Error(`GET /api/tts/config failed: ${res.status}`);
+  return res.json();
+}
+
+// Returns WAV bytes for `text`, or throws — callers fall back to the browser's
+// own speechSynthesis rather than surfacing an error, so TTS never hard-fails.
+export async function synthesizeSpeech(text, signal) {
+  const res = await fetch("/api/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    signal,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = (await res.json()).detail ?? "";
+    } catch {
+      // non-JSON error body — the status is enough
+    }
+    throw new Error(`POST /api/tts failed: ${res.status} ${detail}`.trim());
+  }
+  return res.blob();
+}
+
 export async function listSessions() {
   const res = await fetch("/api/sessions");
   if (!res.ok) throw new Error(`GET /api/sessions failed: ${res.status}`);

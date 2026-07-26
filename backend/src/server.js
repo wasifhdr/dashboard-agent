@@ -50,6 +50,79 @@ app.get("/api/config", (req, res) => {
   res.json({ dashboards: config.dashboards ?? [], maxSteps: config.maxSteps });
 });
 
+// Text-to-speech proxy. The browser must never see GROQ_API_KEY, so the
+// frontend posts the answer text here and gets audio bytes back.
+//
+// This is strictly an ENHANCEMENT over the browser's own speechSynthesis: the
+// frontend falls back to local voices on any non-200, so a missing key, an
+// unaccepted model terms gate, a 429, or Groq being down all degrade to the
+// robotic-but-always-available path rather than to silence.
+app.get("/api/tts/config", (req, res) => {
+  const tts = config.tts ?? {};
+  // `available` gates the remote path in the UI. The key is only checked for
+  // presence — never sent to the client.
+  res.json({
+    available: !!(tts.enabled && tts.endpoint && (!tts.apiKeyEnv || process.env[tts.apiKeyEnv])),
+    voice: tts.voice ?? null,
+  });
+});
+
+app.post("/api/tts", async (req, res) => {
+  const tts = config.tts ?? {};
+  if (!tts.enabled || !tts.endpoint) {
+    return res.status(503).json({ error: "tts_disabled" });
+  }
+  const apiKey = tts.apiKeyEnv ? process.env[tts.apiKeyEnv] : null;
+  if (tts.apiKeyEnv && !apiKey) {
+    return res.status(503).json({ error: "tts_key_missing", detail: `${tts.apiKeyEnv} is not set` });
+  }
+
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) return res.status(400).json({ error: "empty_text" });
+  // Answers are short; the cap is a guard against a runaway best-effort answer
+  // turning into a minute of billed audio, not a real content limit.
+  const input = text.slice(0, tts.maxChars ?? 1200);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), tts.timeoutMs ?? 20000);
+  try {
+    const upstream = await fetch(tts.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: tts.modelName,
+        input,
+        voice: req.body?.voice || tts.voice,
+        response_format: "wav",
+      }),
+      signal: controller.signal,
+    });
+
+    if (!upstream.ok) {
+      // Surface the provider's own message (model_terms_required, rate limits,
+      // a decommissioned model) rather than a bare status - these are the
+      // failures that actually happen, and they're all actionable.
+      const detail = await upstream.text();
+      console.warn(`[tts] upstream ${upstream.status}: ${detail.slice(0, 300)}`);
+      return res.status(502).json({ error: "tts_upstream_error", status: upstream.status, detail: detail.slice(0, 500) });
+    }
+
+    const audio = Buffer.from(await upstream.arrayBuffer());
+    res.set("Content-Type", "audio/wav");
+    res.set("Cache-Control", "no-store");
+    return res.send(audio);
+  } catch (err) {
+    const reason = err.name === "AbortError" ? "tts_timeout" : "tts_request_failed";
+    console.warn(`[tts] ${reason}: ${err.message}`);
+    return res.status(502).json({ error: reason, detail: err.message });
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 app.get("/api/dashboards/meta", (req, res) => {
   const dashboards = (config.dashboards ?? []).map((d) => {
     const step1 = store.latestStep1ForDashboard(d.url);

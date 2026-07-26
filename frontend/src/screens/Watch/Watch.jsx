@@ -8,13 +8,16 @@ import LiveStage from "./LiveStage.jsx";
 import Filmstrip from "./Filmstrip.jsx";
 import Feed from "./Feed.jsx";
 import Composer from "./Composer.jsx";
-import ChatPanel, { ChatDockTrigger } from "./ChatDock.jsx";
+import ChatPanel from "./ChatDock.jsx";
+import QuickAsk from "./QuickAsk.jsx";
 import Spinner from "../../components/ui/Spinner.jsx";
 import { cx } from "../../components/ui/cx.js";
 import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
 import { WARNING_LABEL } from "./warningLabels.js";
+import { useSpeechSynthesis } from "../../hooks/useSpeechSynthesis.js";
+import { loadReadAloudPref, saveReadAloudPref, speakableAnswer } from "./speech.js";
 
 // Small square "stop" glyph for the red end-session button in the thread header.
 function StopIcon() {
@@ -64,6 +67,10 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // True when a turn finished while the dock was minimized, so the bubble can
   // advertise "Response ready" until the user looks at it.
   const [unread, setUnread] = useState(false);
+  // Read-aloud (TTS) of each turn's final answer. Off by default, remembered
+  // across sessions, and only ever the answer — never thoughts or action cards.
+  const tts = useSpeechSynthesis();
+  const [readAloud, setReadAloud] = useState(loadReadAloudPref);
 
   const primaryRun = runs[0] ?? null;
   const lastRun = runs[runs.length - 1] ?? null;
@@ -87,6 +94,54 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
     setDockOpen(true);
     setUnread(false);
   }
+
+  // Switching it ON reads the answer already on screen, rather than only
+  // affecting the next turn. Without this the control looks broken on first
+  // use: the common path is to read an answer, want it spoken, click the
+  // speaker — and get silence until another question is asked.
+  //
+  // Written as a plain read of `readAloud` (not a setState updater) so the
+  // speak() side effect can't fire twice under StrictMode's double-invoke.
+  function toggleReadAloud() {
+    const next = !readAloud;
+    setReadAloud(next);
+    saveReadAloudPref(next);
+    if (!next) {
+      tts.cancel(); // turning it off mid-sentence should shut up now
+      return;
+    }
+    const latest = [...runs].reverse().find((r) => TERMINAL_STATUSES.has(r.status));
+    const text = latest ? speakableAnswer(latest) : null;
+    if (text) tts.speak(text);
+  }
+
+  // Speak each turn's answer once, as it lands.
+  //
+  // Scoped to `liveSessionIds` — the runs actually driven by a live SSE
+  // subscription — for the same reason Feed uses it: opening a past
+  // conversation from History must not read its whole answer history aloud.
+  // Turns are marked spoken whether or not the toggle is on, so this effect
+  // never replays a backlog of answers when the toggle flips. Speaking the
+  // answer already on screen at that moment is toggleReadAloud's job.
+  const spokenRef = useRef(new Set());
+  // Set by handleVoiceAsk; makes the next settling turn speak regardless of the
+  // toggle, then clears itself.
+  const forceSpeakRef = useRef(false);
+  useEffect(() => {
+    runs.forEach((run) => {
+      if (!TERMINAL_STATUSES.has(run.status)) return;
+      if (!stream.liveSessionIds?.has(run.sessionId)) return;
+      if (spokenRef.current.has(run.sessionId)) return;
+      spokenRef.current.add(run.sessionId);
+      // Read (and clear) the override here rather than at ask time, so it is
+      // consumed exactly once by the turn it was set for.
+      const forced = forceSpeakRef.current;
+      forceSpeakRef.current = false;
+      if ((!readAloud && !forced) || !tts.supported) return;
+      const text = speakableAnswer(run);
+      if (text) tts.speak(text);
+    });
+  }, [runs, readAloud, stream.liveSessionIds, tts.supported, tts.speak]);
 
   // Surface the resolved dashboard {name, url} to the app header (clickable
   // link). In live mode the stream fills this in once the first turn opens the
@@ -164,8 +219,30 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   }, [selectedFlatIdx, flatSteps.length]);
 
   async function handleAsk(question) {
+    tts.cancel(); // a new question cuts off the previous answer being read
     await stream.startQuestion(question);
     setFollowLive(true);
+  }
+
+  // A question asked by voice from the minimized dock is always spoken back,
+  // whatever the Read-aloud toggle says — you asked without looking, so you
+  // shouldn't have to look to get the answer. Deliberately a ONE-SHOT: the
+  // saved preference is left alone, so typing a question later still behaves
+  // however the user set it.
+  //
+  // Consumed by whichever turn settles first, which is unambiguous because the
+  // backend runs one turn at a time. It's cleared even when the turn produces
+  // no speakable answer (error/stopped), so a failed voice turn can't leak the
+  // override onto the next typed one. (`forceSpeakRef` is declared up with
+  // `spokenRef`, next to the effect that consumes it.)
+  async function handleVoiceAsk(question) {
+    forceSpeakRef.current = true;
+    try {
+      await handleAsk(question);
+    } catch (err) {
+      forceSpeakRef.current = false;
+      throw err;
+    }
   }
 
   // Composer "Stop": halt the current response but STAY on the Watch screen -
@@ -182,6 +259,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // The frontend never waits on the backend, so it's instant even mid-open or
   // mid-VLM-call.
   function handleEndSession() {
+    tts.cancel();
     stream.stopAndLeave();
     onEnd?.();
   }
@@ -334,7 +412,14 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               dockOpen && "min-[901px]:pl-[26rem]",
             )}
           >
-            {!dockOpen && <ChatDockTrigger isRunning={isRunning} unread={unread} onOpen={openDock} />}
+            {!dockOpen && (
+              <QuickAsk
+                isRunning={isRunning}
+                unread={unread}
+                onOpen={openDock}
+                onVoiceAsk={handleVoiceAsk}
+              />
+            )}
             <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
           </div>
 
@@ -413,6 +498,9 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
                 startedAt={lastRun?.startedAt}
                 onAsk={handleAsk}
                 onStop={handleStopTurn}
+                readAloud={readAloud}
+                onToggleReadAloud={toggleReadAloud}
+                canReadAloud={tts.supported}
               />
             )
           }

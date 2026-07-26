@@ -176,11 +176,15 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
           the area AROUND the floating bubble stays blurred. */}
       {footer && (
         <>
-          {/* Taller than the header's pair: the composer bubble is opaque and
-              covers the bottom ~76px, so these need extra reach for the strong
-              blur to actually show ABOVE the bubble rather than behind it. */}
-          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-10 h-40 backdrop-blur-md" />
-          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 h-32 backdrop-blur-2xl" />
+          {/* Kept just tall enough to cover the composer bubble (~91px from the
+              panel's bottom edge, including the p-3 gutter) plus a small halo.
+              These used to be h-40/h-32 (160/128px), which reached far enough
+              above the bubble to visibly haze the bottom of the newest answer —
+              the one message you're most likely to be reading. The mask already
+              fades each veil out over its top half, so a shorter box still
+              softens the approach without smearing live text. */}
+          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 backdrop-blur-md" />
+          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 h-24 backdrop-blur-2xl" />
           <div className="absolute inset-x-0 bottom-0 z-30 p-3">{footer}</div>
         </>
       )}
