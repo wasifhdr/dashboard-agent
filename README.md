@@ -197,13 +197,13 @@ Pick large, clearly-labeled marks as click targets. Clicking the *small stacked 
 
 ## Pixel-clicking actuation mode
 
-By default, the agent operates dashboards through the Tableau Embedding API v3 (`__agentBridge` — `applyFilterAsync`, parameters, `activateSheetAsync`). A second, config-selected actuation mode is also available: **pixel mode**, where a hosted VLM (CraftX, serving Qwen3-VL-30B-A3B-Instruct) operates the dashboard by clicking on screen coordinates with a visible cursor, instead of calling structured bridge methods. This is useful for demoing/comparing a pixel-grounded actuation path against the API-grounded default.
+By default, the agent operates dashboards through the Tableau Embedding API v3 (`__agentBridge` — `applyFilterAsync`, parameters, `activateSheetAsync`). A second, config-selected actuation mode is also available: **pixel mode**, where a hosted VLM (Google Gemini, serving `gemini-flash-lite-latest`) operates the dashboard by clicking on screen coordinates with a visible cursor, instead of calling structured bridge methods. This is useful for demoing/comparing a pixel-grounded actuation path against the API-grounded default.
 
 **How to enable:**
-- Set `"actuationMode": "pixel"` in `backend/config.json` (default is `"api"` — leave it alone unless you want pixel mode). The `config.pixel` block (`vlmEndpoint`, `modelName`, `vlmApiKeyEnv`) already points at the CraftX endpoint and doesn't need editing.
-- Put `CRAFTX_API_KEY=<key>` in the root `.env` (git-ignored) — `resolveVlmTarget` in `vlmClient.js` reads the key from that environment variable at the name given by `vlmApiKeyEnv`, never from `config.json` itself.
+- `backend/config.json` currently ships with `"actuationMode": "pixel"`; set it back to `"api"` for the local-only bridge path. The `config.pixel` block (`vlmEndpoint`, `modelName`, `vlmApiKeyEnv`) already points at the Gemini endpoint and doesn't need editing.
+- Put `GEMINI_API_KEY=<key>` in the root `.env` (git-ignored) — `resolveVlmTarget` in `vlmClient.js` reads the key from that environment variable at the name given by `vlmApiKeyEnv`, never from `config.json` itself.
 
-**Data-egress note:** In pixel mode, per-step dashboard screenshots are sent to the configured third-party VLM endpoint (CraftX), unlike the default local-only pipeline. The configured dashboards are Tableau Public (public data), so sensitivity is low; no credentials or personal data are sent.
+**Data-egress note:** In pixel mode, per-step dashboard screenshots are sent to the configured third-party VLM endpoint (Google Gemini), unlike the local-only API-mode pipeline. The configured dashboards are Tableau Public (public data), so sensitivity is low; no credentials or personal data are sent.
 
 **Running the demo:** enable pixel mode as above, start the three processes (llama-server is not needed for a pixel-mode-only run, but leave the usual startup order otherwise unchanged), then ask the verified pixel-click question — Video Game Sales → "Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart" (expect **FIFA 15**, 2 steps) — and watch the Watch screen: instead of semantic action cards, you'll see a visible cursor click the EA bar and the dashboard re-filter before it answers.
 
