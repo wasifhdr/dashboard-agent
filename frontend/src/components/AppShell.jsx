@@ -75,9 +75,13 @@ export default function AppShell({ view, onNavigate, headerCenter, children }) {
                 New dashboard
               </button>
             )}
+            {/* Acts as a toggle: on the History screen it goes back to the
+                landing page, so the highlighted control is never a dead click. */}
             <button
               type="button"
-              onClick={() => onNavigate("history")}
+              onClick={() => onNavigate(view === "history" ? "landing" : "history")}
+              aria-current={view === "history" ? "page" : undefined}
+              title={view === "history" ? "Back to the landing page" : "Past sessions"}
               className={cx(NAV_LINK_BASE, view === "history" && "bg-white/15 text-white")}
             >
               History

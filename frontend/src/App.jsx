@@ -56,7 +56,7 @@ export default function App() {
 
   return (
     <AppShell view={view} onNavigate={navigate} headerCenter={view === "watch" ? watchDashboard : null}>
-      {view === "landing" && <Landing onOpenWatch={openWatch} onOpenHistory={() => navigate("history")} />}
+      {view === "landing" && <Landing onOpenWatch={openWatch} />}
       {view === "watch" && replayTarget?.kind === "conversation" && (
         <Watch
           mode="replay"

@@ -13,7 +13,7 @@ gsap.registerPlugin(useGSAP);
 
 const DEBOUNCE_MS = 150;
 
-export default function Landing({ onOpenWatch, onOpenHistory }) {
+export default function Landing({ onOpenWatch }) {
   const [dashboards, setDashboards] = useState([]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -155,7 +155,7 @@ export default function Landing({ onOpenWatch, onOpenHistory }) {
           </div>
         </div>
       </section>
-      <Footer onOpenHistory={onOpenHistory} />
+      <Footer />
     </div>
   );
 }
