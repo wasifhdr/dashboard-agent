@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { cx } from "../../components/ui/cx.js";
 import CapsLabel from "../../components/ui/CapsLabel.jsx";
+import { IDLE_COMPOSER_H } from "./ChatDock.jsx";
+import { speakableAnswer } from "./speech.js";
 import Spinner from "../../components/ui/Spinner.jsx";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 
@@ -278,12 +280,37 @@ function QuestionCard({ question }) {
   );
 }
 
-function OutcomeCard({ run }) {
+// Speaker with sound waves. Quieter and smaller than the composer's toggle: this
+// is a per-answer affordance that should be findable without competing with the
+// answer text it sits under.
+function SpeakerWavesIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+    </svg>
+  );
+}
+
+function OutcomeCard({ run, onSpeak, isSpeaking }) {
   const config = OUTCOME_CONFIG[run.status];
   if (!config) return null;
 
   const body = config.body ?? (run.status === "error" ? run.error : run.finalAnswer);
   const showConfidence = (run.status === "answered" || run.status === "max_steps") && run.confidence != null;
+  // Only where there is a response to read: `speakableAnswer` deliberately
+  // refuses error/stopped cards, so those get no button rather than a dead one.
+  const canSpeak = !!onSpeak && !!speakableAnswer(run);
 
   // Agent's answer — a bubble kept to the left, mirroring the user's right-aligned question.
   return (
@@ -291,14 +318,57 @@ function OutcomeCard({ run }) {
       <div className={cx("max-w-[90%] rounded-card rounded-bl-sm border-l-4 p-4", config.surface, config.border)}>
         {config.label !== "ANSWER" && <div className={cx("text-label uppercase", config.labelColor)}>{config.label}</div>}
         <p className={cx("text-sm font-medium text-fg", config.label !== "ANSWER" && "mt-1")}>{body}</p>
-        {showConfidence && <div className="mt-1 font-mono text-xs text-fg/60">confidence {run.confidence.toFixed(2)}</div>}
+        {(showConfidence || canSpeak) && (
+          <div className="mt-1 flex items-center justify-between gap-3">
+            {showConfidence ? (
+              <span className="font-mono text-xs text-fg/60">confidence {run.confidence.toFixed(2)}</span>
+            ) : (
+              <span />
+            )}
+            {canSpeak && (
+              <button
+                type="button"
+                // The card is clickable in the Stage sense — don't let reading an
+                // answer aloud also change the selected step.
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSpeak(run);
+                }}
+                aria-label={isSpeaking ? "Stop reading this answer aloud" : "Read this answer aloud"}
+                aria-pressed={isSpeaking}
+                title={isSpeaking ? "Stop reading aloud" : "Read this answer aloud"}
+                className={cx(
+                  "-mb-1 -mr-1 grid size-7 shrink-0 place-items-center rounded-pill transition-colors",
+                  "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
+                  isSpeaking
+                    ? "animate-pulse bg-teal/15 text-teal-ink"
+                    : "text-fg/45 hover:bg-glass-hover hover:text-fg",
+                )}
+              >
+                <SpeakerWavesIcon />
+              </button>
+            )}
+          </div>
+        )}
         {config.subline && <p className="mt-1 text-sm text-fg/70">{config.subline}</p>}
       </div>
     </div>
   );
 }
 
-export default function Feed({ runs, selected, onSelectStep, playback, atOutcome, isLive, liveSessionIds, trailingTakeover, tallComposer }) {
+export default function Feed({
+  runs,
+  selected,
+  onSelectStep,
+  playback,
+  atOutcome,
+  isLive,
+  liveSessionIds,
+  trailingTakeover,
+  composerHeight = 0,
+  onSpeakAnswer = null,
+  speakingRunId = null,
+}) {
   const scrollRef = useRef(null);
   const userScrolledUpRef = useRef(false);
 
@@ -315,19 +385,22 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
     userScrolledUpRef.current = el.scrollTop + el.clientHeight < el.scrollHeight - 24;
   }
 
-  // pt-14/pb-* clear the panel's overlaid header and composer, so messages come
-  // to rest fully visible rather than under the glass. The composer grows a
-  // second row (question + step counter) while a turn runs, so the bottom
-  // clearance follows it instead of being one size that's wrong half the time.
+  // pt-14 / paddingBottom clear the panel's overlaid header and composer, so
+  // messages come to rest fully visible rather than under the glass. The
+  // composer's height is variable — it grows a second row while a turn runs, and
+  // its textarea grows upward as the question gets longer — so the bottom
+  // clearance is driven by its *measured* height (composerHeight, from Watch)
+  // rather than a fixed class. Because that arrives as a prop, a growing
+  // composer re-renders the Feed, and the scroll effect above then re-pins the
+  // thread to the bottom: the messages slide up instead of being overlapped.
+  // The fallback covers the first paint, before the composer has been measured.
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      className={cx(
-        "thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pt-14 text-fg",
-        tallComposer ? "pb-36" : "pb-24",
-      )}
+      style={{ paddingBottom: `${(composerHeight || IDLE_COMPOSER_H) + 28}px` }}
+      className="thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pt-14 text-fg"
     >
       {/* Spacer to push content to the bottom */}
       <div className="flex-1 shrink-0" />
@@ -366,7 +439,9 @@ export default function Feed({ runs, selected, onSelectStep, playback, atOutcome
               return <StepCard key={stepIdx} step={step} revealMode={revealMode} isSelected={isSelected} onSelect={onSelect} />;
             })}
 
-            {TERMINAL_STATUSES.has(run.status) && runOutcomeVisible && <OutcomeCard run={run} />}
+            {TERMINAL_STATUSES.has(run.status) && runOutcomeVisible && (
+              <OutcomeCard run={run} onSpeak={onSpeakAnswer} isSpeaking={speakingRunId === run.sessionId} />
+            )}
           </div>
         );
       })}

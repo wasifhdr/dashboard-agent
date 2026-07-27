@@ -40,16 +40,6 @@
   },
   "dashboards": [
     {
-      "name": "US Flight Delays & Cancellations",
-      "url": "https://public.tableau.com/views/FlightDelayandCancellationDashboard_17154472015970/Dashboard1",
-      "description": "US flight delays and cancellations by airport and state — delayed/cancelled counts, average delay by cause, and per-airport breakdowns. Single-view dashboard.",
-      "tags": ["flights", "airlines", "travel", "delays", "transportation"],
-      "exampleQuestions": [
-        "In the 'Cancellations by airport' chart, which airport has the most cancelled flights, and how many?",
-        "What is the 'AVG Delay Time' value shown in the KPIs at the top of the dashboard?"
-      ]
-    },
-    {
       "name": "Netflix Movies & TV Shows",
       "url": "https://public.tableau.com/views/NetflixMoviesandTVShowsDashboard_17065467710800/Netflix",
       "description": "Netflix's catalog of ~6,200 movies and TV shows — distribution by country, content rating, genre, and year, with a Type (Movie/TV Show) filter. Single-view dashboard.",
@@ -77,6 +67,16 @@
       "exampleQuestions": [
         "Which publisher has the highest total sales in the Top 5 Publishers chart?",
         "In the Top 10 Games by Sales chart, which single game has the highest global sales?"
+      ]
+    },
+    {
+      "name": "US Flight Delays & Cancellations",
+      "url": "https://public.tableau.com/views/FlightDelayandCancellationDashboard_17154472015970/Dashboard1",
+      "description": "US flight delays and cancellations by airport and state — delayed/cancelled counts, average delay by cause, and per-airport breakdowns. Single-view dashboard.",
+      "tags": ["flights", "airlines", "travel", "delays", "transportation"],
+      "exampleQuestions": [
+        "In the 'Cancellations by airport' chart, which airport has the most cancelled flights, and how many?",
+        "What is the 'AVG Delay Time' value shown in the KPIs at the top of the dashboard?"
       ]
     },
     {

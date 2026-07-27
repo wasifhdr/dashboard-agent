@@ -19,6 +19,25 @@ import { WARNING_LABEL } from "./warningLabels.js";
 import { useSpeechSynthesis } from "../../hooks/useSpeechSynthesis.js";
 import { loadReadAloudPref, saveReadAloudPref, speakableAnswer } from "./speech.js";
 
+// Live height of a node, via ResizeObserver. Used for the composer: it floats
+// over the bottom of the thread and changes height (auto-growing textarea, plus
+// a second row while a turn runs), so the thread's bottom clearance has to be
+// measured rather than guessed. Returned as state on purpose — the re-render is
+// what lets the Feed re-pin its scroll to the bottom as the composer grows.
+// Callback ref rather than a plain ref so a node that mounts later (the composer
+// is absent during a pure replay) is still picked up.
+function useMeasuredHeight() {
+  const [node, setNode] = useState(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([entry]) => setHeight(Math.round(entry.contentRect.height)));
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [node]);
+  return [setNode, height];
+}
+
 // Small square "stop" glyph for the red end-session button in the thread header.
 function StopIcon() {
   return (
@@ -71,6 +90,10 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // across sessions, and only ever the answer — never thoughts or action cards.
   const tts = useSpeechSynthesis();
   const [readAloud, setReadAloud] = useState(loadReadAloudPref);
+  // Measured height of the floating composer, fed to the Feed as its bottom
+  // clearance so the thread scrolls up as the composer grows instead of being
+  // overlapped by it.
+  const [composerRef, composerHeight] = useMeasuredHeight();
 
   const primaryRun = runs[0] ?? null;
   const lastRun = runs[runs.length - 1] ?? null;
@@ -95,24 +118,17 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
     setUnread(false);
   }
 
-  // Switching it ON reads the answer already on screen, rather than only
-  // affecting the next turn. Without this the control looks broken on first
-  // use: the common path is to read an answer, want it spoken, click the
-  // speaker — and get silence until another question is asked.
-  //
-  // Written as a plain read of `readAloud` (not a setState updater) so the
-  // speak() side effect can't fire twice under StrictMode's double-invoke.
+  // Applies to LATER turns only: switching it on does NOT read the answer
+  // already on screen. It used to, on the reasoning that a toggle which stays
+  // silent until the next question looks broken — but that made enabling it for
+  // future turns always cost an unwanted replay of the last one. The answer on
+  // screen now has its own speaker button on its outcome card, which is the
+  // precise way to hear one response, so the toggle can mean only what it says.
   function toggleReadAloud() {
     const next = !readAloud;
     setReadAloud(next);
     saveReadAloudPref(next);
-    if (!next) {
-      tts.cancel(); // turning it off mid-sentence should shut up now
-      return;
-    }
-    const latest = [...runs].reverse().find((r) => TERMINAL_STATUSES.has(r.status));
-    const text = latest ? speakableAnswer(latest) : null;
-    if (text) tts.speak(text);
+    if (!next) tts.cancel(); // turning it off mid-sentence should shut up now
   }
 
   // Speak each turn's answer once, as it lands.
@@ -142,6 +158,27 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
       if (text) tts.speak(text);
     });
   }, [runs, readAloud, stream.liveSessionIds, tts.supported, tts.speak]);
+
+  // Per-answer read-aloud — the small speaker on each outcome card. Reads that
+  // one answer once, independent of the toggle and of whether the turn was ever
+  // live, so it also works in replay where the composer (and its toggle) isn't
+  // mounted at all. Tracked by session id so the card currently being read can
+  // offer to STOP rather than restart itself.
+  const [speakingRunId, setSpeakingRunId] = useState(null);
+  useEffect(() => {
+    if (!tts.speaking) setSpeakingRunId(null);
+  }, [tts.speaking]);
+
+  function handleSpeakRun(run) {
+    if (speakingRunId === run.sessionId && tts.speaking) {
+      tts.cancel(); // the effect above clears speakingRunId
+      return;
+    }
+    const text = speakableAnswer(run);
+    if (!text) return;
+    setSpeakingRunId(run.sessionId);
+    tts.speak(text);
+  }
 
   // Surface the resolved dashboard {name, url} to the app header (clickable
   // link). In live mode the stream fills this in once the first turn opens the
@@ -473,6 +510,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
         <ChatPanel
           open={dockOpen}
           onMinimize={() => setDockOpen(false)}
+          footerHeight={composerHeight}
           thread={
             <Feed
               runs={runs}
@@ -483,25 +521,29 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
               isLive={stream.everLive}
               liveSessionIds={stream.liveSessionIds}
               trailingTakeover={trailingTakeover}
-              tallComposer={isRunning}
+              composerHeight={composerHeight}
+              onSpeakAnswer={tts.supported ? handleSpeakRun : null}
+              speakingRunId={speakingRunId}
             />
           }
           footer={
             isPureReplay ? null : (
-              <Composer
-                hasPriorRun={runs.length > 0}
-                exampleQuestions={stream.exampleQuestions}
-                isRunning={isRunning}
-                runningQuestion={lastRun?.question}
-                stepsUsed={lastRun?.steps.size ?? 0}
-                maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
-                startedAt={lastRun?.startedAt}
-                onAsk={handleAsk}
-                onStop={handleStopTurn}
-                readAloud={readAloud}
-                onToggleReadAloud={toggleReadAloud}
-                canReadAloud={tts.supported}
-              />
+              <div ref={composerRef}>
+                <Composer
+                  hasPriorRun={runs.length > 0}
+                  exampleQuestions={stream.exampleQuestions}
+                  isRunning={isRunning}
+                  runningQuestion={lastRun?.question}
+                  stepsUsed={lastRun?.steps.size ?? 0}
+                  maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
+                  startedAt={lastRun?.startedAt}
+                  onAsk={handleAsk}
+                  onStop={handleStopTurn}
+                  readAloud={readAloud}
+                  onToggleReadAloud={toggleReadAloud}
+                  canReadAloud={tts.supported}
+                />
+              </div>
             )
           }
         />

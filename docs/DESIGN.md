@@ -120,13 +120,23 @@ needed) with two amendments:
 
 | Tier | Utility | Blur | Used for |
 |---|---|---|---|
-| Glass chrome | `glass` / `glass-raised` / `glass-deep` | yes | app header, Watch status bar + composer + filmstrip rail + feed container, stage frame, modals, hero feature card |
+| Glass chrome | `glass` / `glass-raised` / `glass-deep` | yes | app header, Watch status bar + filmstrip rail + feed container, stage frame, modals, hero feature card |
+| Glass pane | `glass-pane` | yes | the chat composer — a glass surface that floats *inside* another glass surface (see the blur budget below) |
 | Panel | `panel` | no | nested cards, tables, code blocks, inputs, inspect panel, thumbnails |
 | Tinted panel | `panel-tint-{teal,coral,gold,sky,green,violet}` | no | the colorful zones: question cards (teal), outcome cards (green/gold/coral), loop/feature cards (rotating), landing step-flow nodes |
 
 **Blur budget: ≤6 blurred surfaces per screen.** Blur-inside-blur is banned — a panel inside a
 glass container never blurs. If a new surface needs blur, something else on the screen should
 give it up.
+
+**One frosting per footprint.** The ban above exists because stacked blur does not read as more
+glass, it reads as *less*: frosting a backdrop and then frosting it again through the surface on
+top leaves a uniform wash with no structure to see through, and the top surface flattens into a
+slab. Where a glass surface genuinely must float inside another (the chat composer, `glass-pane`),
+it keeps its own blur and nothing else in its footprint blurs — the chat panel's progressive-blur
+veil is positioned to sit *above* the composer rather than behind it, and `glass-pane` pairs its
+blur with a deliberately thin fill so structure survives. A heavy fill over an already-frosted
+backdrop is the failure mode this rule names.
 
 **Borders:** glass/panel utilities bring their own hairline border. Decorative accent edges
 (`border-t-4 border-t-{accent}` on feature cards, `border-l-4` on callouts/outcomes) layer on top.

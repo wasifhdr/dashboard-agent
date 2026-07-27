@@ -37,6 +37,22 @@ function MinimizeIcon({ className = "size-4" }) {
   );
 }
 
+// Height of the idle one-line composer bubble: py-2 (8+8) + the size-10 action
+// buttons (40) + its hairline border (2). Used only for the first paint, before
+// the ResizeObserver in Watch has reported the real height — measuring it live is
+// what keeps the thread's clearance and the blur ramp attached to the bubble as
+// it grows. Exported so Feed uses the same number rather than a second guess.
+export const IDLE_COMPOSER_H = 58;
+
+// How far the composer's frosting reaches ABOVE the bubble before it has fully
+// ramped off, so messages soften on approach instead of hitting a hard edge.
+const VEIL_RAMP = 56;
+
+// Full strength across the bubble's footprint (its height + the p-3 gutter),
+// then a linear ramp to nothing over VEIL_RAMP above it.
+const VEIL_MASK = (footerHeight) =>
+  `linear-gradient(to top, #000 ${(footerHeight || IDLE_COMPOSER_H) + 12}px, transparent 100%)`;
+
 const TRIGGER_BASE =
   "glass-teal relative flex items-center rounded-pill text-fg transition-transform duration-150 ease-glass " +
   "hover:scale-[1.03] active:scale-[0.97] focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2";
@@ -102,7 +118,7 @@ export function ChatDockTrigger({ isRunning, unread, onOpen, title = "Ask the Ag
 // Layering: the thread is a full-bleed scroll layer; the header and composer sit
 // ABOVE it as glass bars, so messages slide underneath them and blur through,
 // with .chat-thread-fade dissolving them instead of clipping at a hard edge.
-export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", thread, footer }) {
+export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", thread, footer, footerHeight = 0 }) {
   // The panel stays mounted while minimized, so its composer and buttons would
   // otherwise still be reachable by Tab. `inert` takes them out of the tab order
   // and the a11y tree; React 18 has no `inert` prop, so set it on the node.
@@ -136,7 +152,7 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
       ref={panelRef}
       aria-hidden={!open}
       className={cx(
-        "glass-deep absolute bottom-3 left-4 z-30 flex w-[400px] flex-col overflow-hidden rounded-card-lg",
+        "glass-plate absolute bottom-3 left-4 z-30 flex w-[400px] flex-col overflow-hidden rounded-card-lg",
         // Bottom edge sits level with the minimized bubble in the bar below, so
         // the panel visibly grows out of it; top rises to 10px under the header.
         "top-[10px]",
@@ -146,8 +162,15 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
         open ? "scale-100 opacity-100" : "pointer-events-none scale-[0.4] opacity-0",
       )}
     >
+      {/* The panel's own frosting of the dashboard, as a CHILD rather than on the
+          panel itself (`glass-plate` is `glass-deep` minus the blur). Identical
+          to look at — it blurs the same backdrop through the same fill — but it
+          leaves the panel free of backdrop-filter, so the layers ABOVE this one
+          can blur the thread instead of silently re-blurring the dashboard. */}
+      <div className="pointer-events-none absolute inset-0 z-0 backdrop-blur-[28px] backdrop-saturate-[1.4]" />
+
       {/* Thread layer (scrolls; fades out under the bars above it). */}
-      <div className="chat-thread-fade absolute inset-0 z-0">{thread}</div>
+      <div className="chat-thread-fade absolute inset-0 z-[1]">{thread}</div>
 
       {/* Header floats free — no bar fill, no border. Two masked blur layers
           (gentle + strong) sit behind it, so messages soften on approach and
@@ -171,20 +194,30 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
       </div>
 
       {/* Composer floats free — it carries its own glass bubble, so there is no
-          bar fill or border here. Two masked blur layers (gentle + strong) sit
-          behind it instead, so the thread still softens toward the bottom and
-          the area AROUND the floating bubble stays blurred. */}
+          bar fill or border here. */}
       {footer && (
         <>
-          {/* Kept just tall enough to cover the composer bubble (~91px from the
-              panel's bottom edge, including the p-3 gutter) plus a small halo.
-              These used to be h-40/h-32 (160/128px), which reached far enough
-              above the bubble to visibly haze the bottom of the newest answer —
-              the one message you're most likely to be reading. The mask already
-              fades each veil out over its top half, so a shorter box still
-              softens the approach without smearing live text. */}
-          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 backdrop-blur-md" />
-          <div className="thread-blur-veil-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 h-24 backdrop-blur-2xl" />
+          {/* The frosting behind the composer. Runs from the panel's BOTTOM edge
+              up across the bubble's whole footprint at full strength, then ramps
+              off over RAMP px above it — so the blur reaches the bottom of the
+              container instead of stopping at the bubble's top edge, and a
+              message softens before it slides under rather than snapping.
+              This layer, not `.glass-pane`, is what makes the composer read as
+              glass: the bubble is a thin translucent fill sitting ON a blurred
+              region. A backdrop-filter on the bubble itself cannot do this while
+              nested in the panel — see `glass-plate` in index.css.
+              Height and mask both key off the MEASURED composer height, so the
+              full-strength band keeps matching the bubble as the textarea grows.
+              The explicit mask replaces `.thread-blur-veil-bottom`, whose fixed
+              50% split can't track a variable-height bubble. */}
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] backdrop-blur-lg"
+            style={{
+              height: `${(footerHeight || IDLE_COMPOSER_H) + 12 + VEIL_RAMP}px`,
+              maskImage: VEIL_MASK(footerHeight),
+              WebkitMaskImage: VEIL_MASK(footerHeight),
+            }}
+          />
           <div className="absolute inset-x-0 bottom-0 z-30 p-3">{footer}</div>
         </>
       )}

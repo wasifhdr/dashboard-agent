@@ -219,6 +219,22 @@
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
+/* Same surface as `glass-deep`, with the frosting deliberately NOT applied here.
+   An element with `backdrop-filter` becomes a Backdrop Root, and Chrome gives
+   every nested backdrop-filter inside it the ROOT's backdrop to sample rather
+   than the content painted within it. On the chat panel that meant the composer
+   and the veils were all blurring the dashboard behind the panel — which the
+   panel had already blurred, so the effect was invisible — while the thread text
+   painted between them passed straight through, sharp. Use this on a container
+   that needs frosting AND nested glass, and frost it with an inset child layer
+   instead (see ChatDock): the panel looks identical, but its children can now
+   blur the thread. */
+@utility glass-plate {
+  background: var(--t-glass-deep);
+  border: 1px solid var(--t-glass-border);
+  box-shadow: var(--t-shadow-glass);
+}
+
 @utility glass-deep {
   background: var(--t-glass-deep);
   border: 1px solid var(--t-glass-border);
@@ -235,6 +251,21 @@
   box-shadow: var(--t-shadow-glass-lg);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* The chat composer's surface: a THIN translucent fill that thins further
+   downward, so the blurred thread behind it shows through and it reads as a pane
+   of glass rather than a slab. The specular lip along its top edge comes free
+   with `--t-shadow-glass-lg`.
+   It carries NO backdrop-filter of its own, per DESIGN.md §4 — the frosting
+   behind it comes from ChatPanel's veil layer, which covers the composer's whole
+   footprint down to the panel's bottom edge. A backdrop-filter here would be
+   worse than redundant: nested inside the panel it blurs the wrong backdrop
+   entirely (see `glass-plate`), so it looked like glass that frosted nothing. */
+@utility glass-pane {
+  background: linear-gradient(to bottom, var(--t-glass-hover), var(--t-glass));
+  border: 1px solid var(--t-glass-border-strong);
+  box-shadow: var(--t-shadow-glass-lg);
 }
 
 @utility panel {
@@ -314,12 +345,22 @@ body {
    distances slightly larger than the bars themselves, so the fade starts just
    before a message slips under the glass. */
 .chat-thread-fade {
-  /* Roughly the header / composer heights: messages stay fully opaque right up
-     to each bar, then fade across it. They must still be PRESENT under the bar,
-     otherwise the bar's backdrop-filter has nothing to blur. The gradual blur
-     that starts before the bar comes from .thread-blur-veil-* below. */
+  /* Messages stay fully opaque right up to each bar, then fade across it. They
+     must still be PRESENT under the bar, otherwise the bar's backdrop-filter has
+     nothing to blur. The gradual blur that starts before the bar comes from
+     .thread-blur-veil-* below. */
   --thread-fade-top: 3.5rem;
-  --thread-fade-bottom: 5rem;
+  /* Bottom: only the p-3 gutter AROUND the composer bubble (12px), deliberately
+     NOT the composer's height. This used to be 5rem, from when two opaque veils
+     covered the composer's whole footprint and the thread under them genuinely
+     needed hiding. `.glass-pane` needs the exact opposite — with a 5rem fade the
+     thread was masked to nearly zero opacity everywhere the composer sits, so
+     the pane frosted empty space: it read as a flat slab, and the background
+     blur ended in a hard line at the bubble's top edge (where the veil ramp
+     stops). Content behind the pane must stay opaque; the PANE is what softens
+     it. All this fade still owes us is that the thread doesn't chop off at the
+     panel's bottom edge in the thin frame around the bubble. */
+  --thread-fade-bottom: 1rem;
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,

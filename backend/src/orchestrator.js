@@ -323,7 +323,7 @@ export async function runSession({
           status: "error",
           answer: null,
           confidence: null,
-          error: `Model failed to produce a valid response after 3 consecutive attempts (last: ${detail}).`,
+          error: `Model failed to produce a valid response on 3 steps in a row, 3 attempts each (last: ${detail}).`,
         };
         break;
       }
@@ -334,6 +334,12 @@ export async function runSession({
           : withEscalation("Your previous response was not valid JSON matching the required schema. Return STRICT JSON only.");
       continue;
     }
+
+    // The model answered validly, so the invalid streak is over. Without this
+    // reset invalidCount was cumulative-for-the-whole-run while being reported
+    // as consecutive: three scattered bad steps across an otherwise healthy
+    // 15-step run killed the session and blamed a streak that never happened.
+    invalidCount = 0;
 
     onEvent({ type: "thought", idx, text: thought });
 

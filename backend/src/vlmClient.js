@@ -198,6 +198,80 @@ function parseModelJson(raw) {
   return tryParseJson((raw || "").trim()) ?? extractLastJsonObject(raw);
 }
 
+// ---- click-coordinate rescue -------------------------------------------
+
+// Models regularly write click coordinates with the RIGHT DIGITS at the WRONG
+// MAGNITUDE, which ClickAction's 0-1 range check then rejects. Observed from
+// gemini-flash-lite on one question: nx=4.195 (a stray decade shift of 0.4195),
+// then nx=424 / nx=425 (its 0-1000 normalized space) — 9 straight model calls
+// rejected, all of them naming the right control at the right place, in the
+// wrong units. Re-prompting with the zod message does not reliably talk a model
+// out of the convention it has decided to use.
+//
+// So rescale instead of arguing: divide by the smallest power of ten that lands
+// the value in [0,1]. That recovers every case above, because each is the
+// correct fraction shifted by whole decades — percentages (42), 0-1000
+// normalized space (424) and decade slips (4.195) all collapse to the same fix.
+// Past 1000 no normalized convention applies and the number can only be real
+// pixels, so those are divided by the frame's own dimension instead.
+//
+// Guessing wrong is not dangerous. A rescued click is still only an aim: pixel
+// mode runs every click through refineClickPoint, which rejects it outright if
+// the named target isn't in the zoom window around the point.
+function decadeScale(v) {
+  // Smallest power of ten that lands v in [0,1]. Normally stops at 1000; a pixel
+  // value with no frame dimension to divide by (metadata read failed) needs
+  // another decade or two rather than being left out of range. Bounded so it
+  // always terminates.
+  let scale = 10;
+  while (v / scale > 1 && scale < 1e6) scale *= 10;
+  return scale;
+}
+
+// The two coordinates are rescaled TOGETHER, not independently, because the
+// pair's scale is a property of the space the model was writing in:
+//
+//   (424, 62)     both out of range, so both are in that space. The scale has to
+//                 come from the pair — 424 fixes it at 0-1000, making this
+//                 (0.424, 0.062). Scaling 62 on its own would read it as a
+//                 percentage and put the aim at 0.62, most of the way DOWN a
+//                 frame whose target sits near the top edge.
+//   (4.195, 0.08) only nx is out of range, so ny is already a fraction and must
+//                 be left alone; the offender is rescaled by itself.
+//
+// Above 1000 no normalized convention applies and the numbers can only be real
+// pixels — there each axis divides by its own dimension, since width ≠ height.
+function rescalePair(nx, ny, dims) {
+  if (nx <= 1 && ny <= 1) return { nx, ny };
+
+  const peak = Math.max(nx, ny);
+  if (peak > 1000 && dims.width > 0 && dims.height > 0) {
+    return { nx: nx > 1 ? nx / dims.width : nx, ny: ny > 1 ? ny / dims.height : ny };
+  }
+  if (nx > 1 && ny > 1) {
+    const scale = decadeScale(peak);
+    return { nx: nx / scale, ny: ny / scale };
+  }
+  return {
+    nx: nx > 1 ? nx / decadeScale(nx) : nx,
+    ny: ny > 1 ? ny / decadeScale(ny) : ny,
+  };
+}
+
+// Returns `action` unchanged unless it is a click whose coordinates needed
+// rescaling, in which case a corrected copy is returned.
+function normalizeClickAction(action, dims) {
+  if (!action || action.type !== "click") return action;
+  const nx = Number(action.nx);
+  const ny = Number(action.ny);
+  // Non-numeric / missing coords aren't a magnitude problem — leave them for
+  // zod so the model gets the accurate "expected number" complaint. Negatives
+  // likewise: there is no scale that makes them a valid aim.
+  if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || ny < 0) return action;
+  if (nx <= 1 && ny <= 1) return action;
+  return { ...action, ...rescalePair(nx, ny, dims) };
+}
+
 // ---- image handling ---------------------------------------------------
 
 async function resizeImageToDataUrl(imagePath, longSide) {
@@ -346,11 +420,14 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
     const left = Math.min(Math.max(0, Math.round(nx * W - cw / 2)), W - cw);
     const top = Math.min(Math.max(0, Math.round(ny * H - ch / 2)), H - ch);
 
-    const buf = await sharp(imagePath)
+    // resolveWithObject so the crop's SENT dimensions are known — the refine
+    // model is the same one that misscales coordinates in the main loop, and
+    // rescuing its answer needs the size of the image it was looking at.
+    const { data: buf, info } = await sharp(imagePath)
       .extract({ left, top, width: cw, height: ch })
       .resize({ width: REFINE_LONG_SIDE, height: REFINE_LONG_SIDE, fit: "inside" })
       .png()
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
 
     const raw = await callVlm({
       config,
@@ -365,9 +442,14 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
     // An explicit "not here" is a real verdict, not a failure - pass it up so
     // the caller can reject the aim. Anything else unparseable stays null.
     if (parsed.found === false) return { notFound: true };
-    const rnx = Number(parsed.nx);
-    const rny = Number(parsed.ny);
-    if (!Number.isFinite(rnx) || !Number.isFinite(rny) || rnx < 0 || rnx > 1 || rny < 0 || rny > 1) return null;
+    // Same magnitude rescue as the main loop — a refine answer in pixels or
+    // 0-1000 space is a real verdict about where the target is, and dropping it
+    // to null would silently fall back to the unrefined coarse aim.
+    const pnx = Number(parsed.nx);
+    const pny = Number(parsed.ny);
+    if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
+    const { nx: rnx, ny: rny } = rescalePair(pnx, pny, { width: info.width, height: info.height });
+    if (rnx > 1 || rny > 1) return null;
 
     return {
       nx: (left + rnx * cw) / W,
@@ -389,6 +471,23 @@ export async function getNextAction({ config, question, inventory, history, imag
   let feedback = correctiveFeedback;
   let lastRaw = null;
   let lastNetworkError = null;
+
+  // Frame dimensions, probed at most once and only if a click actually needs
+  // rescaling. The resize callVlm applies is fit:"inside", so it preserves
+  // aspect ratio — a pixel/dimension fraction is identical whether measured on
+  // the original screenshot or the resized copy the model saw.
+  let dims = null;
+  async function frameDims() {
+    if (!dims) {
+      try {
+        const meta = await sharp(imagePath).metadata();
+        dims = { width: meta.width ?? 0, height: meta.height ?? 0 };
+      } catch {
+        dims = { width: 0, height: 0 }; // rescaleCoord falls back to decades
+      }
+    }
+    return dims;
+  }
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     // A stop requested mid-flight aborts callVlm below; don't burn the
@@ -419,6 +518,12 @@ export async function getNextAction({ config, question, inventory, history, imag
       continue;
     }
 
+    // Rescue right-digits/wrong-magnitude click coordinates before validating,
+    // so a usable aim isn't thrown away over its units (see normalizeClickAction).
+    if (parsed?.action?.type === "click") {
+      parsed.action = normalizeClickAction(parsed.action, await frameDims());
+    }
+
     const result = StepResponseSchema.safeParse(parsed);
     if (result.success && !((config.actuationMode ?? "api") !== "pixel" && result.data.action.type === "click")) {
       return { valid: true, thought: result.data.thought, action: result.data.action, rawText: raw, attempts: attempt };
@@ -442,4 +547,13 @@ export async function getNextAction({ config, question, inventory, history, imag
   };
 }
 
-export const _internal = { formatInventoryForPrompt, formatHistoryLine, extractLastJsonObject, buildPrompt, resolveVlmTarget, authHeaders };
+export const _internal = {
+  formatInventoryForPrompt,
+  formatHistoryLine,
+  extractLastJsonObject,
+  buildPrompt,
+  resolveVlmTarget,
+  authHeaders,
+  rescalePair,
+  normalizeClickAction,
+};
