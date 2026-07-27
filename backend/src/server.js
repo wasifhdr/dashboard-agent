@@ -639,15 +639,59 @@ function attachLiveWebSocket(httpServer) {
   });
 }
 
-const PORT = config.backendPort ?? 8990;
+// BACKEND_PORT wins over config.json so a blocked port can be worked around
+// without editing tracked files (the frontend proxy reads the same override).
+const PORT = Number(process.env.BACKEND_PORT) || config.backendPort || 8990;
+
+// hostPageOrigin is what Playwright navigates to for /host, so it has to point
+// at the port we actually bound. Catching the mismatch here beats debugging a
+// blank Tableau embed later.
+const hostPagePort = Number(new URL(config.hostPageOrigin).port);
+if (hostPagePort !== PORT) {
+  console.error(
+    `config mismatch: hostPageOrigin is ${config.hostPageOrigin} but the backend ` +
+      `binds :${PORT}. Update hostPageOrigin in backend/config.json to match.`
+  );
+  process.exit(1);
+}
+
+// Windows hands 1024-15000 to Hyper-V/WinNAT on some machines (see
+// `netsh interface ipv4 show excludedportrange protocol=tcp`); a bind inside a
+// reserved range fails with EACCES, which reads like a permissions bug unless
+// you know to look. Say so explicitly instead of dying on an unhandled event.
+function explainListenError(err) {
+  if (err.code === "EACCES") {
+    console.error(
+      `\nCannot bind 127.0.0.1:${PORT} - Windows has reserved it (EACCES).\n` +
+        `Nothing is running there; the OS excluded the port from user binds.\n` +
+        `  Check:  netsh interface ipv4 show excludedportrange protocol=tcp\n` +
+        `  Fix:    see "Port 8990 is blocked on Windows" in README.md\n` +
+        `  Escape: BACKEND_PORT=<free port> npm run dev (also update hostPageOrigin)\n`
+    );
+  } else if (err.code === "EADDRINUSE") {
+    console.error(
+      `\nPort ${PORT} is already in use - another backend is probably still running.\n` +
+        `  Find it:  Get-NetTCPConnection -LocalPort ${PORT} -State Listen\n`
+    );
+  } else {
+    console.error(`Failed to listen on ${PORT}:`, err);
+  }
+  process.exit(1);
+}
 
 launchBrowser()
   .then((browser) => {
     sharedBrowser = browser;
+    // Express runs this callback even when the bind failed, leaving address()
+    // null - that is why a backend on a reserved port used to print a cheerful
+    // "listening" banner and then serve nothing. Only claim success if we
+    // really got the socket; the error handler below reports the failure.
     const httpServer = app.listen(PORT, "127.0.0.1", () => {
+      if (!httpServer.address()) return;
       console.log(`dashboard-agent backend listening on http://127.0.0.1:${PORT}`);
       console.log(`host page: http://127.0.0.1:${PORT}/host?viz=<tableau-public-view-url>`);
     });
+    httpServer.on("error", explainListenError);
     attachLiveWebSocket(httpServer);
   })
   .catch((err) => {

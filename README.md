@@ -241,6 +241,35 @@ One layout subtlety worth preserving: the 8px gap between the mic and the bubble
 
 ## Troubleshooting
 
+### Port 8990 is blocked on Windows (`EACCES`, frontend can't reach the backend)
+
+Symptom: `npm run dev` in `backend/` exits with "Windows has reserved it (EACCES)", or the frontend loads but every `/api` call fails. **Nothing is running on the port** — Windows excluded it from user binds.
+
+Windows hands whole TCP ranges to Hyper-V/WSL/WinNAT out of the *dynamic port range*. On this machine that range had been set to **1024–15000**, which covers essentially every port a dev server would want, so reservations keep landing on ours (8788 died in 8720–8819; 8990 later landed in 8921–9020). Chasing a new "free" port is not a fix — the ranges are re-rolled on every reboot.
+
+Diagnose:
+
+```bash
+netsh interface ipv4 show excludedportrange protocol=tcp
+netsh int ipv4 show dynamicport tcp
+```
+
+Permanent fix — restore the Windows default dynamic range (49152 + 16384) so reservations move up out of dev-port territory, then pin 8990 so nothing can ever claim it. **Run in an elevated (Administrator) PowerShell, then reboot:**
+
+```bash
+netsh int ipv4 set dynamicport tcp start=49152 num=16384
+netsh int ipv6 set dynamicport tcp start=49152 num=16384
+net stop winnat
+netsh int ipv4 add excludedportrange protocol=tcp startport=8990 numberofports=1 store=persistent
+net start winnat
+```
+
+The `add excludedportrange` line reserves 8990 *for us*: it removes the port from the pool Windows auto-allocates from, while an explicit `listen()` on it still succeeds. `store=persistent` makes it survive reboots. If that command errors with "access denied" or "process cannot access the file", 8990 is still inside a live auto-reservation — reboot first, then re-run just that line.
+
+Per-run escape hatch (no admin needed): `BACKEND_PORT=9500 npm run dev`, and set `hostPageOrigin` in `backend/config.json` to match. The Vite proxy reads `backendPort`/`BACKEND_PORT` from the same place, so the frontend follows automatically.
+
+### Other issues
+
 - **llama-server won't start / OOM on load:** confirm no other llama-server is already holding the GPU (`tasklist` / check `nvidia-smi`). Only one model fits in 6GB at a time. If a model genuinely won't fit, drop `--ctx-size` to 6144 before trying a smaller quant.
 - **Session hangs at "Running" forever:** shouldn't happen post-Phase-3 - every stage has a bounded timeout (viz load 90s, VLM call 120s, bridge action 30s, session wall clock 15min). If it does, check `backend` stdout for an unhandled exception; the server's crash safety net should still mark the session `error` in the DB, but a truly stuck Playwright page is the one thing that can't self-recover - restart the backend.
 - **Settle timeout warnings:** shown when a dashboard update takes >12s to visually stabilize (slow Tableau Public rendering, not a bug). The step still completes with a `settle_timeout` flag; occasional ones are normal on heavier dashboards, frequent ones suggest that specific dashboard isn't a good fit for the curated list.
