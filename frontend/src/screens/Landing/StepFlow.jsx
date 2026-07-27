@@ -14,25 +14,25 @@ const STEPS = [
   {
     n: "01",
     title: "Perceive",
-    body: "Takes a screenshot of the live dashboard — the same pixels you would see.",
+    body: "Ask out loud or type it. Docent screenshots the live dashboard — the same pixels you would see.",
     accent: "teal",
   },
   {
     n: "02",
     title: "Think",
-    body: "A local 4-billion-parameter vision-language model reads the view and picks one next move.",
+    body: "A hosted vision-language model reads that image and picks a single next move.",
     accent: "sky",
   },
   {
     n: "03",
     title: "Act",
-    body: "Applies real filters, parameters, and tab switches through the Tableau Embedding API.",
+    body: "Clicks the dashboard directly — a mark, a filter, a tab — exactly where you would.",
     accent: "gold",
   },
   {
     n: "04",
     title: "Observe",
-    body: "Waits for the dashboard to settle, re-reads it, and repeats until it can answer.",
+    body: "Waits for it to settle, re-reads it, and repeats until it can answer — then reads that answer aloud.",
     accent: "green",
   },
 ];
