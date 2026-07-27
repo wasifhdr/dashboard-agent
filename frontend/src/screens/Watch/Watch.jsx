@@ -61,7 +61,10 @@ function flattenSteps(runs) {
 // follow-up) questions on `dashboardTarget` via the Composer; `mode ===
 // "replay"` loads a historical session (live re-attaching automatically if
 // it's still running - see useSessionStream's replay branch).
-export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange }) {
+// `confirm` is App's promise-based ConfirmDialog opener (see ui/ConfirmDialog).
+// Taken as a prop rather than mounting a second dialog here so there is exactly
+// one overlay in the tree, anchored above Watch's fixed-viewport cockpit layout.
+export default function Watch({ mode, sessionId, conversationId, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange, confirm }) {
   const stream = useSessionStream(mode, {
     sessionId,
     conversationId,
@@ -295,7 +298,19 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // dashboard — runs in the background (stream.stopAndLeave is fire-and-forget).
   // The frontend never waits on the backend, so it's instant even mid-open or
   // mid-VLM-call.
-  function handleEndSession() {
+  // Confirmed first because it is irreversible and instant: onEnd navigates away
+  // before the backend cleanup has even been issued, so there is nothing to
+  // undo. The header nav routes are gated the same way, in App's navigate().
+  async function handleEndSession() {
+    const ok = await confirm({
+      title: "End this session?",
+      body: isRunning
+        ? "The agent is still working on your question. Ending closes the dashboard and the answer is lost."
+        : "This closes the dashboard and ends the conversation. Past turns stay in your history.",
+      confirmLabel: "End session",
+      danger: true,
+    });
+    if (!ok) return;
     tts.cancel();
     stream.stopAndLeave();
     onEnd?.();
@@ -537,6 +552,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
                   stepsUsed={lastRun?.steps.size ?? 0}
                   maxSteps={lastRun?.maxSteps ?? stream.maxSteps}
                   startedAt={lastRun?.startedAt}
+                  active={dockOpen}
                   onAsk={handleAsk}
                   onStop={handleStopTurn}
                   readAloud={readAloud}

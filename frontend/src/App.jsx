@@ -1,5 +1,6 @@
 import { useState } from "react";
 import AppShell from "./components/AppShell.jsx";
+import ConfirmDialog, { useConfirm } from "./components/ui/ConfirmDialog.jsx";
 import Landing from "./screens/Landing/Landing.jsx";
 import Watch from "./screens/Watch/Watch.jsx";
 import History from "./screens/History/History.jsx";
@@ -15,11 +16,31 @@ export default function App() {
   // The live dashboard {name, url} Watch is currently showing, surfaced in the
   // top header as a clickable link. Null outside the watch view.
   const [watchDashboard, setWatchDashboard] = useState(null);
+  const [confirm, confirmProps] = useConfirm();
 
-  function navigate(nextView) {
-    if (view === "watch" && nextView !== "watch" && watchHasActiveRun) {
-      if (!window.confirm("The agent is still running. Leave this session?")) return;
-    }
+  // Leaving the Watch view tears the live session down — the backend closes the
+  // shared browser and the conversation is over — so EVERY exit from a live
+  // watch confirms first, not just the ones taken mid-run. "Docent", "New
+  // dashboard" and "History" all funnel through navigate(), so this covers them
+  // all. Replays have nothing to lose and never prompt. (The dashboard title in
+  // the header is a target="_blank" link to Tableau Public; it opens a new tab
+  // rather than leaving, so it ends nothing and is deliberately not gated.)
+  const isLiveWatch = view === "watch" && !replayTarget && !!watchTarget;
+
+  function confirmLeaveLiveWatch() {
+    if (!isLiveWatch) return Promise.resolve(true);
+    return confirm({
+      title: "Leave this session?",
+      body: watchHasActiveRun
+        ? "The agent is still working on your question. Leaving closes the dashboard and the answer is lost."
+        : "Leaving closes the dashboard and ends the conversation. Past turns stay in your history.",
+      confirmLabel: "Leave",
+      danger: true,
+    });
+  }
+
+  async function navigate(nextView) {
+    if (view === "watch" && nextView !== "watch" && !(await confirmLeaveLiveWatch())) return;
     setWatchHasActiveRun(false);
     if (nextView !== "watch") setWatchDashboard(null);
     setView(nextView);
@@ -81,10 +102,12 @@ export default function App() {
           dashboardTarget={watchTarget}
           onActiveRunChange={setWatchHasActiveRun}
           onEnd={endLiveWatch}
+          confirm={confirm}
           onDashboardChange={setWatchDashboard}
         />
       )}
       {view === "history" && <History onOpenReplay={openReplay} onGoToLanding={() => navigate("landing")} />}
+      <ConfirmDialog {...confirmProps} />
     </AppShell>
   );
 }

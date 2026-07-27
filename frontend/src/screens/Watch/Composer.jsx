@@ -103,6 +103,7 @@ export default function Composer({
   stepsUsed,
   maxSteps,
   startedAt,
+  active,
   onAsk,
   onStop,
   readAloud,
@@ -141,6 +142,15 @@ export default function Composer({
   useEffect(() => {
     if (!isRunning) setStopping(false);
   }, [isRunning]);
+
+  // Opening the panel puts the caret in the composer, so you can just type.
+  // Deferred to a rAF because ChatPanel clears its `inert` attribute in its own
+  // effect, which runs AFTER this child's — focusing an inert subtree is a no-op.
+  useEffect(() => {
+    if (!active) return undefined;
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [active]);
 
   // Auto-grow the textarea upward as the question gets longer, capped at ~half
   // the viewport (the thread bubble is bottom-anchored, so it grows upward).
