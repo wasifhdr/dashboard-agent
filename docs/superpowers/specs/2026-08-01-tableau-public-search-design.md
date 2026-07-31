@@ -124,12 +124,18 @@ Returns `{ verdict, reasons, facts }` where verdict is one of:
 | Verdict | Meaning | Triggers |
 |---|---|---|
 | `unusable` | Agent has no path to an answer | active sheet is a story; viz never reached `FirstInteractive`; first frame is near-uniform (nothing painted) |
-| `limited` | Answerable but constrained | bare worksheet rather than a dashboard; zero operable filters or parameters; `size.behavior === "automatic"` (dead margin, small marks, wasted image tokens) |
+| `limited` | Answerable but constrained | bare worksheet rather than a dashboard; zero operable filters or parameters |
 | `good` | No known problems | none of the above |
 | `unknown` | Inspection itself failed | any thrown error, caught |
 
 `facts` carries the raw observations: `sheetType`, `isDashboard`, sheet count,
 operable-filter count, parameter count, `sizeBehavior`, blank-frame boolean.
+
+`sizeBehavior === "automatic"` (the dead-margin case) is **recorded in `facts`
+but does not affect the verdict**. Plenty of automatic-sized dashboards answer
+reading questions perfectly well; downgrading them would flag far more
+dashboards than it usefully warns about. It stays in `facts` so it is available
+later for diagnostics or ranking without costing anything now.
 
 Story detection reads `sheets.find(s => s.isActive).sheetType`, already present
 in the inventory payload.
