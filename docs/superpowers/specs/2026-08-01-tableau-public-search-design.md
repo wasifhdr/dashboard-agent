@@ -124,12 +124,25 @@ Returns `{ verdict, reasons, facts }` where verdict is one of:
 | Verdict | Meaning | Triggers |
 |---|---|---|
 | `unusable` | Agent has no path to an answer | active sheet is a story; viz never reached `FirstInteractive`; first frame is near-uniform (nothing painted) |
-| `limited` | Answerable but constrained | bare worksheet rather than a dashboard; zero operable filters or parameters |
 | `good` | No known problems | none of the above |
 | `unknown` | Inspection itself failed | any thrown error, caught |
 
 `facts` carries the raw observations: `sheetType`, `isDashboard`, sheet count,
 operable-filter count, parameter count, blank-frame boolean.
+
+**There is deliberately no "limited" verdict.** Actuation runs in pixel mode,
+where `vlmClient.js:120` tells the model the inventory is reference-only and it
+must act by clicking. A bridge-visible filter count therefore does not predict
+whether a dashboard is workable: the agent filters by clicking a *mark* — a bar,
+a row — which is not a Tableau filter object at all, so a dashboard reporting
+zero filters and zero parameters can be fully operable. A bare worksheet is
+likewise perfectly readable. Both counts stay in `facts` for the backend log
+without becoming a user-facing warning.
+
+What the inventory *does* contribute in pixel mode is vocabulary: filter domain
+values tell the model a value exists even when it sits inside a collapsed
+dropdown, which feeds the `target` string that the zoom-refine pass then tries
+to locate on screen.
 
 Dead margin (`size.behavior === "automatic"`) is deliberately **not** inspected.
 It is a token-efficiency annoyance, not an answerability problem, and plenty of
@@ -156,7 +169,6 @@ On the Watch screen:
 
 - `unusable` → dismissible banner stating the specific reason, with a
   back-to-search button. Nothing is torn down; the user stays in control.
-- `limited` → a small status chip.
 - `good` / `unknown` → nothing rendered.
 
 ## Error handling
