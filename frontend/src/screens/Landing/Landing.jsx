@@ -41,6 +41,7 @@ export default function Landing({ onOpenWatch }) {
     }
 
     const controller = new AbortController();
+    setRemoteResults([]);
     setRemoteStatus("loading");
 
     fetch(`/api/search?q=${encodeURIComponent(q)}&count=8`, { signal: controller.signal })
