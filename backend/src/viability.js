@@ -5,6 +5,11 @@
 // The point is narrow: tell the user when the thing they opened is something
 // the agent structurally cannot work, before they spend a question on it.
 
+import fs from "node:fs";
+import sharp from "sharp";
+import { screenshotViz } from "./perception.js";
+import { createInventoryTracker } from "./inventory.js";
+
 export function deriveVerdict({ activeSheetType, inventory, blankFrame }) {
   const facts = {
     activeSheetType: activeSheetType ?? null,
@@ -38,4 +43,68 @@ export function deriveVerdict({ activeSheetType, inventory, blankFrame }) {
   // agent filters by clicking marks, not by operating filter objects. Those
   // counts stay in `facts` for the log rather than becoming a warning.
   return { verdict: "good", reasons: [], facts };
+}
+
+// A frame where every channel is essentially constant means the viz element
+// exists but painted nothing (deleted extract, auth wall, error tile). Real
+// dashboards have text and marks, so their standard deviation is far above this.
+const BLANK_STDEV_MAX = 2;
+
+async function isBlankFrame(imagePath) {
+  try {
+    const { channels } = await sharp(imagePath).stats();
+    return channels.every((c) => c.stdev < BLANK_STDEV_MAX);
+  } catch {
+    // Unreadable screenshot is not evidence of blankness.
+    return false;
+  }
+}
+
+// Read the active sheet's type straight off the embed element. Deliberately
+// does NOT go through __agentBridge.getInventory(), which calls getFiltersAsync
+// unguarded and therefore throws on a Story - the exact case we most need to
+// detect. The element id is "agentViz", never "viz" (Tableau's own internal
+// iframe reuses "viz").
+async function readActiveSheetType(page) {
+  try {
+    return await page.evaluate(() => {
+      const el = document.getElementById("agentViz");
+      return el?.workbook?.activeSheet?.sheetType ?? null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function inspectViz(page, { screenshotPath }) {
+  try {
+    const activeSheetType = await readActiveSheetType(page);
+
+    // Short-circuit before touching the bridge: on a story it would throw.
+    if (activeSheetType === "story") {
+      return deriveVerdict({ activeSheetType, inventory: null, blankFrame: false });
+    }
+
+    await screenshotViz(page, screenshotPath);
+    const blankFrame = await isBlankFrame(screenshotPath);
+
+    let inventory = null;
+    try {
+      const raw = await page.evaluate(() => window.__agentBridge.getInventory());
+      inventory = createInventoryTracker().normalize(raw);
+    } catch {
+      // Leave null - deriveVerdict reports "unknown" rather than guessing.
+    }
+
+    return deriveVerdict({ activeSheetType, inventory, blankFrame });
+  } catch (e) {
+    // Inspection is advisory. It must never take a session down.
+    return {
+      verdict: "unknown",
+      reasons: ["inspection_failed"],
+      facts: { error: e.message },
+    };
+  } finally {
+    fs.rm(screenshotPath, { force: true }, () => {});
+  }
 }
