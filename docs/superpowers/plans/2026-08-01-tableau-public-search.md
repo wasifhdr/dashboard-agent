@@ -1105,9 +1105,32 @@ Expected: the session opens, the dashboard renders, and any banner that appears 
 
 - [ ] **Step 4: Verify the story path — the case this was built for**
 
-Find a Tableau Public story to confirm the `unusable` banner fires. Search the landing box for a term likely to surface one (`story`, `data story`), or find one by hand at `https://public.tableau.com/app/search/all/story`. Open it.
+Use this URL, verified as a story against this exact stack on 2026-08-01:
 
-Expected: the dashboard appears, then within a few seconds a coral banner reads "This is a Tableau story, not a dashboard…" with "Back to search" and "Dismiss". The backend logs `[viability] <url> -> unusable ["story"]`. Confirm "Back to search" returns to the landing page and "Dismiss" hides the banner without ending the session.
+```
+https://public.tableau.com/views/HartfordYoungChildrenDataStory/DataStory
+```
+
+Paste it into the "Or open a Tableau Public link" field on the landing page.
+
+Measured behaviour of this URL through `openSession` + the host page:
+- it loads successfully and reaches `FirstInteractive`
+- `document.getElementById("agentViz").workbook.activeSheet.sheetType` === `"story"`
+- `window.__agentBridge.getInventory()` **throws** `TypeError: worksheets[0].getFiltersAsync is not a function`
+
+That last point is the whole reason Task 6 reads the sheet type before calling
+the bridge. If you inverted the order, this dashboard would report `unknown`
+instead of `unusable` and the banner would never appear.
+
+Expected: the story appears on screen, then within a few seconds a coral banner
+reads "This is a Tableau story, not a dashboard…" with "Back to search" and
+"Dismiss". The backend logs `[viability] <url> -> unusable ["story"]`. Confirm
+"Dismiss" hides the banner and leaves the session running, and that "Back to
+search" prompts the end-session confirm and then returns to the landing page.
+
+Do **not** substitute a workbook merely because its name contains "story".
+`SevenDataStoryTypes` contains story sheets but its default view opens as a
+`dashboard`, so it does not exercise this path.
 
 - [ ] **Step 5: Verify graceful degradation**
 
