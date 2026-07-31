@@ -92,6 +92,10 @@ export async function inspectViz(page, { screenshotPath }) {
     try {
       const raw = await page.evaluate(() => window.__agentBridge.getInventory());
       inventory = createInventoryTracker().normalize(raw);
+      // normalize() intentionally drops isDashboard (only activeSheet/sheets/
+      // filters/parameters are its contract with the orchestrator), so carry
+      // it over from the raw bridge payload for the viability facts log.
+      inventory.isDashboard = raw?.isDashboard ?? null;
     } catch {
       // Leave null - deriveVerdict reports "unknown" rather than guessing.
     }
