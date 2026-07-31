@@ -125,6 +125,14 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   if (!isLocallyListed) {
     inspectViz(page, { screenshotPath: path.join(FRAMES_DIR, `_inspect_${id}.png`) })
       .then((result) => {
+        // Retain it BEFORE broadcasting, so the verdict survives even if
+        // zero clients are connected right now (the common case - the HTTP
+        // response + WS reconnect race almost always outlasts this). Any
+        // client already in `clients` at this exact moment gets it via the
+        // broadcast below and is marked sent so addClient's priming (below)
+        // doesn't hand it to them a second time.
+        lastInspection = { verdict: result.verdict, reasons: result.reasons };
+        for (const ws of clients) inspectionSentTo.add(ws);
         broadcast({ type: "inspection", verdict: result.verdict, reasons: result.reasons });
         console.log(`[viability] ${dashboardUrl} -> ${result.verdict} ${JSON.stringify(result.reasons)}`);
       })
@@ -146,6 +154,8 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   let vizboxTimer = null; // self-rescheduling vizbox poll
   let lastVizBoxKey = null; // dedup key so we only broadcast vizbox on change (POLL LOOP ONLY - do not repurpose)
   let lastVizBox = null; // { box:{nx,ny,nw,nh}, viewport:{width,height} } - cache for dispatchInput's coord mapping
+  let lastInspection = null; // retained { verdict, reasons } from inspectViz, so a client that connects/reconnects after the (one-shot) inspection resolved still learns the verdict
+  const inspectionSentTo = new WeakSet(); // dedupe guard: a client can be "already in `clients`" when the inspection resolves (gets it via broadcast below) AND still be mid-priming in addClient - this prevents sending it twice to the same socket
   let mode = "idle"; // 'idle' | 'agent' (two-state; input is dispatched only when mode !== 'agent')
   let closed = false;
   let openTakeover = null; // { afterTurnIndex, startedAt, beforeFramePath, beforeInventory, eventLogStartLength } | null
@@ -316,6 +326,26 @@ export async function createRuntime({ browser, config, conversationId, dashboard
         ws.send(JSON.stringify({ type: "lock" }));
       } catch {
         /* ignore */
+      }
+    }
+    // Prime the new client with a retained inspection verdict, same reasoning
+    // as vizbox/lock above: a client that connects (or reconnects) after the
+    // one-shot inspectViz() already resolved must not miss the warning just
+    // because it wasn't listening at broadcast time. inspectionSentTo guards
+    // against the race where this client was already in `clients` when the
+    // inspection resolved (it got the broadcast then, and was marked there)
+    // - unlike vizbox's poll-driven dedup key, a duplicate "inspection"
+    // message isn't harmless-and-ignorable to the same degree (it's a
+    // one-shot banner, not a repeating geometry update), so it's guarded
+    // explicitly here instead.
+    if (lastInspection && !inspectionSentTo.has(ws)) {
+      inspectionSentTo.add(ws);
+      if (ws.readyState === WS_OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "inspection", verdict: lastInspection.verdict, reasons: lastInspection.reasons }));
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
