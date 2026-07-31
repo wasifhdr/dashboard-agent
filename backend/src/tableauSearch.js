@@ -50,3 +50,78 @@ export function normalizeSearchPayload(payload) {
 
   return { results, degraded: false, reason: null };
 }
+
+const SEARCH_ENDPOINT = "https://public.tableau.com/public/apis/bff/v1/search/query-workbooks";
+const TIMEOUT_MS = 6000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX = 100;
+
+// query -> { at: epochMs, value }. Insertion-ordered, so the oldest key is
+// always the first key when we need to evict.
+const cache = new Map();
+
+export function clearSearchCache() {
+  cache.clear();
+}
+
+function cacheKey(query, count, start) {
+  return `${query}|${count}|${start}`;
+}
+
+function readCache(key) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writeCache(key, value) {
+  if (cache.size >= CACHE_MAX) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, { at: Date.now(), value });
+}
+
+export async function searchWorkbooks(query, options = {}) {
+  const { count = 10, start = 0, fetchImpl = globalThis.fetch } = options;
+  const normalizedQuery = String(query ?? "").trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return { results: [], degraded: false, reason: null };
+  }
+
+  const key = cacheKey(normalizedQuery, count, start);
+  const cached = readCache(key);
+  if (cached) return cached;
+
+  const url =
+    `${SEARCH_ENDPOINT}?count=${encodeURIComponent(count)}` +
+    `&query=${encodeURIComponent(normalizedQuery)}&start=${encodeURIComponent(start)}`;
+
+  let payload;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetchImpl(url, { signal: controller.signal });
+      if (!res.ok) {
+        return { results: [], degraded: true, reason: `upstream_${res.status}` };
+      }
+      payload = await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (e) {
+    // Abort, DNS failure, socket reset, malformed JSON - all the same to a
+    // caller that just wants to fall back to the local dashboard list.
+    return { results: [], degraded: true, reason: "fetch_failed" };
+  }
+
+  const out = normalizeSearchPayload(payload);
+  // Only cache success; a degraded lookup must be retried next keystroke.
+  if (!out.degraded) writeCache(key, out);
+  return out;
+}

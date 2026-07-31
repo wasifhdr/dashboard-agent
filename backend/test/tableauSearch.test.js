@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeSearchPayload } from "../src/tableauSearch.js";
+import { normalizeSearchPayload, searchWorkbooks, clearSearchCache } from "../src/tableauSearch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
@@ -79,4 +79,70 @@ test("a non-object or resultless payload is degraded, not a crash", () => {
     assert.equal(out.reason, "bad_payload");
     assert.deepEqual(out.results, []);
   }
+});
+
+function fakeFetch(payload, { status = 200 } = {}) {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(url);
+    return { ok: status >= 200 && status < 300, status, json: async () => payload };
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+test("searchWorkbooks returns normalized results", async () => {
+  clearSearchCache();
+  const impl = fakeFetch({ totalHits: 1, results: [{ workbook: { title: "T", defaultViewRepoUrl: "B/sheets/V" } }] });
+  const out = await searchWorkbooks("netflix", { fetchImpl: impl });
+  assert.equal(out.degraded, false);
+  assert.equal(out.results[0].url, "https://public.tableau.com/views/B/V");
+  assert.match(impl.calls[0], /query=netflix/);
+  assert.match(impl.calls[0], /count=10/);
+});
+
+test("an identical query is served from cache without a second fetch", async () => {
+  clearSearchCache();
+  const impl = fakeFetch({ totalHits: 1, results: [{ workbook: { title: "T", defaultViewRepoUrl: "B/sheets/V" } }] });
+  await searchWorkbooks("Netflix", { fetchImpl: impl });
+  await searchWorkbooks("  netflix  ", { fetchImpl: impl });
+  assert.equal(impl.calls.length, 1, "second call should hit the cache");
+});
+
+test("a non-ok upstream status degrades instead of throwing", async () => {
+  clearSearchCache();
+  const impl = fakeFetch({}, { status: 429 });
+  const out = await searchWorkbooks("anything", { fetchImpl: impl });
+  assert.equal(out.degraded, true);
+  assert.equal(out.reason, "upstream_429");
+  assert.deepEqual(out.results, []);
+});
+
+test("a thrown fetch degrades instead of propagating", async () => {
+  clearSearchCache();
+  const impl = async () => {
+    throw new Error("socket hang up");
+  };
+  const out = await searchWorkbooks("anything", { fetchImpl: impl });
+  assert.equal(out.degraded, true);
+  assert.equal(out.reason, "fetch_failed");
+});
+
+test("an empty query never reaches the network", async () => {
+  clearSearchCache();
+  const impl = fakeFetch({ totalHits: 0, results: [] });
+  const out = await searchWorkbooks("   ", { fetchImpl: impl });
+  assert.equal(impl.calls.length, 0);
+  assert.deepEqual(out.results, []);
+  assert.equal(out.degraded, false);
+});
+
+test("a degraded response is not cached", async () => {
+  clearSearchCache();
+  const bad = fakeFetch({}, { status: 500 });
+  await searchWorkbooks("q", { fetchImpl: bad });
+  const good = fakeFetch({ totalHits: 1, results: [{ workbook: { title: "T", defaultViewRepoUrl: "B/sheets/V" } }] });
+  const out = await searchWorkbooks("q", { fetchImpl: good });
+  assert.equal(out.degraded, false);
+  assert.equal(good.calls.length, 1, "a failed lookup must be retried, not cached");
 });
