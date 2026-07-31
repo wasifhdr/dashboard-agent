@@ -13,6 +13,7 @@ import { runSession } from "./orchestrator.js";
 import * as store from "./store.js";
 import * as bus from "./sessionBus.js";
 import * as conversationRuntime from "./conversationRuntime.js";
+import { searchWorkbooks } from "./tableauSearch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -48,6 +49,20 @@ function framePathToUrl(framePath) {
 
 app.get("/api/config", (req, res) => {
   res.json({ dashboards: config.dashboards ?? [], maxSteps: config.maxSteps });
+});
+
+// Live keyword search against Tableau Public. Deliberately always 200: this
+// proxies an undocumented third-party endpoint, and the landing page must stay
+// fully usable (local results, paste-a-URL) when it is down or has changed
+// shape. Failure is reported in the body as degraded:true.
+app.get("/api/search", async (req, res) => {
+  const q = String(req.query.q ?? "");
+  const count = Math.min(Math.max(Number(req.query.count ?? 10) || 10, 1), 25);
+  const out = await searchWorkbooks(q, { count });
+  if (out.degraded) {
+    console.warn(`[search] degraded (${out.reason}) for query ${JSON.stringify(q)}`);
+  }
+  res.json(out);
 });
 
 // Text-to-speech proxy. The browser must never see GROQ_API_KEY, so the
