@@ -8,6 +8,7 @@ import Button from "../../components/ui/Button.jsx";
 import StepFlow from "./StepFlow.jsx";
 import DashboardCarousel from "./DashboardCarousel.jsx";
 import Footer from "./Footer.jsx";
+import TableauResults from "./TableauResults.jsx";
 
 gsap.registerPlugin(useGSAP);
 
@@ -19,12 +20,43 @@ export default function Landing({ onOpenWatch }) {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [urlValue, setUrlValue] = useState("");
   const [urlError, setUrlError] = useState("");
+  const [remoteResults, setRemoteResults] = useState([]);
+  const [remoteStatus, setRemoteStatus] = useState("idle");
   const heroRef = useRef(null);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query), DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [query]);
+
+  // Live Tableau Public lookup. Skipped for URL-shaped input (that has its own
+  // open-directly path) and for very short queries, which would return noise and
+  // hammer an undocumented endpoint.
+  useEffect(() => {
+    const q = debouncedQuery.trim();
+    if (looksLikeUrl(q) || q.length < 3) {
+      setRemoteResults([]);
+      setRemoteStatus("idle");
+      return;
+    }
+
+    const controller = new AbortController();
+    setRemoteStatus("loading");
+
+    fetch(`/api/search?q=${encodeURIComponent(q)}&count=8`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        setRemoteResults(data.results ?? []);
+        setRemoteStatus(data.degraded ? "degraded" : "ok");
+      })
+      .catch((e) => {
+        if (e.name === "AbortError") return;
+        setRemoteResults([]);
+        setRemoteStatus("degraded");
+      });
+
+    return () => controller.abort();
+  }, [debouncedQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +181,14 @@ export default function Landing({ onOpenWatch }) {
                 isUrlQuery={isUrlQuery}
                 query={query}
                 onOpenDashboard={openDashboard}
+                onOpenUrl={(url) => openDashboard(url, null)}
+              />
+            </div>
+
+            <div className="hero-rise">
+              <TableauResults
+                status={remoteStatus}
+                results={remoteResults}
                 onOpenUrl={(url) => openDashboard(url, null)}
               />
             </div>
