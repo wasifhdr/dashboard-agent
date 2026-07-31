@@ -129,33 +129,27 @@ Returns `{ verdict, reasons, facts }` where verdict is one of:
 | `unknown` | Inspection itself failed | any thrown error, caught |
 
 `facts` carries the raw observations: `sheetType`, `isDashboard`, sheet count,
-operable-filter count, parameter count, `sizeBehavior`, blank-frame boolean.
+operable-filter count, parameter count, blank-frame boolean.
 
-`sizeBehavior === "automatic"` (the dead-margin case) is **recorded in `facts`
-but does not affect the verdict**. Plenty of automatic-sized dashboards answer
-reading questions perfectly well; downgrading them would flag far more
-dashboards than it usefully warns about. It stays in `facts` so it is available
-later for diagnostics or ranking without costing anything now.
+Dead margin (`size.behavior === "automatic"`) is deliberately **not** inspected.
+It is a token-efficiency annoyance, not an answerability problem, and plenty of
+automatic-sized dashboards answer reading questions perfectly well. Nothing
+would consume it, so `getInventory()` in `host.html` is left untouched.
 
 Story detection reads `sheets.find(s => s.isActive).sheetType`, already present
 in the inventory payload.
 
-### Component 5 — `size.behavior` in the inventory payload
+No change to `backend/public/host.html` is required. Everything `inspectViz`
+needs is already in the `getInventory()` payload.
 
-`getInventory()` in `backend/public/host.html` does not currently return
-`size.behavior`, though the auto-shrink logic at host.html:70 reads it. Add
-`sizeBehavior: vizEl.workbook.activeSheet.size?.behavior ?? null` to the returned
-object. Purely additive; no existing consumer changes.
-
-This file sits adjacent to the frozen agent core. The change adds a field and
-alters no existing one.
-
-### Component 6 — wiring and surfacing
+### Component 5 — wiring and surfacing
 
 `conversationRuntime.js` calls `inspectViz` after the viz reaches
-`FirstInteractive`, **only when the dashboard URL is not in `config.dashboards`**
-(the curated 5 are known-good; inspecting them is noise). The call never gates
-or delays the session — the dashboard is already visible by the time it resolves.
+`FirstInteractive`, for any dashboard URL not already listed in
+`config.dashboards`. That list is a starting shortcut on the landing page, not a
+privileged class — skipping it is purely a noise optimization, and every other
+part of this pipeline treats all URLs identically. The call never gates or
+delays the session; the dashboard is already visible by the time it resolves.
 
 The result is emitted on the existing event channel as a `viz_inspection` event.
 On the Watch screen:
