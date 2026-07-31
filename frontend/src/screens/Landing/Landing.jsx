@@ -13,11 +13,16 @@ import TableauResults from "./TableauResults.jsx";
 gsap.registerPlugin(useGSAP);
 
 const DEBOUNCE_MS = 150;
+// Longer than DEBOUNCE_MS on purpose: the remote search hits an undocumented
+// third-party endpoint (Tableau Public) via our backend proxy, so it needs
+// a slower gate than the free, purely local dashboard scoring does.
+const REMOTE_DEBOUNCE_MS = 450;
 
 export default function Landing({ onOpenWatch }) {
   const [dashboards, setDashboards] = useState([]);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [remoteQuery, setRemoteQuery] = useState("");
   const [urlValue, setUrlValue] = useState("");
   const [urlError, setUrlError] = useState("");
   const [remoteResults, setRemoteResults] = useState([]);
@@ -29,11 +34,16 @@ export default function Landing({ onOpenWatch }) {
     return () => clearTimeout(id);
   }, [query]);
 
+  useEffect(() => {
+    const id = setTimeout(() => setRemoteQuery(query), REMOTE_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [query]);
+
   // Live Tableau Public lookup. Skipped for URL-shaped input (that has its own
   // open-directly path) and for very short queries, which would return noise and
   // hammer an undocumented endpoint.
   useEffect(() => {
-    const q = debouncedQuery.trim();
+    const q = remoteQuery.trim();
     if (looksLikeUrl(q) || q.length < 3) {
       setRemoteResults([]);
       setRemoteStatus("idle");
@@ -57,7 +67,7 @@ export default function Landing({ onOpenWatch }) {
       });
 
     return () => controller.abort();
-  }, [debouncedQuery]);
+  }, [remoteQuery]);
 
   useEffect(() => {
     let cancelled = false;
