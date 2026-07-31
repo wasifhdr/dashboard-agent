@@ -6,3 +6,10 @@ export const WARNING_LABEL = {
   wall_clock_timeout: "The session exceeded its overall time budget.",
   max_steps: "Reached the maximum step budget before answering.",
 };
+
+// Verdict reasons from the read-only viability inspection (viability.js).
+// Only "unusable" reasons need copy - "good" and "unknown" render nothing.
+export const INSPECTION_LABEL = {
+  story: "This is a Tableau story, not a dashboard - the agent can't advance story points, so it can't work this one.",
+  blank_frame: "This dashboard loaded but rendered nothing - the data source may have been removed.",
+};

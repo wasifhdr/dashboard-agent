@@ -15,7 +15,7 @@ import { cx } from "../../components/ui/cx.js";
 import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Button from "../../components/ui/Button.jsx";
-import { WARNING_LABEL } from "./warningLabels.js";
+import { WARNING_LABEL, INSPECTION_LABEL } from "./warningLabels.js";
 import { useSpeechSynthesis } from "../../hooks/useSpeechSynthesis.js";
 import { loadReadAloudPref, saveReadAloudPref, speakableAnswer } from "./speech.js";
 
@@ -86,6 +86,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // Floating conversation dock: minimized to a bubble by default so the
   // dashboard gets the whole canvas; the bubble expands it on demand.
   const [dockOpen, setDockOpen] = useState(false);
+  const [inspectionDismissed, setInspectionDismissed] = useState(false);
   // True when a turn finished while the dock was minimized, so the bubble can
   // advertise "Response ready" until the user looks at it.
   const [unread, setUnread] = useState(false);
@@ -411,6 +412,22 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
           <Button size="sm" onClick={stream.reconnect}>
             Reconnect
           </Button>
+        </div>
+      )}
+
+      {live.inspection?.verdict === "unusable" && !inspectionDismissed && (
+        <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral-ink">
+          <span>
+            {INSPECTION_LABEL[live.inspection.reasons[0]] ?? "The agent may not be able to work this dashboard."}
+          </span>
+          <span className="flex shrink-0 gap-2">
+            <Button size="sm" onClick={handleEndSession}>
+              Back to search
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setInspectionDismissed(true)}>
+              Dismiss
+            </Button>
+          </span>
         </div>
       )}
 

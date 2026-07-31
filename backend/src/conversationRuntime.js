@@ -21,6 +21,7 @@ import path from "node:path";
 import { openSession, waitForSettle, screenshotViz } from "./perception.js";
 import * as store from "./store.js";
 import { FRAMES_DIR } from "./paths.js";
+import { inspectViz } from "./viability.js";
 
 // Must match the id on <tableau-viz id="agentViz"> in public/host.html.
 // perception.js is the source of truth (VIZ_SELECTOR there) but is frozen and
@@ -116,6 +117,19 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   page.once("crash", () => {
     close("browser_crashed").catch(() => {});
   });
+
+  // Advisory viability check for dashboards that didn't come from the local
+  // list. Fire-and-forget by design: the dashboard is already on screen, and
+  // this must never gate, delay, or fail the session.
+  const isLocallyListed = (config.dashboards ?? []).some((d) => d.url === dashboardUrl);
+  if (!isLocallyListed) {
+    inspectViz(page, { screenshotPath: path.join(FRAMES_DIR, `_inspect_${id}.png`) })
+      .then((result) => {
+        broadcast({ type: "inspection", verdict: result.verdict, reasons: result.reasons });
+        console.log(`[viability] ${dashboardUrl} -> ${result.verdict} ${JSON.stringify(result.reasons)}`);
+      })
+      .catch(() => {});
+  }
 
   store.createConversation({
     id,

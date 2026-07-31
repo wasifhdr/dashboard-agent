@@ -179,6 +179,9 @@ export function openLiveChannel(conversationId, handlers = {}) {
       case "closed":
         handlers.onClosed?.(evt.reason);
         break;
+      case "inspection":
+        handlers.onInspection?.(evt.verdict, evt.reasons);
+        break;
       default:
         break;
     }
