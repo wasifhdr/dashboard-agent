@@ -1,107 +1,138 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repo. Keep it accurate — if you discover the running app diverges from a doc, trust the app and fix the doc.
+Guidance for Claude Code working in this repo. Keep it accurate — if the running app diverges from a doc, trust the app and fix the doc.
 
 ## What this is
 
-A **Gemini 3.5 Flash Lite agent that answers questions about interactive Tableau Public dashboards by operating them** (filters, parameters, tab switches) through the Tableau Embedding API v3, recording every step (reasoning + action + screenshot) into a trajectory you can watch live or replay. It's the _showcase/system_ half of an NSU CSE499B senior-design project built around the **DashboardQA** benchmark (agentic VLM QA on Tableau dashboards). The user owns the system; teammates own the research (beating accuracy scores) — so prioritize demo-ability, reliability, and clarity over squeezing benchmark points.
+An agent that answers questions about interactive Tableau Public dashboards **by operating them** — clicking marks, filtering, switching views — and records every step (reasoning + action + screenshot) into a trajectory you can watch live or replay. It's the _showcase/system_ half of an NSU CSE499B senior-design project built around the **DashboardQA** benchmark. The user owns the system; teammates own the research (accuracy scores) — so prioritize demo-ability, reliability, and clarity over squeezing benchmark points.
 
-The product is branded **"Docent"** in the frontend (UI strings only; the repo/code is "dashboard-agent").
+Branded **"Docent"** in the frontend (UI strings only; the repo/code is `dashboard-agent`).
+
+Public repo: <https://github.com/wasifhdr/dashboard-agent>. README.md is now written for that audience — keep it public-facing, not a build log.
+
+## The model: Gemini, pixel mode, permanently
+
+**Actuation is pixel mode and the VLM is hosted Gemini.** `config.json` has `"actuationMode": "pixel"`, and `resolveVlmTarget` in `vlmClient.js` routes pixel mode to `config.pixel.vlmEndpoint` (`gemini-flash-lite-latest`, key read from the env var named by `vlmApiKeyEnv`). The key lives in the **repo-root** `.env` (git-ignored), loaded by `src/env.js`.
+
+The earlier locally-hosted approach is **retired**: no llama.cpp, no local Qwen, no 6GB-VRAM constraints. Do not reintroduce them or write docs that assume them.
+
+Vestigial and kept only for reference — do not build on these, and don't describe them as live:
+
+- `config.llamaEndpoint` / `config.modelName` (the non-pixel fallback branch in `resolveVlmTarget`)
+- `"api"` actuation mode — the structured-bridge path
+- `backend/scripts/start-llama*.ps1`, `npm run reading-bench`, `npm run vision-smoke-test`
+- `eval/reading/` benchmark results
+
+If asked to clean house, these are the removal candidates — but confirm first, they're referenced from `eval/` and old docs.
 
 ## Layout
 
-This folder (`dashboard-agent/`) is the project root and working directory. The **plan docs live one level up** in the parent `CSE499B.17/` and are referenced as `../` (matching the README).
+This folder is the repo root and working directory. Plan docs are in `docs/`, **inside** the repo.
 
 ```
-dashboard-agent/           ← project root / working directory
-  .claude/launch.json      Preview-tool config (frontend dev server; runs `npm run dev --prefix frontend`)
-  README.md                phase-by-phase build history + setup/demo/troubleshooting
-  backend/                 Node ESM, Express, Playwright, better-sqlite3, VLM client  (:8990)
+dashboard-agent/
+  .claude/launch.json      Preview-tool config (frontend dev server)
+  README.md                public-facing project README
+  backend/                 Node ESM, Express, Playwright, better-sqlite3  (:8990)
     src/                   core modules (see map below)
-    public/host.html       Tableau <tableau-viz> embed page + window.__agentBridge (Embedding API v3)
-    scripts/               llama-server launchers + vision smoke test
-    eval/                  questions.json, smoke-questions.json, reading/ micro-benchmark, results.csv
-    config.json            llama endpoint, timeouts, settle gate, curated dashboards
+    public/host.html       <tableau-viz> embed page + window.__agentBridge
+    eval/                  questions.json, smoke-questions.json, results.csv
+    test/                  node:test unit tests (`npm test`)
+    config.json            VLM endpoints, timeouts, settle gate, starter dashboards
     run.js probe.js eval.js  CLI entry points
-  frontend/                Vite + React + Tailwind v4, "Docent" UI  (:5173)
-    src/screens/           Landing/ (marketing), Watch/ (cinematic run view), History/
+  frontend/                Vite + React + Tailwind v4  (:5173)
+    src/screens/           Landing/ · Watch/ · History/
     src/components/        AppShell + ui/ primitives
+  docs/AGENT_PLAN.md       backend build plan + contracts (complete)
+  docs/LIVE_TAKEOVER_PLAN.md  live conversation/takeover system (complete)
   docs/DESIGN.md           design system ("Warm Editorial" tokens)
-
-  ../AGENT_PLAN.md         backend build plan + contracts (Phases 0–3, all complete)  [parent dir]
-  ../FRONTEND_PLAN.md      "Docent" UI revamp spec (built — Phases F0–F5)             [parent dir]
+  docs/superpowers/        specs + plans from planned feature work
 ```
+
+`FRONTEND_PLAN.md` is referenced in places but lives **outside the repo** in the parent folder — it won't exist in a clone. Don't link to it from committed docs.
 
 ## Architecture & the key insight
 
 ```
-React viewer (:5173) ──REST(start/list/replay)+SSE(live steps)──► Node backend (:8990)
-                                                                     │ Playwright drives ONE shared long-lived browser
-                                    ┌────────────────────────────────┴───────────────┐
-                          host.html (<tableau-viz> + __agentBridge)          llama-server (:8080, VLM)
+React viewer (:5173) ──REST + SSE + WS──► Node backend (:8990)
+                                            │ Playwright drives ONE shared headless Chromium
+                     ┌──────────────────────┴───────────────────┐
+            host.html (<tableau-viz> + __agentBridge)      Google Gemini (vision)
 ```
 
-The **user's browser never embeds the Tableau viz** — Tableau renders marks to `<canvas>` inside a cross-origin iframe that page JS can't screenshot or introspect. Only Playwright (browser-automation level) can. The React viewer _only_ displays frames/events streamed from the backend. Perception is visual (Playwright screenshot); grounding/actuation is structured (Embedding API v3 bridge — `getFilters`/`applyFilterAsync`, parameters, `activateSheetAsync`, `applyRangeFilterAsync`). There is no DOM to walk on Tableau.
+The **user's browser never embeds the Tableau viz** — Tableau paints marks to `<canvas>` inside a cross-origin iframe that page JS can't screenshot or introspect. Only Playwright (browser-automation level) can. The React viewer _only_ displays frames/events streamed from the backend.
 
-## Running it (there is no single start script)
+Perception is visual (Playwright screenshot → Gemini). Actuation is by **normalized coordinate click**, refined by a zoom pass. The Embedding API bridge is still read for the control inventory, but in pixel mode that inventory is **context, not a control surface** — `vlmClient.js`'s pixel prompt explicitly tells the model it must act by clicking, not by id. Its value is vocabulary: filter domain values tell the model a value exists even when it's inside a collapsed dropdown, which sharpens the `target` string the zoom-refine pass then looks for.
 
-Three processes, ideally in this order (llama first so its ~15–25s load hides behind the others). Windows, PowerShell primary. All paths below are relative to this root.
+## Running it
 
-1. **VLM** — `backend/scripts/start-llama.ps1` → llama-server on `:8080`. Wait for `main: server is listening` / `curl http://127.0.0.1:8080/health` → `{"status":"ok"}`.
-2. **Backend** — from `backend/`: `npm run dev` (= `node src/server.js`) → Express + shared Playwright browser on `:8990`.
-3. **Frontend** — Preview tool `preview_start({name: "frontend"})` (or from `frontend/`: `npm run dev`) → Vite on `:5173`.
+Two processes. Windows, PowerShell primary.
 
-Backend/frontend don't need llama-server until a session actually starts. Only one model fits in 6GB VRAM at a time — stop one llama-server before starting another.
+1. **Backend** — from `backend/`: `npm run dev` → Express + shared Playwright browser on `:8990`. The listening banner is gated on the socket actually binding; a port diagnostic instead means the bind failed (see gotchas).
+2. **Frontend** — Preview tool `preview_start({name: "frontend"})`, or from `frontend/`: `npm run dev` → Vite on `:5173`.
 
-**CLI entry points** (run from `backend/`, need only llama-server up — no UI):
+No local model server is involved. The backend needs `GEMINI_API_KEY` in the repo-root `.env` before a run can call the VLM, but starts fine without it.
 
-- `npm run probe -- <tableau-url>` — validate a dashboard (inventory, screenshot, filter+settle+diff), no VLM.
+**CLI entry points** (run from `backend/`):
+
+- `npm run probe -- <tableau-url>` — validate a dashboard (inventory, screenshot, filter+settle+diff), no VLM. Note it launches its **own** browser and **mutates state** by applying a filter — never point it at a live session's page.
 - `npm run run-agent -- <tableau-url> "<question>"` — one agent run, streams steps to stdout.
 - `npm run eval -- eval/questions.json` — batch harness → `eval/results.csv`.
-- `npm run reading-bench -- --label <name>` — chart-reading micro-benchmark vs whichever model is loaded.
-- `npm run vision-smoke-test -- <image.png>` — "can this model see at all" check.
+- `npm test` — unit tests. Use this, **not** bare `node --test`, which picks up `scripts/vision-smoke-test.js` and fails for unrelated reasons.
 
 ## Backend module map (`backend/src/`)
 
-| File                     | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `orchestrator.js`        | The agent loop: perceive→inventory→prompt→validate→execute→settle→persist. Step budget (15), loop guard (exact-repeat + max-2-consecutive-waits + escalating corrective feedback), timeouts, forced best-effort answer on budget exhaustion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `perception.js`          | Playwright open, **settle gate**, screenshot, coarse changed-region pixel diff.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `inventory.js`           | Normalizes controls to stable `S*`/`F*`/`P*` IDs; merges same-field filters across worksheets.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `vlmClient.js`           | Prompt builder + image resize + `response_format: json_object` call + last-JSON-object fallback extractor (tolerates leaked `<think>`) + up to 2 re-prompts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `actionSchema.js`        | zod discriminated union — the 8 action types (`set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `wait`, `answer`, `fail`, `click`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `actuator.js`            | Executes a validated action against `__agentBridge`; case-insensitive domain matching + near-match suggestions; 30s timeout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `store.js`               | better-sqlite3 (sessions/steps), WAL, frames never deleted. Schema migrations are safe `ALTER TABLE` / table-rebuild.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `server.js`              | Express: `POST/GET /api/sessions`, `GET /api/sessions/:id` (replay), `POST /api/sessions/:id/stop`, `/events` (SSE live), `/api/config`, `/api/dashboards/meta`, static `/frames`; plus the WebSocket screencast/input endpoint for live takeover. `adaptAndPublish()` translates internal step events into the SSE contract. One-session-at-a-time mutex.                                                                                                                                                                                                                                                                                                                                                                         |
-| `sessionBus.js`          | Per-session event buffer + fan-out so a mid-run SSE client gets full replay then live.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `tableauSearch.js`       | Proxies Tableau Public's undocumented live search endpoint (`GET /api/search`, normalizes results, 5-minute TTL cache); degrades to `{results:[], degraded:true}` — never throws or surfaces a non-200 — on any upstream failure or response-shape change, so the caller falls back to the local dashboard list instead of erroring.                                                                                                                                                                                                                                                                                                                                                                                               |
-| `viability.js`           | Read-only post-open inspection for dashboards opened via live search (unvetted, unlike the curated `config.dashboards` set). Reads `activeSheet.sheetType` off the DOM before touching `__agentBridge` (a Story has no `getFiltersAsync`, so the bridge itself can't be used to detect one) and checks for a blank frame; returns a `good`/`unusable`/`unknown` verdict plus facts that drive the dismissible landing-page banner.                                                                                                                                                                                                                                                                                                 |
-| `conversationRuntime.js` | **Live-takeover subsystem** (docs/LIVE_TAKEOVER_PLAN.md). Owns the ONE long-lived Playwright context/page so multiple agent turns run against the same live dashboard without reopening it, and lets a user take over that shared browser. Singleton via `getActiveRuntime`/`setActiveRuntime`; CDP screencast fanned out to WebSocket clients as base64 JPEG frames + normalized vizbox + lock/unlock signals; forwarded mouse/keyboard input under a turn-based lock (dispatched only while `mode !== 'agent'`); takeover capture (before/after frame + inventory + Tableau event-log slice, diffed and persisted to the `takeovers` table); idle timers + mode switching. Newer than the frozen agent core; built on top of it. |
-| `paths.js`               | Path helpers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| File | Role |
+|---|---|
+| `orchestrator.js` | The agent loop: perceive→inventory→prompt→validate→execute→settle→persist. Step budget (15), loop guard (exact-repeat + max-2-consecutive-waits + dead-click radius + escalating corrective feedback), zoom-refine pass on pixel clicks, forced best-effort answer on budget exhaustion. |
+| `perception.js` | Playwright open, **settle gate**, screenshot, coarse changed-region pixel diff. |
+| `inventory.js` | Normalizes controls to stable `S*`/`F*`/`P*` IDs; merges same-field filters across worksheets. Returns `{activeSheet, sheets, filters, parameters}` — note it does **not** preserve `isDashboard` from the raw bridge payload. |
+| `vlmClient.js` | Prompt builder (separate api/pixel system templates) + image resize + `response_format: json_object` + last-JSON-object fallback extractor + up to 2 re-prompts. `resolveVlmTarget` picks the Gemini endpoint in pixel mode. |
+| `actionSchema.js` | zod discriminated union — 8 action types (`set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `wait`, `answer`, `fail`, `click`). **None advances a story point.** |
+| `actuator.js` | Executes a validated action against `__agentBridge`; case-insensitive domain matching + near-match suggestions; 30s timeout. |
+| `pixelGuard.js` | Dead-click proximity guard for pixel mode. |
+| `store.js` | better-sqlite3: `conversations`, `sessions` (one row per turn), `steps`, `takeovers`. WAL, frames never deleted. Migrations are guarded `ALTER TABLE` / table-rebuild. |
+| `server.js` | Express: sessions + conversations REST, `/events` SSE, `/api/config`, `/api/dashboards/meta`, `/api/search`, `/api/tts`, static `/frames`, plus the WebSocket screencast/input endpoint. `adaptAndPublish()` translates internal step events into the SSE contract. One-turn-at-a-time mutex. |
+| `sessionBus.js` | Per-session event buffer + fan-out so a mid-run SSE client gets full replay then live. |
+| `tableauSearch.js` | Proxies Tableau Public's undocumented search endpoint; normalizes `defaultViewRepoUrl` into the `/views/<wb>/<view>` shape plus a thumbnail URL; 5-min TTL cache; degrades to `{results:[], degraded:true}` and **never** surfaces a non-200. |
+| `viability.js` | Read-only post-open inspection for dashboards not in `config.dashboards`. Returns `good` / `unusable` / `unknown`. Deliberately has **no "limited" verdict** — in pixel mode a filter count doesn't predict workability, since the agent clicks marks rather than operating filter objects. |
+| `conversationRuntime.js` | Owns the ONE long-lived Playwright context/page so multiple turns run against the same live dashboard without reopening it, and lets the user take over. CDP screencast → WebSocket clients as base64 JPEG + normalized vizbox + lock/unlock; forwarded input under a turn-based lock; takeover capture (before/after frame + inventory + event-log slice, persisted); idle timers; mode switching. |
+| `paths.js` / `env.js` | Path helpers; repo-root `.env` loader (imported first by every entry point). |
 
 ## Frozen vs. mutable
 
-Per FRONTEND_PLAN.md, the **agent core is frozen** — do not casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, `perception.js`, or the `eval/` sets; the frontend revamp was built strictly on top of them. Changes to these need a real reason and re-running the smoke/batch evals. The frontend (`frontend/src/`), server event plumbing, and `config.json` dashboards are the normal edit surface.
+The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, `perception.js`, or the `eval/` sets. Changes there need a real reason and a re-run of the smoke/batch evals. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
+
+## `config.dashboards` is a shortcut, not a class
+
+The five entries in `config.json` are a **landing-page starting list and demo safety net** — not a privileged category the system is built around. Search and paste-a-URL open any workbook, and every module treats all URLs identically. The one exception is `viability.js` inspection being skipped for listed URLs, which is a noise optimization only. Design new features URL-agnostic; don't frame work around curated-vs-uncurated.
 
 ## Non-obvious gotchas (learned the hard way — don't rediscover)
 
-- **`id="agentViz"`, never `id="viz"`** — Tableau's own internal iframe reuses `id="viz"`, causing Playwright locator collisions.
-- **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field (when the active sheet is a dashboard) — no per-worksheet iteration for categorical filters. **Range filters** have no dashboard-level equivalent — still per-worksheet `applyRangeFilterAsync`.
-- **`getDomainAsync` works reliably** — the `domain: null` fallback is a true edge case, not the common path.
-- **Settle gate is required** — Embedding API promises can resolve _before_ render finishes (the paper's "info-retention" failure). Wait for visual stabilization before each frame. `settle_timeout` (>12s) is a flag, not a crash; frequent ones mean that dashboard is a poor fit.
-- **Decoy/orphaned controls exist** in real workbooks (e.g. an unwired "Select Region" parameter sitting next to the real `RegionName` filter that actually drives the view). The loop guard + escalating corrective feedback recovers within a few steps — the system doesn't detect decoys directly (not generally knowable).
-- **Dead margin** when `sheet.size.behavior === "automatic"` (no fixed published size to auto-snap to) — wastes image tokens (see the Data Science Salaries dashboard, ~40% blank on the right). The host page auto-shrinks to the real published size after `FirstInteractive` when it can.
-- **Backend port dies on Windows, and Express lies about it** — this machine's TCP dynamic port range was set to 1024–15000, so Hyper-V/WinNAT auto-reservations keep landing on dev ports (8788, then 8990). A bind inside a reserved range fails `EACCES`, but `app.listen`'s callback still fires (with `address() === null`), so the backend printed a "listening" banner while serving nothing. `server.js` now gates that banner on `address()` and prints a real diagnostic. Permanent fix (restore the default dynamic range + persistently reserve 8990, admin) is in README.md → Troubleshooting. `BACKEND_PORT` overrides `config.backendPort` for both backend and Vite proxy; `hostPageOrigin` must be kept in sync (startup asserts this).
-- **Dense fine-grained charts** (many small icons/marks) are genuinely hard to verify even by manual human inspection (see `q4` disease-icon counting) — don't treat a model answer on that class as ground truth without independent checking.
+- **`id="agentViz"`, never `id="viz"`** — Tableau's internal iframe reuses `id="viz"`, causing Playwright locator collisions.
+- **`getInventory()` throws on a Tableau story** — `host.html` calls `getRawFilters()` unguarded and a Story has no `getFiltersAsync` (`TypeError: worksheets[0].getFiltersAsync is not a function`). Detect a story by reading `activeSheet.sheetType` off the element **before** touching the bridge, as `viability.js` does.
+- **`waitForSettle` RETURNS `{settled, timedOut}` — it does not throw on timeout.** Discard that value and you'll screenshot a still-painting dashboard. This caused a real bug where slow-but-healthy dashboards were reported as blank.
+- **Settle gate is required** — Embedding API promises resolve _before_ render finishes. `settle_timeout` (>12s) is a flag, not a crash; frequent ones mean a poor-fit dashboard.
+- **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field (when the active sheet is a dashboard). **Range filters** have no dashboard-level equivalent — still per-worksheet.
+- **`getDomainAsync` works reliably** — `domain: null` is a true edge case, not the common path.
+- **Decoy/orphaned controls exist** in real workbooks (an unwired "Select Region" parameter next to the real `RegionName` filter). Loop guard + escalating feedback recovers; decoys aren't directly detectable.
+- **Dead margin** when `sheet.size.behavior === "automatic"` — no published size to snap to, so frames waste image tokens. The host page auto-shrinks when it can.
+- **Backend port dies on Windows, and Express lies about it** — Hyper-V/WinNAT auto-reservations land on dev ports; a bind inside a reserved range fails `EACCES` but `app.listen`'s callback **still fires** with `address() === null`. `server.js` gates the banner on `address()`. Permanent fix in README → Troubleshooting. `BACKEND_PORT` overrides `config.backendPort` for backend and Vite proxy alike; `hostPageOrigin` must stay in sync (startup asserts this).
+- **The Browser pane can't test debounce** — synthetic keystrokes land 4–11s apart, exceeding any debounce in the app. Verify debounce by reading code, never by counting requests.
+- **Dense fine-grained charts** are hard to verify even by manual human inspection — don't treat a model answer on that class as ground truth.
 
 ## Verifying a change
 
-For anything observable in the browser, actually run it (don't just typecheck). Start the three processes, open `:5173`, pick a dashboard, ask a question, watch the Watch screen, and check `read_console_messages` + `read_network_requests` for errors. Actuation is **pixel mode** (`config.json` `actuationMode: "pixel"`, remote VLM), so demos exercise pixel perception + clicking, not the structured bridge. Fastest known-good end-to-end demo (pure reading, no click): **Video Game Sales → "In the Top 5 Publishers chart, which publisher has the highest total sales?" → expect Nintendo** (1 step). Pixel-click actuation demo (known-good): **Video Game Sales → "Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart" → expect FIFA 15** (2 steps: one pixel-click on the big EA bar, then the answer off the re-filtered frame). Prefer large, clearly-labeled marks as click targets — clicking the _small stacked rows_ in the "Top Genres" chart instead loops (10+ `rejected_loop` steps in testing) because the pixel target is too small/ambiguous.
+For anything observable in the browser, actually run it (don't just typecheck). Start both processes, open `:5173`, pick a dashboard, ask a question, watch the Watch screen, and check `read_console_messages` + `read_network_requests`.
+
+Known-good demos:
+
+- **Pure reading, 1 step** — Video Game Sales → _"In the Top 5 Publishers chart, which publisher has the highest total sales?"_ → **Nintendo**
+- **Pixel-click actuation, 2 steps** — Video Game Sales → _"Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart"_ → **FIFA 15**
+- **Viability banner** — paste `https://public.tableau.com/views/HartfordYoungChildrenDataStory/DataStory` → verified story; expect the coral banner and `[viability] ... -> unusable ["story"]` in the backend log
+
+Prefer large, clearly-labeled click targets. The small stacked rows in "Top Genres" loop (10+ `rejected_loop` steps observed) because the target is too small and ambiguous.
 
 ## Git
 
-This repo (`.git` here at the root) is committed history now, not zero commits as earlier notes here once said — check `git log` before assuming otherwise. Still suggest committing before risky operations, and never run a destructive git/filesystem command here without flagging it first. Branch state is the user's call.
-
-## Docs are ahead of / behind the code in places
-
-`../FRONTEND_PLAN.md` is **built**, not pending. `README.md`'s "Deferred" section predates the frontend revamp and doesn't mention it — genuinely deferred items are keep-alive/stateful follow-ups, token streaming, voice (STT/TTS), open-web dashboard search, and literal click crosshairs. When unsure whether a feature exists, re-verify against the running app.
+Real committed history — check `git log` before assuming anything about repo state. Work happens directly on `master` by the user's standing preference. Suggest committing before risky operations, stage only the files a change actually touches (never `git add -A`), and never run a destructive git/filesystem command without flagging it first.

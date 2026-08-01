@@ -1,320 +1,221 @@
-# Tableau Dashboard QA Agent
+# Docent — an agent that *operates* Tableau dashboards to answer questions
 
-Local VLM agent that answers questions about interactive Tableau Public dashboards by operating them (filters, parameters, tabs) through the Tableau Embedding API v3, with every step (reasoning, action, screenshot) recorded and viewable in a trajectory viewer.
+Most "chat with your data" tools answer questions by querying a database. Docent doesn't have the database. It gets the same thing a human analyst gets — a published, interactive Tableau dashboard — and answers by **looking at it and clicking on it**: filtering, drilling in, switching views, then reading the result off the screen.
 
-See [docs/AGENT_PLAN.md](docs/AGENT_PLAN.md) for the original agent build plan, architecture, and contracts - all 4 phases are complete. See [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md) for the live, multi-turn conversation & takeover system built on top of it (Phases B0-B4, also complete, with one regression check still pending - see the Status entry below). [Setup](#setup) gets it running; the phase-by-phase history below covers how it got here.
+Every step is recorded — the model's reasoning, the action it chose, and a screenshot of the dashboard at that moment — so you can watch a run live or replay it later, frame by frame.
 
-## Status
+Built as the systems half of an NSU CSE499B senior-design project around the [DashboardQA](https://huggingface.co/datasets/ahmed-masry/DashboardQA) benchmark (agentic VLM question-answering on interactive dashboards).
 
-**Phase 0 complete.** All foundational primitives validated against real Tableau Public dashboards:
+---
 
-- `scripts/start-llama.ps1` + `scripts/vision-smoke-test.js` — confirmed the chosen model (Qwen3-VL-4B base + Claude-Opus reasoning LoRA) retained vision; it correctly transcribed dense axis labels, legends, and percentages from a real dashboard screenshot.
-- `public/host.html` + `window.__agentBridge` — embeds a `<tableau-viz>` via Embedding API v3 and exposes inventory/filter/parameter/sheet control methods. Verified end-to-end on 3 real DashboardQA-sourced Tableau Public dashboards (`backend/probe.js <url>`): inventory enumeration (including full categorical-domain enumeration via `getDomainAsync` — this is available, so the `domain: null` fallback path is a true fallback, not the common case), filter application, dashboard-level filter broadcast across worksheets, settle-gate timing, and pixel-diff change regions all work correctly.
-- `src/perception.js` — Playwright session open (with a bounded readiness timeout, not an unbounded promise await), settle gate, screenshot, coarse changed-region diffing.
-- `src/inventory.js` — stable-ID (`S*`/`F*`/`P*`) normalization, merges same-field filters across worksheets per the spec.
+## The problem that shapes everything
 
-Implementation notes that update AGENT_PLAN.md's assumptions:
-- Tableau's own internal iframe reuses `id="viz"`, so the `<tableau-viz>` element uses `id="agentViz"` to avoid Playwright locator collisions.
-- Filter domain enumeration (`getDomainAsync`) works reliably on the dashboards tested — the plan's uncertainty here is resolved in the optimistic direction.
-- `Dashboard.applyFilterAsync` (not per-worksheet iteration) is used for categorical filters when the active sheet is a dashboard — Tableau natively broadcasts it to every worksheet sharing the field. Range filters have no dashboard-level equivalent and are still applied per-worksheet.
-- The host page auto-shrinks the `<tableau-viz>` element to the dashboard's real published size after `FirstInteractive`, instead of leaving dead black margin at the default 1600x1000 box — matters for image-token budget on a 6GB-VRAM model.
+You cannot screenshot a Tableau dashboard from a web page.
 
-**Phase 1 complete.** Full perceive -> inventory -> prompt -> validate -> execute -> settle -> persist agent loop, driven end-to-end by the VLM:
+Tableau renders its marks to a `<canvas>` inside a **cross-origin iframe**. Page JavaScript can't read pixels from it, can't walk its DOM, can't find where anything is on screen. There is no HTML to parse — the "bar chart" is paint.
 
-- `src/actionSchema.js` — zod discriminated-union schema for the 7 action types.
-- `src/vlmClient.js` — prompt builder (inventory + history formatting, domain truncation), image resize, `response_format: json_object` call to llama-server with a last-JSON-object fallback extractor (tolerates leaked `<think>` preambles), up to 2 re-prompts on invalid/malformed output.
-- `src/actuator.js` — executes a validated action against the bridge, with case-insensitive domain matching and near-match suggestions on failure, wrapped in a 30s timeout.
-- `src/store.js` — better-sqlite3 sessions/steps schema, WAL mode, frames never deleted.
-- `src/orchestrator.js` — the loop itself: step budget (15), loop guard (exact-repeat rejection + max-2-consecutive-waits), forced best-effort answer on budget exhaustion, per-action timeout, session wall clock, changed-region overlay computed every step, best-effort widget-bbox lookup.
-- `run.js` — CLI runner (`node run.js <tableau-url> "<question>"`), streams steps to stdout.
-- `eval/smoke-questions.json` — 6 handwritten QA pairs across the 3 Phase-0 dashboards (1 no-action-needed, 3 filter-required, 1 tab-required, 1 unanswerable-trap).
+So the browser doing the work can't be yours. Docent runs a **Playwright-controlled browser server-side**, which operates one level below the page and *can* screenshot the canvas. Your browser only ever receives frames and events streamed from the backend — it never embeds the viz at all.
 
-All 6 smoke questions were run and inspected against real dashboard frames (not just trusted blindly). Results: 5/6 have a manually-verified-correct final answer; the 6th (`q4`, counting disease-case icons on a dense multi-row icon chart) executed the correct filter action, but the icon-to-label alignment on that specific chart turned out to be too fine-grained to confidently verify even by manual pixel inspection — so its answer is recorded as unverified rather than confirmed right or wrong (see `eval/questions.json`'s `q4` notes). Per the plan, action correctness (not answer correctness) is Phase 1's bar, and every action taken across all 6 runs was correct.
+That single constraint explains most of the architecture:
 
-Notable finding during testing: on `q2` (Zillow "Boston, MA" ZHVI), the model initially fixated on a decoy - this workbook has an orphaned parameter also named "Select Region" (`P1`/`P4`) that is *not* wired to anything visible, alongside the real, working `RegionName` filter. The actuator correctly executed the no-op parameter change (Tableau itself accepts it - not a validation bug), and the loop guard correctly blocked repeated retries of the same dead-end action, but the model needed several rejections to try a different control. Fixed by escalating the corrective-feedback message after 2 consecutive non-progress steps to explicitly say "re-scan the FULL inventory, both filters and parameters - this is likely the wrong control" - cut convergence from 10 steps to 5, with the model's own next-step reasoning explicitly citing the hint ("parameter shows X but the dropdown shows Y, suggesting a wiring issue").
+- **Perception is visual.** A screenshot of the rendered viz, sent to a vision model. There's no accessibility tree to fall back on.
+- **Actuation is by coordinate.** The model returns a normalized `(x, y)` and a description of what it's aiming at; the backend clicks there in the real browser.
+- **You need a settle gate.** Tableau's own API promises resolve *before* rendering finishes. Screenshot too early and you capture a half-drawn dashboard and confidently misread it. Docent waits for the pixels to stop changing before every frame.
 
-**Phase 2 complete.** The showcase UI - a live-streaming trajectory viewer plus session replay.
+## What it does
 
-Backend additions:
-- `src/sessionBus.js` - in-memory per-session event buffer + subscriber fan-out, so an SSE client connecting mid-run gets everything so far replayed, then live events as they happen.
-- `src/server.js` - now launches one shared Playwright browser at startup (reused across sessions instead of one per run), enforces the one-session-at-a-time mutex, and exposes: `POST /api/sessions` (starts a run, returns the id immediately), `GET /api/sessions` (history list), `GET /api/sessions/:id` (full persisted trajectory, for replay), `GET /api/sessions/:id/events` (SSE, live only), `GET /api/config` (dashboard picker options), static `/frames/...`.
-- `adaptAndPublish()` in server.js translates the orchestrator's internal `step` event into the separate `action` / `frame` / `inventory` SSE events from the plan's 6.7 contract, keeping that translation out of the already-tested orchestrator loop.
-- `src/orchestrator.js` gained two small additive changes: an optional pre-generated `sessionId` (so the server can respond with the id synchronously before the run finishes) and a lightweight inventory summary attached to each step event.
-
-Frontend (`frontend/`, Vite + React, dark theme, no UI framework): `Launcher` (dashboard picker + free URL + question), `TrajectoryViewer` (3-pane: `StepTimeline` left, `Stage` center with SVG changed-region/widget-bbox overlays + prev/next/play, `DetailsPanel` right with thought/action JSON/inventory summary/warnings), `Header` (question, status chip, budget meter, final-answer card), `SessionsList` (history/replay picker). Live and replay modes are driven by the same components from a shared per-step state shape - live mode reduces the SSE event stream into it, replay mode fetches the full trajectory once and populates it directly, so a past session renders pixel-identical to how it looked live.
-
-Verified end-to-end in a real browser (Chrome via the preview tool, not just curl): started a live session from the launcher, watched it stream through both steps with the correct thumbnails/badges/thought/action/inventory/final-answer, confirmed the changed-region overlay boxes matched the actual pixel diff between frames, navigated with Prev/Next and direct step clicks, toggled overlays on/off, then opened a Phase-1-era CLI-run session from History and confirmed it replays with byte-identical thought/action/answer/inventory-counts to what the CLI printed at the time - zero console errors, zero failed network requests throughout.
-
-**Phase 3 complete.** Hardening and evaluation readiness.
-
-- **Error taxonomy.** Fixed a real gap: a VLM network/timeout failure inside `getNextAction`'s retry loop was previously unhandled and could crash a session mid-run; it's now caught, classified as `vlm_error` (distinct from `invalid_json`), and retried the same as any other transient failure. Added a `sessions.error_message` column (safe `ALTER TABLE` migration for the pre-existing DB) so *why* a session failed (viz load timeout, 3x VLM failure, an unexpected crash) is recorded and threaded all the way through the orchestrator → store → SSE `session_done` event → REST replay → CLI → the frontend `Header`, instead of a bare "ERROR" chip with no explanation. Added an `empty_inventory` warning (dashboard has no operable controls at all - agent falls back to read-only). The server's catch-all safety net for an unexpected crash now also writes `finishSession` so a bug can no longer leave a session stuck at `status='running'` forever in the History list.
-- **Curated dashboards.** Added 2 more real Tableau Public dashboards (via `probe.js`, load time + non-empty inventory verified) alongside the original 3, for **5 total**: see `config.json`. One additional candidate (an AirBnB Berlin dashboard) was tested and *rejected* - its stats panel showed a stuck loading spinner in the captured screenshot, a reliability risk not worth including in a curated "known-good" list.
-- **Batch eval harness** (`eval.js`, `eval/questions.json`): runs a list of questions sequentially against one shared browser, writes `eval/results.csv` (id, question, dashboard, answer, status, steps, duration, session id, error). Each question runs in its own try/catch so one crashing question can't take down the batch. 10 questions span all 5 dashboards and exercise every action type, including `set_range_filter`, which no earlier question had covered.
-- **Model A/B** (`scripts/start-llama-stock.ps1`, `eval/reading/`, `eval/reading-bench.js`): a 10-crop chart-reading micro-benchmark built from real, already-visually-verified session frames, comparing the Jackrong Claude-Opus-reasoning distill against the stock `Qwen3.5-4B` base it was fine-tuned from (same base family; the stock build available locally is Q6_K rather than Q4_K_M, a minor quantization mismatch worth noting). See [Model A/B results](#model-ab-results) below.
-
-**Phases B0-B4 complete.** The live, multi-turn conversation & takeover system - see [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md) for the full build plan, data model, and transport contracts. This turns "one question = one fresh Playwright page, reset to the dashboard's default state" into "one **conversation** = one persistent browser context the user can watch live and briefly drive between turns":
-
-- **`src/conversationRuntime.js`** (new) - the single owner of a conversation's long-lived Playwright context+page. `createRuntime()` opens the dashboard once (not per question) and keeps it alive across every turn; it exposes `addClient`/`removeClient`/`broadcast` for the live WebSocket, `setMode("idle"|"agent")` as the turn-based input lock, `dispatchInput()` for forwarded mouse/keyboard, and `captureTakeoverStart()`/`captureTakeoverEnd()` for before/after takeover bookkeeping. `close(reason)` tears everything down on an explicit close, an idle timeout, or an unrecoverable page crash.
-- **`store.js`** gained a `conversations` table, `sessions.conversation_id`/`turn_index` columns (a "session" row is now one turn inside a conversation - legacy rows with `conversation_id IS NULL` still replay standalone exactly as before), and a `takeovers` table (before/after frame paths, inventory JSON, a slice of the bridge's event log, and a computed diff) - all additive migrations, the same guarded-`ALTER TABLE` idiom as Phase 3's `error_message` column.
-- **`orchestrator.js`**'s `runSession` gained reuse-page options (`page`, `ownsPage:false`, `conversationId`, `turnIndex`) that all default to today's behavior, so `run.js` and the batch harness are untouched - a turn is the identical perceive→inventory→prompt→validate→execute→settle→persist loop, it just runs on a page the conversation runtime already opened instead of opening (and closing) its own.
-- **Live view.** The runtime starts a CDP `Page.startScreencast` session and streams frames plus viz-geometry (`vizbox`) updates over a new per-conversation `WS /api/conversations/:id/live` (Origin-checked in `server.js`'s `attachLiveWebSocket()` against the same allowlist the Express CORS config uses). `frontend/src/screens/Watch/useLiveChannel.js` consumes it and exposes `{liveFrameUrl, vizBox, mode, connected, closedReason}`; `LiveStage.jsx` renders the live frame with a lock veil while `mode==="agent"`.
-- **Takeover.** Between turns, `mode` flips so forwarded mouse/keyboard actually reaches the page - the user can click a filter, drag a range slider, or switch tabs directly on the live dashboard, and the *next* turn resumes from whatever state that leaves (the agent's own reasoning history/loop-guard/inventory IDs still reset per turn; only the dashboard's physical state carries over). A `lock`/`unlock` broadcast ensures only one actor drives at a time. Each takeover's before/after frame + inventory diff is persisted and rendered as a card in the thread.
-- **`server.js`** replaced the old one-session boolean with conversation-aware state (`turnRunning`, `conversationOpening`, `stopRequests`) and added `POST /api/conversations`, `POST /api/conversations/:id/turns`, `POST /api/conversations/:id/close`, `GET /api/conversations`, `GET /api/conversations/:id` (full multi-turn + takeover replay). `POST /api/sessions` is kept as a backward-compatible shim; the CLI still calls `runSession` directly and never touches HTTP.
-- **Replay + History.** `GET /api/conversations/:id` returns every turn's full trajectory plus takeovers in order, replayed with no live processes running. `store.listConversationsWithSummary()` backs a unified History list (turn count, dashboard, last question/answer/status) alongside legacy standalone sessions.
-- **Lifecycle hardening (B4).** An idle timer (`conversationIdleMs` in `config.json`, 30 minutes) auto-closes an unattended conversation; a `page.once("crash", ...)` listener closes the runtime on an unrecoverable browser crash instead of leaving it hung forever; a screencast-start failure now broadcasts `{type:"closed", reason:"screencast_failed"}` instead of silently leaving the live view blank (per-turn frames still work either way). A new "End session" control in `StatusBar.jsx` closes the conversation explicitly from the UI (shows an inline error and stays put if a turn is running), and `useLiveChannel.js`/`LiveStage.jsx` now surface *why* a live connection ended - idle timeout, browser crash, screencast failure, or an explicit close - instead of a generic "disconnected" state.
-
-**Live Tableau Public search.** The landing page's "Find a dashboard" box now also queries Tableau Public's live (undocumented) search endpoint via a backend proxy (`GET /api/search`, `backend/src/tableauSearch.js`) alongside the local keyword match over the 5 curated dashboards, so a search can open *any* Tableau Public workbook, not just the curated set. Because those results are unvetted, opening one runs a short read-only inspection (`backend/src/viability.js`) after the dashboard loads; if it's structurally unusable for the agent - a Tableau story (no `getFiltersAsync`) or a frame that painted nothing - a dismissible banner offers "Back to search" instead of letting the session silently fail later. The proxy never surfaces an error status: an upstream outage or shape change degrades to "search unavailable" with the local results still shown, since `/api/search` fronts a dependency with no SLA.
-
-**Not yet done:** the frozen-core regression re-run called for in `LIVE_TAKEOVER_PLAN.md` §9 Phase B4 item 5 - re-running the smoke set and `npm run eval -- eval/questions.json` against a baseline captured before B0, to confirm the reuse-page changes to `orchestrator.js` didn't shift any answers. The [Model A/B results](#model-ab-results) and [Batch eval harness results](#batch-eval-harness-results) below predate this refactor; `orchestrator.js`'s reuse-page changes are additive and default-preserving and the CLI path still runs fine by hand, but the full comparison hasn't been re-run against a pre-B0 baseline yet - that's a pending, separate step, not a completed one.
-
-See [Setup](#setup), [Demo script](#demo-script), and [Troubleshooting](#troubleshooting) below.
+- **Search the live Tableau Public library.** Type "netflix" and it queries Tableau Public's search endpoint through a backend proxy, then opens whichever workbook you pick — not just a hardcoded list.
+- **Check whether a dashboard is even workable.** Unvetted public workbooks include Tableau *stories* (which the agent has no action to navigate) and dashboards that load but paint nothing. A read-only inspection runs after the dashboard opens and warns you instead of letting the run fail confusingly later.
+- **Multi-turn conversations on one live dashboard.** The dashboard is opened once and stays open. Turn two resumes from wherever turn one left it — no reload, no re-filtering.
+- **Take the wheel mid-conversation.** Between turns the input lock flips to you: click a bar, drag a slider, switch a tab directly on the live browser. The next turn continues from the state *you* left.
+- **Watch it work.** A live CDP screencast with the agent's cursor visible, or scrub the recorded frames afterwards.
+- **Ask out loud.** Browser-native dictation, with answers optionally read back.
 
 ## Architecture
 
 ```
-                    ┌────────── React "Docent" Viewer (Vite, :5173) ───────────────────┐
-                    │  Landing · Watch (LiveStage + Stage + StatusBar) · History        │
-                    └───────▲───────────────────────▲────────────────────▲─────────────┘
-                            │ REST (conversations /  │ SSE (per-turn      │ WS (live
-                            │ turns / replay)        │ step events)       │ screencast + input)
-                    ┌───────┴───────────────────────┴────────────────────┴─────────────┐
-                    │            Node backend (Express, ESM, :8990)                     │
-                    │  conversationRuntime.js: ONE persistent Playwright context+page    │
-                    │  per conversation - opened once, kept alive across every turn,     │
-                    │  torn down on explicit close / idle timeout / page crash           │
-                    │    ├─ CDP screencast + vizbox geometry → broadcast over live WS     │
-                    │    ├─ dispatchInput(): forwarded mouse/keyboard, turn-based lock     │
-                    │    └─ captureTakeoverStart/End(): before/after frame+inventory diff  │
-                    │  Orchestrator: a "turn" runs the same agent loop (step budget,       │
-                    │  loop guard, settle gate) on the runtime's already-open page          │
-                    │  instead of opening/closing its own                                  │
-                    │    ├─ Perception:  Playwright → screenshot of embedded viz            │
-                    │    ├─ Grounding:   control inventory via Embedding API bridge          │
-                    │    ├─ Actuation:   bridge calls (filters/params/sheets)                │
-                    │    ├─ VLM client:  llama-server (OpenAI-compatible, :8080)              │
-                    │    └─ Store:       better-sqlite3 (conversations/sessions/takeovers/     │
-                    │                    steps) + PNG frames, never deleted                   │
-                    │  sessionBus.js fans per-turn step events out over SSE                    │
-                    └───────┬───────────────────────────────────────────────────────────────┘
-                            │ Playwright drives ONE shared long-lived browser
-                            │ (one persistent context+page per active conversation)
-                    ┌───────┴────────────────────────────────┐   ┌───────────────────┐
-                    │ host.html (served by backend, loaded    │   │ llama-server        │
-                    │ in the Playwright browser, NOT the       │   │ (:8080)              │
-                    │ user's): <tableau-viz> + window.         │   │ Qwen3.5-4B distill    │
-                    │ __agentBridge (Embedding API v3)         │   │ or stock, swappable  │
-                    └──────────────────────────────────────────┘   └───────────────────┘
+┌──────────── React "Docent" UI (Vite, :5173) ─────────────┐
+│  Landing (search + picker) · Watch (live) · History       │
+└────▲──────────────────▲───────────────────▲──────────────┘
+     │ REST             │ SSE               │ WebSocket
+     │ conversations,   │ per-turn step     │ live screencast
+     │ turns, replay    │ events            │ + forwarded input
+┌────┴──────────────────┴───────────────────┴──────────────┐
+│              Node backend (Express, ESM, :8990)           │
+│                                                           │
+│  conversationRuntime  ONE long-lived Playwright page per   │
+│                       conversation; CDP screencast out,    │
+│                       mouse/keyboard in, under a lock      │
+│  orchestrator         perceive → prompt → validate →       │
+│                       execute → settle → persist           │
+│  perception           screenshot + settle gate + diff      │
+│  tableauSearch        proxy for Tableau Public search       │
+│  viability            is this dashboard workable at all?     │
+│  store                SQLite: conversations, turns, steps,   │
+│                       takeovers, frames                      │
+└────┬──────────────────────────────────────┬───────────────┘
+     │ Playwright (headless Chromium)       │ HTTPS
+┌────┴─────────────────────────┐   ┌────────┴────────────────┐
+│ host.html                    │   │ Google Gemini            │
+│ <tableau-viz> + __agentBridge │   │ (vision — reads frames,  │
+│ (Tableau Embedding API v3)    │   │  returns click targets)  │
+└──────────────────────────────┘   └─────────────────────────┘
 ```
 
-The user's browser never embeds the Tableau viz directly - Tableau renders marks to canvas inside a cross-origin iframe, which the user's own page JS can't screenshot or introspect. Playwright, operating at the browser-automation level, can.
+**The vision model is Google Gemini** (`gemini-flash-lite-latest`), called over an OpenAI-compatible endpoint. Screenshots of the dashboard are sent to it each step — see [Data egress](#data-egress).
 
-A **conversation** now owns one persistent Playwright context+page for its whole lifetime (`conversationRuntime.js`); a **question** is a **turn** within that conversation, running the identical perceive→act→settle agent loop but resuming into whatever state the previous turn - or a user takeover in between - left the dashboard in, instead of reloading it from scratch. The React viewer consumes two independent streams from the backend: the persisted per-step trajectory (frames/events over REST+SSE, exactly as before Phase B0) and, while a conversation is live, a real-time CDP screencast plus a forwarded-input channel over WebSocket, for watching and briefly driving the actual browser between turns.
+## Requirements
+
+- **Node 20+** (24 is what this is developed against)
+- **A Google Gemini API key** — this is the agent's eyes; nothing works without it
+- Playwright's Chromium, downloaded automatically by `npm install`
+- Optional: a **Groq API key** for higher-quality text-to-speech (falls back to the OS voice)
+
+Windows is the primary development platform, but nothing here is Windows-specific except one port workaround in [Troubleshooting](#troubleshooting).
+
+## Setup
+
+```bash
+git clone https://github.com/wasifhdr/dashboard-agent.git
+cd dashboard-agent
+npm install --prefix backend
+npm install --prefix frontend
+```
+
+Create a `.env` in the repo root (git-ignored):
+
+```
+GEMINI_API_KEY=your-key-here
+GROQ_API_KEY=optional-for-nicer-tts
+```
+
+The key is read by name from `config.pixel.vlmApiKeyEnv` and never stored in `config.json`.
+
+## Running it
+
+Two processes.
+
+**Backend** — Express plus the shared Playwright browser:
+
+```bash
+npm run dev --prefix backend
+```
+
+Wait for `dashboard-agent backend listening on http://127.0.0.1:8990`. That banner only prints if the socket genuinely bound — if you see a port diagnostic instead, read [Troubleshooting](#troubleshooting).
+
+**Frontend** — Vite, proxying `/api` and `/frames` to the backend:
+
+```bash
+npm run dev --prefix frontend
+```
+
+Open <http://localhost:5173>.
+
+### Try these
+
+Two verified runs, good for a first look:
+
+| Dashboard | Ask | Expect |
+|---|---|---|
+| Video Game Sales | *In the Top 5 Publishers chart, which publisher has the highest total sales?* | **Nintendo** — one step, pure reading |
+| Video Game Sales | *Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart.* | **FIFA 15** — two steps; watch it click the bar, then read the re-filtered chart |
+
+The second one is the interesting demo: you see the cursor land on the EA bar, the whole dashboard re-filter, and the answer come off the *new* frame.
+
+**Aim at large, clearly-labeled marks.** Pointing it at the small stacked rows in "Top Genres" makes it loop — the click target is too small and ambiguous to hit reliably. That's a genuine limit of coordinate-based actuation, not a bug.
+
+### Command line
+
+Run from `backend/`, no UI needed:
+
+```bash
+npm run run-agent -- <tableau-url> "<question>"   # one run, streams to stdout
+npm run probe -- <tableau-url>                    # inspect a dashboard, no model involved
+npm run eval -- eval/questions.json               # batch harness → eval/results.csv
+npm test                                          # unit tests
+```
+
+## How a turn works
+
+1. **Perceive** — wait for the dashboard to stop changing, then screenshot the viz.
+2. **Ground** — read the control inventory (filters, parameters, sheets) through the Tableau Embedding API bridge. In pixel mode this is *context*, not a control surface: it tells the model that "Electronic Arts" exists as a value even when it's off-screen, which makes its click targets far better.
+3. **Decide** — the frame, the inventory, and the history go to Gemini, which returns strict JSON: one thought and one action.
+4. **Validate** — a zod discriminated union over the eight action types (`click`, `set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `wait`, `answer`, `fail`). Malformed output is re-prompted, not crashed on.
+5. **Execute** — a click is aimed coarsely, then refined: the backend zooms into a small window around the point and looks for the thing the model *said* it was clicking. Found, and the click snaps to its center; not found, and the click is rejected and re-aimed.
+6. **Settle and record** — wait for pixels to stabilize, capture the new frame, persist the step.
+
+There's a 15-step budget, a loop guard that rejects repeated dead-end clicks, and a forced best-effort answer if the budget runs out — so a run always terminates with *something*, rather than spinning.
 
 ## Layout
 
 ```
-backend/    Node ESM backend (Express, Playwright, better-sqlite3, VLM client, orchestrator)
-  src/            core modules (perception, inventory, vlmClient, actuator, orchestrator, store, server, sessionBus,
-                   conversationRuntime - persistent per-conversation Playwright context/page + live screencast/input, B0-B4)
-  public/         host.html (the Tableau embed page Playwright loads)
-  scripts/        llama-server launchers + vision smoke test
-  eval/           questions.json, smoke-questions.json, reading/ (micro-benchmark), results.csv
-  run.js          CLI: node run.js <tableau-url> "<question>"
-  probe.js        Phase-0-style manual dashboard validator
-  eval.js         batch harness: node eval.js [questions.json]
-frontend/   Vite + React "Docent" UI - Landing (marketing/picker), Watch (live view + step replay), History (unified list)
-docs/       AGENT_PLAN.md + LIVE_TAKEOVER_PLAN.md (build plans) and DESIGN.md (design system)
+backend/
+  src/          orchestrator, perception, inventory, actuator, vlmClient,
+                conversationRuntime, tableauSearch, viability, store, server
+  public/       host.html — the Tableau embed page Playwright loads
+  eval/         question sets + results
+  config.json   model endpoint, timeouts, settle gate, starter dashboards
+frontend/
+  src/screens/  Landing · Watch · History
+docs/           AGENT_PLAN.md · LIVE_TAKEOVER_PLAN.md · DESIGN.md
 ```
 
-## Setup
+`config.json`'s `dashboards` array is a **starting shortcut** on the landing page, not a restriction — search or a pasted URL opens any Tableau Public workbook.
 
-**Prerequisites:** Node 18+, a local llama.cpp build with CUDA support (`E:\llama.cpp\` in this project), and the model files below.
+## Data egress
 
-**Model files** (local paths, not committed):
-- Primary (Jackrong Claude-Opus-reasoning distill): `E:\llama.cpp\models\Jackrong_Qwen3.5-4B.Q4_K_M_v2.gguf` + `Jackrong_Qwen3.5-4B.Q6_K_v2_mmproj.gguf`
-- Stock comparison (Qwen3.5-4B base, no reasoning LoRA): `E:\llama.cpp\models\Qwen3.5-4B-Q6_K.gguf` + `qwen3.5-mmproj-F16.gguf`
+In normal operation, **a screenshot of the dashboard is sent to Google Gemini on every step.** The bundled dashboards are Tableau Public — already public data — so the sensitivity is low, but point it at something private and you should understand where the pixels go. No credentials or personal data are sent.
 
-**1. Start the model:**
-```powershell
-backend/scripts/start-llama.ps1          # primary model (default in config.json)
-# or
-backend/scripts/start-llama-stock.ps1    # stock comparison model - stop the other one first, only one fits in 6GB at a time
-```
-Wait for `main: server is listening on http://127.0.0.1:8080` and a `{"status":"ok"}` from `curl http://127.0.0.1:8080/health`. First load takes ~15-25s.
+Dictation is handled by the browser's own Web Speech API (in Chrome, that means audio goes to Google's recognizer). The optional TTS path sends the agent's *answer text* — never your voice — to Groq.
 
-**2. Start the backend:**
-```bash
-cd backend
-npm install       # first time only
-npm run dev       # launches a shared Playwright browser + Express on :8990
-```
+## Limitations
 
-**3. Start the frontend:**
-```bash
-cd frontend
-npm install       # first time only
-npm run dev       # Vite on :5173, proxies /api and /frames to :8990
-```
-Open `http://localhost:5173`.
-
-**Other entry points** (all run from `backend/`, with llama-server + nothing else required):
-- `npm run probe -- <tableau-url>` - one-off dashboard validator (inventory, screenshot, filter+settle+diff cycle), no VLM involved.
-- `npm run run-agent -- <tableau-url> "<question>"` - CLI agent run, streams steps to stdout.
-- `npm run eval -- eval/questions.json` - batch harness, writes `eval/results.csv`.
-- `npm run reading-bench -- --label <name>` - chart-reading micro-benchmark against whichever model is currently loaded.
-- `npm run vision-smoke-test -- <image.png>` - quick "can this model see at all" check.
-
-## Demo script
-
-**With live conversations (B0-B4) in place, lead with the two-turn Video Game Sales conversation that includes a manual takeover in between** - it's the demo that actually shows off what this phase built, rather than just the per-step agent loop the earlier demos below already covered: the dashboard stays open across turns, the audience watches the agent work in the **live** view (not just per-step frames), then the presenter takes the wheel for a few seconds before handing it back.
-
-```
-Dashboard:  Video Game Sales
-Turn 1:     In the Top 5 Publishers chart, which publisher has the highest total sales?
-Turn 1 →    Nintendo (agent answers live; the lock veil then lifts)
-Takeover:   click the 'Electronic Arts' bar yourself, directly in the live view, to filter the dashboard to EA
-Turn 2:     Which single game now has the highest global sales in the Top 10 Games chart?
-Turn 2 →    FIFA 15 (agent reads the state you left it in - it never reloads or re-applies the filter itself)
-```
-
-Narrate it as: ask the first question and watch Docent answer live, the same as before; once it finishes, the lock veil disappears and the "Yours" badge appears - click the Electronic Arts bar yourself instead of asking the agent to; then ask the follow-up and watch it answer from the state *you* left it in. That last beat - a turn resuming into a human's manual edit, on the same live page, with no reload - is the concrete payoff of the whole persistent-conversation system and the one moment worth building the demo around. (Both turn values are verified: Nintendo tops the unfiltered publishers chart, and FIFA 15 is EA's top game after the filter.)
-
-For a **quick single-turn fallback** (if the live WebSocket isn't cooperating, or time is short): a pure-reading question on the Video Game Sales dashboard is the fastest reliable demo (1 step, ~10s), exercising pixel-mode perception with no click needed.
-
-```
-Dashboard: Video Game Sales
-Question:  In the Top 5 Publishers chart, which publisher has the highest total sales?
-Expected:  Nintendo   (1 step, verified in pixel mode)
-```
-
-For a **richer single-turn demo** that shows pixel-click actuation end to end (a good "look, it operates the dashboard" moment): the Electronic Arts filter question on Video Game Sales. The agent pixel-clicks the big EA bar in the Top 5 Publishers chart, the whole dashboard re-filters to EA, and it reads the top game off the updated frame.
-
-```
-Dashboard: Video Game Sales
-Question:  Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart.
-Expected:  FIFA 15   (2 steps, verified in pixel mode)
-```
-
-Pick large, clearly-labeled marks as click targets. Clicking the *small stacked rows* in the "Top Genres" chart instead makes the agent loop (10+ `rejected_loop` steps observed) because the pixel target is too small/ambiguous - a good cautionary note if asked about pixel-mode limits, but not something to demo live.
-
-## Pixel-clicking actuation mode
-
-By default, the agent operates dashboards through the Tableau Embedding API v3 (`__agentBridge` — `applyFilterAsync`, parameters, `activateSheetAsync`). A second, config-selected actuation mode is also available: **pixel mode**, where a hosted VLM (Google Gemini, serving `gemini-flash-lite-latest`) operates the dashboard by clicking on screen coordinates with a visible cursor, instead of calling structured bridge methods. This is useful for demoing/comparing a pixel-grounded actuation path against the API-grounded default.
-
-**How to enable:**
-- `backend/config.json` currently ships with `"actuationMode": "pixel"`; set it back to `"api"` for the local-only bridge path. The `config.pixel` block (`vlmEndpoint`, `modelName`, `vlmApiKeyEnv`) already points at the Gemini endpoint and doesn't need editing.
-- Put `GEMINI_API_KEY=<key>` in the root `.env` (git-ignored) — `resolveVlmTarget` in `vlmClient.js` reads the key from that environment variable at the name given by `vlmApiKeyEnv`, never from `config.json` itself.
-
-**Data-egress note:** In pixel mode, per-step dashboard screenshots are sent to the configured third-party VLM endpoint (Google Gemini), unlike the local-only API-mode pipeline. The configured dashboards are Tableau Public (public data), so sensitivity is low; no credentials or personal data are sent.
-
-**Running the demo:** enable pixel mode as above, start the three processes (llama-server is not needed for a pixel-mode-only run, but leave the usual startup order otherwise unchanged), then ask the verified pixel-click question — Video Game Sales → "Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart" (expect **FIFA 15**, 2 steps) — and watch the Watch screen: instead of semantic action cards, you'll see a visible cursor click the EA bar and the dashboard re-filter before it answers.
-
-## Voice (STT/TTS)
-
-**STT runs entirely in the user's browser** via the Web Speech API — no key, no quota, no backend route. A hosted alternative (Groq Whisper) was deliberately rejected: it would ship recordings of the user's voice to a third party, a categorically more sensitive payload than the public Tableau screenshots pixel mode already sends.
-
-**TTS has two paths**, remote-preferred with an automatic local fallback, so it degrades in *quality* rather than going silent:
-
-1. **Remote** — the frontend POSTs the answer text to the backend's `/api/tts` proxy, which calls Groq's Orpheus TTS (`canopylabs/orpheus-v1-english`) and returns WAV bytes. Natural-sounding, but costs a network round trip and can fail.
-2. **Local** — `window.speechSynthesis`. Instant and never fails, but only as good as the voices installed on the machine.
-
-Any non-200 from the proxy — missing key, unaccepted model terms, rate limit, provider down — falls through to the local voice with a `console.warn`, never to silence.
-
-**Prerequisites for the remote path:** `GROQ_API_KEY` in the root `.env`, **and** a one-time terms acceptance for the Orpheus model at `console.groq.com/playground?model=canopylabs%2Forpheus-v1-english`. Without the terms acceptance Groq returns `400 model_terms_required` and every answer silently uses the local voice. Set `config.tts.enabled` to `false` to disable the remote path entirely.
-
-**Egress note:** the remote path sends the agent's *answer text* (not audio, and never the user's voice) to Groq. Milder than the pixel-mode screenshot egress already documented above, but it is a third-party call.
-
-Historical note: Groq's older `playai-tts` / `playai-tts-arabic` models are **decommissioned** (as of 2025-12-31) and return `400 model_decommissioned`; Orpheus is their named replacement. Don't reintroduce the PlayAI IDs.
-
-- **STT (`frontend/src/hooks/useSpeechRecognition.js`)** — click-to-speak dictation from the mic button in the composer. Chrome streams the audio to Google's recognizer and returns interim guesses that get revised as you keep talking, so each event carries the *full* session transcript and the composer rebuilds the field as `base + transcript` rather than appending. That's what lets a guess be corrected in place instead of stuttering into the box twice. Chrome/Edge only (`webkitSpeechRecognition`); the button hides itself entirely where the API is absent. Chrome's `no-speech` error is swallowed deliberately — it fires on any thinking pause and surfacing it reads as a malfunction.
-- **TTS (`frontend/src/hooks/useSpeechSynthesis.js`)** — reads **only the final answer** of each turn. Thoughts, action cards, and takeover cards are never spoken. Scope is enforced by `speakableAnswer()` in `frontend/src/screens/Watch/speech.js`: `answered`/`max_steps` speak the answer text and `failed` speaks the "can't answer this" verdict, while `error` and `stopped` stay silent (they're session conditions, not responses).
-- **The toggle** is the speaker icon in the composer's button row (left of the mic and Send) — icon-only and 40x40 like its neighbours, so the composer stays exactly one line tall. It tints teal when on and shows a slashed speaker when off; the state is off by default and remembered in `localStorage` under `docent-read-aloud`. **Switching it on immediately reads the answer currently on screen**, then every subsequent turn — without that, the control looks broken on first use, since the natural sequence is to read an answer, want it spoken, click the speaker, and get silence until another question is asked. Turns are still marked as spoken regardless of the toggle, so flipping it never replays a backlog of older answers. Replayed History sessions never speak: the trigger is scoped to `liveSessionIds`, the same set `Feed` uses to avoid re-typewriting replayed thoughts.
-
-**Voice quick-ask from the minimized dock** (`frontend/src/screens/Watch/QuickAsk.jsx`) — the hands-off path that keeps the dashboard on the full canvas:
-
-- Hovering the minimized chat bubble (only while the agent isn't working) raises a mic **above** it. It's absolutely positioned, so revealing it never reflows the step history beside the dock.
-- Clicking the mic starts dictation and opens a glassmorphic bubble **beside** the mic carrying the live transcript plus its own send button. The transcript is a real editable textarea, not a read-only readout — recognition mangles exactly the words these dashboards are full of (publisher names, "Tableau"), and re-dictating a whole question to fix one word is worse than typing the fix.
-- Sending **does not expand the thread**. The dock stays minimized and flips straight to its "Thinking" face, then to "Response ready" when the turn settles.
-- Read-aloud is forced on for these turns regardless of the toggle — you asked without looking, so you shouldn't have to look for the answer. It's a deliberate **one-shot**: `forceSpeakRef` in `Watch.jsx` is consumed by whichever turn settles next and cleared even when that turn produces no speakable answer, so a failed voice turn can't leak the override onto the next typed one. The saved preference is never written.
-
-One layout subtlety worth preserving: the 8px gap between the mic and the bubble is `pb-2` *inside* the mic container, not a margin. With a margin the container's box wouldn't touch the bubble, so moving the cursor up toward the mic would leave the wrapper's DOM subtree, fire `mouseleave`, and hide the mic just as you reached for it.
-
-**Local-path voice quality is a machine-local concern.** When the remote path is unavailable, `pickVoice()` prefers Microsoft's neural "Natural" voices, then Google's, then any `en-US`, then any English voice. This dev machine only has the three legacy en-GB SAPI voices installed (George/Hazel/Susan), so it falls all the way through to George — intelligible but noticeably robotic. Installing a natural voice via **Settings → Time & Language → Speech → Manage voices** makes the picker prefer it automatically, with no code change. Worth doing before a live demo.
+- **Small click targets are unreliable.** Dense charts with many small marks are the main failure mode.
+- **Tableau stories aren't supported.** No action advances a story point; the viability check detects this and says so up front.
+- **One conversation at a time.** A single shared browser, guarded by a mutex.
+- **Tableau Public's search endpoint is undocumented.** It has no SLA and can change without notice, so the proxy degrades to the local dashboard list rather than erroring — but a change there is a change we don't control.
+- **Answers are not guaranteed correct.** Dense, fine-grained charts are hard to verify even by careful human inspection of the same screenshot. Treat model answers on that class of question as claims, not ground truth.
 
 ## Troubleshooting
 
-### Port 8990 is blocked on Windows (`EACCES`, frontend can't reach the backend)
-
-Symptom: `npm run dev` in `backend/` exits with "Windows has reserved it (EACCES)", or the frontend loads but every `/api` call fails. **Nothing is running on the port** — Windows excluded it from user binds.
-
-Windows hands whole TCP ranges to Hyper-V/WSL/WinNAT out of the *dynamic port range*. On this machine that range had been set to **1024–15000**, which covers essentially every port a dev server would want, so reservations keep landing on ours (8788 died in 8720–8819; 8990 later landed in 8921–9020). Chasing a new "free" port is not a fix — the ranges are re-rolled on every reboot.
+**The backend says it's listening but nothing works (Windows).** Windows hands whole TCP ranges to Hyper-V/WSL/WinNAT out of the dynamic port range. If that range has been widened down into dev-port territory, reservations land on ports like 8990 — and a failed bind still fires Express's `listen` callback, so it can *look* like it started. The backend now checks `address()` and prints a real diagnostic instead.
 
 Diagnose:
 
 ```bash
 netsh interface ipv4 show excludedportrange protocol=tcp
-netsh int ipv4 show dynamicport tcp
 ```
 
-Permanent fix — restore the Windows default dynamic range (49152 + 16384) so reservations move up out of dev-port territory, then pin 8990 so nothing can ever claim it. **Run in an elevated (Administrator) PowerShell, then reboot:**
+Permanent fix, in an **elevated** PowerShell, then reboot:
 
 ```bash
 netsh int ipv4 set dynamicport tcp start=49152 num=16384
-netsh int ipv6 set dynamicport tcp start=49152 num=16384
 net stop winnat
 netsh int ipv4 add excludedportrange protocol=tcp startport=8990 numberofports=1 store=persistent
 net start winnat
 ```
 
-The `add excludedportrange` line reserves 8990 *for us*: it removes the port from the pool Windows auto-allocates from, while an explicit `listen()` on it still succeeds. `store=persistent` makes it survive reboots. If that command errors with "access denied" or "process cannot access the file", 8990 is still inside a live auto-reservation — reboot first, then re-run just that line.
+Quick escape hatch, no admin: `BACKEND_PORT=9500 npm run dev`, and set `hostPageOrigin` in `backend/config.json` to match.
 
-Per-run escape hatch (no admin needed): `BACKEND_PORT=9500 npm run dev`, and set `hostPageOrigin` in `backend/config.json` to match. The Vite proxy reads `backendPort`/`BACKEND_PORT` from the same place, so the frontend follows automatically.
+**A run hangs on "Running".** Every stage is bounded (viz load 90s, model call 120s, action 30s, session 15min). If it truly hangs, a stuck Playwright page is the one thing that can't self-recover — restart the backend.
 
-### Other issues
+**"Settle timeout" warnings.** A dashboard took longer than 12s to stop changing. Occasional ones are normal on heavy workbooks; frequent ones mean that dashboard is a poor fit.
 
-- **llama-server won't start / OOM on load:** confirm no other llama-server is already holding the GPU (`tasklist` / check `nvidia-smi`). Only one model fits in 6GB at a time. If a model genuinely won't fit, drop `--ctx-size` to 6144 before trying a smaller quant.
-- **Session hangs at "Running" forever:** shouldn't happen post-Phase-3 - every stage has a bounded timeout (viz load 90s, VLM call 120s, bridge action 30s, session wall clock 15min). If it does, check `backend` stdout for an unhandled exception; the server's crash safety net should still mark the session `error` in the DB, but a truly stuck Playwright page is the one thing that can't self-recover - restart the backend.
-- **Settle timeout warnings:** shown when a dashboard update takes >12s to visually stabilize (slow Tableau Public rendering, not a bug). The step still completes with a `settle_timeout` flag; occasional ones are normal on heavier dashboards, frequent ones suggest that specific dashboard isn't a good fit for the curated list.
-- **Empty inventory warning:** the dashboard has no API-operable filters/parameters/extra sheets - the agent can only answer from what's visible in the initial screenshot. Not an error, just a capability limit of that specific dashboard.
-- **The mic button is missing, or dictation does nothing:** the Web Speech API is Chrome/Edge-only, and the button is hidden entirely on browsers without it (Firefox). If the button is present but a click surfaces "Microphone access is blocked", grant the mic permission via the icon in the address bar. Note that dictation needs an internet connection — Chrome does the recognition server-side.
-- **Answers are read aloud, but in the robotic local voice:** the remote Groq path failed and fell back. Check the backend log for a `[tts] upstream` line — `model_terms_required` means the one-time Orpheus terms acceptance is still pending (see the Voice section above); a 429 means the free tier is exhausted.
-- **Answers aren't read aloud at all:** check the "Read aloud" toggle in the composer is lit (it's off by default and remembered per browser). Only *answers* are ever spoken — a turn that ends in `error` or `stopped` is silent by design.
-- **A dashboard has a "decoy" control:** some real-world workbooks have parameters or filters left over from authoring that aren't wired to anything visible. The loop guard + escalating corrective feedback (AGENT_PLAN.md-driven design) handles this automatically, typically converging within 2-3 extra steps - if you see a session burn most of its 15-step budget on this, that's worth investigating as a regression.
-- **Image reading seems worse than expected:** check `config.imageLongSide` (1280px) hasn't been lowered, and that the dashboard's actual content isn't being letterboxed with dead margin (the host page auto-sizes to the dashboard's real published size after `FirstInteractive`, but a dashboard with `size.behavior === "automatic"` has no fixed size to snap to and may render at the default 1600x1000 box with wasted space - see the CA Revenue Sources dashboard for an example, its real content only occupies the left ~40% of a wider default canvas).
+**Answers read aloud in a robotic voice.** The Groq TTS path failed and fell back to the OS voice. Check the backend log for `[tts] upstream` — `model_terms_required` means a one-time model terms acceptance is still pending in the Groq console.
 
-## Model A/B results
+## Things learned the hard way
 
-10-crop chart-reading micro-benchmark (`eval/reading-bench.js`), same prompts/images/token budget (600 max_tokens, temperature 0) for both models:
+Worth knowing before extending this:
 
-| Model | Score |
-|---|---|
-| Jackrong Qwen3.5-4B Claude-Opus-reasoning distill (Q4_K_M) | **10/10** |
-| Stock Qwen3.5-4B base (Q6_K, no reasoning LoRA) | **8/10** |
+- **Tableau's internal iframe reuses `id="viz"`.** The embed element is `id="agentViz"` to avoid Playwright locator collisions.
+- **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field. Range filters have no dashboard-level equivalent and still need per-worksheet calls.
+- **Real workbooks contain decoy controls** — a "Select Region" parameter wired to nothing, sitting next to the `RegionName` filter that actually drives the view. The loop guard and escalating corrective feedback recover; nothing detects decoys directly, because that isn't generally knowable.
+- **`getInventory()` throws on a story.** A Story object has no `getFiltersAsync`, so a story must be detected by reading the sheet type off the element *before* touching the bridge.
+- **`waitForSettle` returns `{timedOut}` rather than throwing.** Ignore the return value and you'll screenshot a still-painting dashboard and conclude it rendered nothing.
+- **Dashboards with `size.behavior === "automatic"`** have no published size to snap to, so frames carry dead margin and waste image tokens.
 
-The distill's 2 extra correct reads were both about *completing an answer at all*, not raw pixel-level perception: the stock model gave an empty response on the hardest crop (a dense waterfall chart with 12 small percentage labels) and misread which bar was labeled 28.3% on its first attempt, both consistent with a base model that hasn't been tuned to reliably close out a complete, well-formed answer under real task pressure. This is a genuinely useful signal for the research track: reasoning distillation - even from **text-only** Claude Opus traces, with no vision-specific data - correlated with *more* reliable chart reading here, not less, contrary to the original concern that text-only fine-tuning might degrade visual grounding.
+## Project notes
 
-Full per-crop results: `eval/reading/results-jackrong_distill.json`, `eval/reading/results-qwen3_5_4b_stock.json`.
+Earlier iterations ran a locally-hosted 4B vision model (llama.cpp) and actuated dashboards through structured Embedding API calls rather than clicks. That approach is retired — Gemini with coordinate clicking is the supported path. Some scaffolding from that era still exists (`backend/scripts/start-llama*.ps1`, the `"api"` actuation mode, benchmark results in `eval/reading/`) and is kept only for reference.
 
-**Methodology note:** the first pass used a 200-token budget and showed the stock model failing on roughly half the crops with *empty* responses. Raising the budget to 600 tokens changed the stock model's score substantially, consistent with it spending more of its output budget inside `<think>...</think>` before an answer than the reasoning-distilled model does. Both scores above are from the 600-token, fair-comparison run - do not compare against the discarded 200-token numbers.
-
-## Batch eval harness results
-
-`node eval.js eval/questions.json` against the primary model, 10 questions across all 5 curated dashboards, every action type exercised at least once (`set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `answer`, `fail`):
-
-**10/10 questions completed, 0 harness-level crashes.** 9 reached `answered`, 1 (`q6`, the unanswerable trap) correctly reached `failed` in a single step with no looping. Of the 4 questions with independently-verified ground truth (`q1`, `q3`, `q5`, `q7`), all 4 matched exactly. `q2` (the decoy-parameter Boston question) again self-corrected and answered correctly, this run taking 7 steps rather than the earlier 5 - normal run-to-run variance, still comfortably inside the 15-step budget. `q10` was the first live-agent exercise of `set_range_filter` end to end and completed cleanly in 2 steps. Full detail in `eval/results.csv`.
-
-## Deferred
-
-Intentionally out of scope for the frontend revamp (see `../FRONTEND_PLAN.md`) - not built, not started:
-
-- **Token streaming.** Thoughts are revealed via a client-side typewriter, not real token-by-token streaming from the VLM - the prompt caps thoughts at ≤2 sentences and the call uses `response_format: json_object`, so there's no meaningful token stream to forward, and streaming would also break the JSON-repair retry logic.
-- **Literal click crosshairs on self-generated dashboards.** The agent acts through the Tableau Embedding API, not pixel clicks, so there's no cursor position to show (D10) - a semantic action card + best-effort widget highlight is the permanent design for Tableau targets. Literal crosshairs would only become meaningful for a future self-generated-dashboard target where pixel coordinates are actually known.
-
-## Known findings worth reading before extending this system
-
-- **Tableau's internal iframe reuses `id="viz"`** - the embedded element uses `id="agentViz"` to avoid Playwright locator collisions.
-- **Filter domain enumeration (`getDomainAsync`) works reliably** on every dashboard tested - the `domain: null` fallback path is a true edge case, not the common case.
-- **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field when the active sheet is a dashboard - no manual per-worksheet iteration needed for categorical filters. Range filters have no dashboard-level equivalent and still need per-worksheet `applyRangeFilterAsync`.
-- **Real-world dashboards can have decoy/orphaned controls** - a parameter or filter that sounds relevant by name but isn't wired to anything visible (a real workbook may ship a "Select Region" parameter that does nothing while a separate `RegionName` filter is the one that actually works). The system recovers via loop-guard rejection + escalating corrective feedback, not by detecting decoys directly (that's not generally knowable).
-- **Dense, fine-grained charts (many small icons/marks close together) are genuinely hard to verify** even by manual human inspection of a screenshot, not just for the VLM - see the `q4` disease-icon-counting case. Don't treat a model's answer on this class of question as ground truth without independent verification.
-- **A dashboard's screenshot can have significant dead margin** if `sheet.size.behavior === "automatic"` (no fixed published size to auto-snap the host page to) - see CA Revenue Sources, whose real content occupies only the left ~40% of its captured frame.
+Build plans and contracts, if you want the reasoning behind the design: [docs/AGENT_PLAN.md](docs/AGENT_PLAN.md), [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md), [docs/DESIGN.md](docs/DESIGN.md).
