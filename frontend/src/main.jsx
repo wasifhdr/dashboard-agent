@@ -5,11 +5,14 @@ import "@fontsource-variable/jetbrains-mono";
 // Full axis set (opsz / wght / SOFT / WONK) — the editorial display face used
 // for the agent panel's title. See .docent-title in index.css.
 import "@fontsource-variable/fraunces/full.css";
+import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </React.StrictMode>,
 );

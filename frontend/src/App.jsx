@@ -1,112 +1,120 @@
 import { useState } from "react";
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell.jsx";
 import ConfirmDialog, { useConfirm } from "./components/ui/ConfirmDialog.jsx";
 import Landing from "./screens/Landing/Landing.jsx";
 import Watch from "./screens/Watch/Watch.jsx";
 import History from "./screens/History/History.jsx";
 
+// Maps a pathname back to the coarse "view" AppShell styles itself around.
+// AppShell only needs to know which of the three layouts to use, not the
+// specific route.
+function viewForPath(pathname) {
+  if (pathname.startsWith("/watch") || pathname.startsWith("/replay")) return "watch";
+  if (pathname.startsWith("/history")) return "history";
+  return "landing";
+}
+
+function ConversationReplay({ onActiveRunChange, onDashboardChange }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  return (
+    <Watch
+      mode="replay"
+      conversationId={id}
+      onBack={() => navigate("/history")}
+      onActiveRunChange={onActiveRunChange}
+      onDashboardChange={onDashboardChange}
+    />
+  );
+}
+
+function SessionReplay({ onActiveRunChange, onDashboardChange }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  return (
+    <Watch
+      mode="replay"
+      sessionId={id}
+      onBack={() => navigate("/history")}
+      onActiveRunChange={onActiveRunChange}
+      onDashboardChange={onDashboardChange}
+    />
+  );
+}
+
+// Live watch. The dashboard to open arrives as router location state from
+// Landing (history.state, so it survives a reload). Task 3 replaces this body
+// with the resume-aware version; today a refresh with no state redirects home.
+function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
+  const location = useLocation();
+  const target = location.state?.dashboard ?? null;
+  if (!target) return <Navigate to="/" replace />;
+  return (
+    <Watch
+      mode="live"
+      dashboardTarget={target}
+      onActiveRunChange={onActiveRunChange}
+      onEnd={onEnd}
+      confirm={confirm}
+      onDashboardChange={onDashboardChange}
+    />
+  );
+}
+
 export default function App() {
-  const [view, setView] = useState("landing");
-  const [watchTarget, setWatchTarget] = useState(null);
-  // { kind: "conversation", id } | { kind: "session", id } | null. Discriminates
-  // whether Watch below gets a conversationId or a sessionId prop - constructed
-  // by History.jsx's row click handler, consumed only here.
-  const [replayTarget, setReplayTarget] = useState(null);
   const [watchHasActiveRun, setWatchHasActiveRun] = useState(false);
   // The live dashboard {name, url} Watch is currently showing, surfaced in the
-  // top header as a clickable link. Null outside the watch view.
+  // top header as a clickable link. Null outside the watch/replay views.
   const [watchDashboard, setWatchDashboard] = useState(null);
   const [confirm, confirmProps] = useConfirm();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const view = viewForPath(location.pathname);
 
-  // Leaving the Watch view tears the live session down — the backend closes the
-  // shared browser and the conversation is over — so EVERY exit from a live
-  // watch confirms first, not just the ones taken mid-run. "Docent", "New
-  // dashboard" and "History" all funnel through navigate(), so this covers them
-  // all. Replays have nothing to lose and never prompt. (The dashboard title in
-  // the header is a target="_blank" link to Tableau Public; it opens a new tab
-  // rather than leaving, so it ends nothing and is deliberately not gated.)
-  const isLiveWatch = view === "watch" && !replayTarget && !!watchTarget;
-
-  function confirmLeaveLiveWatch() {
-    if (!isLiveWatch) return Promise.resolve(true);
-    return confirm({
-      title: "Leave this session?",
-      body: watchHasActiveRun
-        ? "The agent is still working on your question. Leaving closes the dashboard and the answer is lost."
-        : "Leaving closes the dashboard and ends the conversation. Past turns stay in your history.",
-      confirmLabel: "Leave",
-      danger: true,
-    });
-  }
-
-  async function navigate(nextView) {
-    if (view === "watch" && nextView !== "watch" && !(await confirmLeaveLiveWatch())) return;
-    setWatchHasActiveRun(false);
-    if (nextView !== "watch") setWatchDashboard(null);
-    setView(nextView);
-  }
-
-  function openWatch(target) {
-    setWatchTarget(target);
-    setReplayTarget(null);
-    setWatchHasActiveRun(false);
-    setWatchDashboard(target ?? null);
-    setView("watch");
-  }
-
-  function openReplay(target) {
-    setReplayTarget(target);
-    setWatchTarget(null);
+  // Navigation no longer confirms. Leaving a live watch does NOT end the
+  // conversation - nothing on unmount closes it - and with routing in place
+  // the exit is recoverable: navigate back to /watch and the still-running
+  // session is re-attached. "End session" inside Watch keeps its own confirm,
+  // because that one really does close the runtime.
+  function handleNavigate(nextView) {
     setWatchHasActiveRun(false);
     setWatchDashboard(null);
-    setView("watch");
+    navigate(nextView === "history" ? "/history" : "/");
   }
 
-  // Stop / End session on a live conversation (the composer Stop button and the
-  // red stop button in Watch's thread header). Navigates back to the landing
-  // page immediately; Watch has already kicked off the backend cleanup
-  // (abort the turn + close the dashboard) fire-and-forget, so there's nothing
-  // to await here.
   function endLiveWatch() {
-    setWatchTarget(null);
-    setReplayTarget(null);
     setWatchHasActiveRun(false);
     setWatchDashboard(null);
-    setView("landing");
+    navigate("/");
   }
+
+  const watchProps = {
+    onActiveRunChange: setWatchHasActiveRun,
+    onDashboardChange: setWatchDashboard,
+  };
 
   return (
-    <AppShell view={view} onNavigate={navigate} headerCenter={view === "watch" ? watchDashboard : null}>
-      {view === "landing" && <Landing onOpenWatch={openWatch} />}
-      {view === "watch" && replayTarget?.kind === "conversation" && (
-        <Watch
-          mode="replay"
-          conversationId={replayTarget.id}
-          onBack={() => navigate("history")}
-          onActiveRunChange={setWatchHasActiveRun}
-          onDashboardChange={setWatchDashboard}
+    <AppShell view={view} onNavigate={handleNavigate} headerCenter={view === "watch" ? watchDashboard : null}>
+      <Routes>
+        <Route
+          path="/"
+          element={<Landing onOpenWatch={(target) => navigate("/watch", { state: { dashboard: target } })} />}
         />
-      )}
-      {view === "watch" && replayTarget?.kind === "session" && (
-        <Watch
-          mode="replay"
-          sessionId={replayTarget.id}
-          onBack={() => navigate("history")}
-          onActiveRunChange={setWatchHasActiveRun}
-          onDashboardChange={setWatchDashboard}
+        <Route path="/watch" element={<LiveWatch {...watchProps} onEnd={endLiveWatch} confirm={confirm} />} />
+        <Route path="/replay/c/:id" element={<ConversationReplay {...watchProps} />} />
+        <Route path="/replay/s/:id" element={<SessionReplay {...watchProps} />} />
+        <Route
+          path="/history"
+          element={
+            <History
+              onOpenReplay={(t) => navigate(t.kind === "conversation" ? `/replay/c/${t.id}` : `/replay/s/${t.id}`)}
+              onGoToLanding={() => navigate("/")}
+            />
+          }
         />
-      )}
-      {view === "watch" && !replayTarget && watchTarget && (
-        <Watch
-          mode="live"
-          dashboardTarget={watchTarget}
-          onActiveRunChange={setWatchHasActiveRun}
-          onEnd={endLiveWatch}
-          confirm={confirm}
-          onDashboardChange={setWatchDashboard}
-        />
-      )}
-      {view === "history" && <History onOpenReplay={openReplay} onGoToLanding={() => navigate("landing")} />}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
       <ConfirmDialog {...confirmProps} />
     </AppShell>
   );
