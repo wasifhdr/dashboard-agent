@@ -329,8 +329,21 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
     onEnd?.();
   }
 
-  if (mode === "replay" && loadError) {
-    return <div className="p-6 text-sm text-coral-ink">Failed to load session: {loadError}</div>;
+  // Not gated on replay: a live RESUME loads through the same effect, so it can
+  // fail the same way (the conversation is closed between /api/conversations/active
+  // reporting it live and getConversation fetching it). Gated on replay, that
+  // case fell through to the loading overlay below and sat there forever with no
+  // error and no way out. loadError is only ever set by that load effect, which
+  // a non-resuming live session never enters, so this cannot fire spuriously.
+  if (loadError) {
+    return (
+      <div className="p-6 text-sm text-coral-ink">
+        <p>Failed to load session: {loadError}</p>
+        <Button size="sm" className="mt-3" onClick={() => (onBack ?? onEnd)?.()}>
+          {onBack ? "Back to history" : "Back to search"}
+        </Button>
+      </div>
+    );
   }
   if (mode === "replay" && !primaryRun) {
     return <div className="p-6 text-sm text-fg/60">Loading session…</div>;
