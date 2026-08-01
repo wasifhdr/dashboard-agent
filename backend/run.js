@@ -1,6 +1,7 @@
 // CLI runner: node run.js <tableau-views-url> "<question>"
 // Streams steps to stdout, prints the final answer + session id.
-// Requires: backend server running (npm run dev) and llama-server running.
+// Requires: the backend running (npm run dev) and GEMINI_API_KEY in the
+// repo-root .env (the VLM is a hosted endpoint, see backend/config.json).
 import "./src/env.js";
 import path from "node:path";
 import fs from "node:fs";

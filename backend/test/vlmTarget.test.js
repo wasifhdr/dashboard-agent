@@ -4,19 +4,24 @@ import { _internal } from "../src/vlmClient.js";
 
 const { resolveVlmTarget, authHeaders } = _internal;
 
-test("api mode resolves to llamaEndpoint completions URL, no key", () => {
-  const cfg = { llamaEndpoint: "http://127.0.0.1:8080", modelName: "local" };
-  const t = resolveVlmTarget(cfg);
-  assert.equal(t.url, "http://127.0.0.1:8080/v1/chat/completions");
-  assert.equal(t.modelName, "local");
-  assert.equal(t.apiKeyEnv, null);
+test("an unconfigured endpoint throws instead of silently falling back", () => {
+  // The local llama-server fallback was removed with the local model. A config
+  // without pixel.vlmEndpoint used to resolve to a dead localhost URL and fail
+  // later as an opaque fetch error; it must now fail loudly and immediately.
+  assert.throws(() => resolveVlmTarget({}), /No VLM endpoint configured/);
+  assert.throws(() => resolveVlmTarget({ pixel: {} }), /No VLM endpoint configured/);
+});
+
+test("resolution does not depend on actuationMode - the mode picks the prompt, not the provider", () => {
+  const pixel = { vlmEndpoint: "https://example.test/v1beta/openai", modelName: "m", vlmApiKeyEnv: "K" };
+  const asPixel = resolveVlmTarget({ actuationMode: "pixel", pixel });
+  const asApi = resolveVlmTarget({ actuationMode: "api", pixel });
+  assert.deepEqual(asApi, asPixel);
 });
 
 test("pixel mode resolves to the pixel endpoint + key env name", () => {
   const cfg = {
     actuationMode: "pixel",
-    llamaEndpoint: "http://127.0.0.1:8080",
-    modelName: "local",
     pixel: {
       vlmEndpoint: "https://generativelanguage.googleapis.com/v1beta/openai",
       modelName: "gemini-flash-lite-latest",

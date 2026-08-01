@@ -282,26 +282,36 @@ async function resizeImageToDataUrl(imagePath, longSide) {
   return `data:image/png;base64,${buf.toString("base64")}`;
 }
 
-// --- provider target resolution (pixel mode adds a hosted endpoint) --------
+// --- provider target resolution -------------------------------------------
 
-// Returns the completions URL, model name, and (optional) API-key env-var NAME
-// for the active actuation mode. In "api" mode this is the local llama-server
-// with no auth — identical to the pre-change behavior. In "pixel" mode it is
-// the hosted OpenAI-compatible endpoint from config.pixel.
+// Returns the completions URL, model name, and API-key env-var NAME for the
+// configured VLM. There is exactly one supported shape now: a hosted
+// OpenAI-compatible endpoint under config.pixel. The local llama-server path
+// was removed with the local model, so an unconfigured endpoint is a hard
+// error rather than a silent fallback to a URL nothing is listening on.
+//
+// This is deliberately independent of actuationMode - the mode selects which
+// system prompt is built, not where the request goes.
 function resolveVlmTarget(config) {
-  const mode = config.actuationMode ?? "api";
-  if (mode === "pixel" && config.pixel?.vlmEndpoint) {
-    return {
-      url: `${config.pixel.vlmEndpoint}/v1/chat/completions`,
-      modelName: config.pixel.modelName ?? config.modelName,
-      apiKeyEnv: config.pixel.vlmApiKeyEnv ?? null,
-    };
+  const endpoint = config.pixel?.vlmEndpoint;
+  if (!endpoint) {
+    throw new Error(
+      "No VLM endpoint configured: set config.pixel.vlmEndpoint (plus pixel.modelName and " +
+        "pixel.vlmApiKeyEnv). The local llama-server path has been removed.",
+    );
   }
   return {
-    url: `${config.llamaEndpoint}/v1/chat/completions`,
-    modelName: config.modelName,
-    apiKeyEnv: null,
+    url: `${endpoint}/v1/chat/completions`,
+    modelName: config.pixel.modelName ?? null,
+    apiKeyEnv: config.pixel.vlmApiKeyEnv ?? null,
   };
+}
+
+// The model actually answering, for recording alongside a session. Kept
+// separate from resolveVlmTarget because a bookkeeping read must never throw
+// on a half-configured install.
+export function activeModelName(config) {
+  return config.pixel?.modelName ?? null;
 }
 
 // Builds the Authorization header from an env-var NAME (never a literal key).
@@ -311,7 +321,7 @@ function authHeaders(apiKeyEnv, env) {
   return value ? { Authorization: `Bearer ${value}` } : {};
 }
 
-// ---- llama-server call --------------------------------------------------
+// ---- VLM call -----------------------------------------------------------
 
 async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: preparedImage, stopSignal }) {
   // `preparedImage` lets a caller supply its own already-encoded image (the
@@ -495,13 +505,13 @@ export async function getNextAction({ config, question, inventory, history, imag
     // the orchestrator's post-call shouldStop() check ends the run promptly.
     if (stopSignal?.aborted) break;
     if (attempt >= 2) onAttempt(attempt);
-    const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback, mode: config.actuationMode ?? "api" });
+    const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback, mode: config.actuationMode ?? "pixel" });
 
     let raw;
     try {
       raw = await callVlm({ config, systemText, userText, imagePath, stopSignal });
     } catch (e) {
-      // Network failure / timeout / llama-server down. Distinct from a
+      // Network failure / timeout / VLM endpoint down. Distinct from a
       // malformed-but-present response - don't inject a "not valid JSON"
       // correction (misleading), just retry with the same feedback as
       // before; if every attempt fails this way the caller sees errorKind
@@ -525,7 +535,7 @@ export async function getNextAction({ config, question, inventory, history, imag
     }
 
     const result = StepResponseSchema.safeParse(parsed);
-    if (result.success && !((config.actuationMode ?? "api") !== "pixel" && result.data.action.type === "click")) {
+    if (result.success && !((config.actuationMode ?? "pixel") !== "pixel" && result.data.action.type === "click")) {
       return { valid: true, thought: result.data.thought, action: result.data.action, rawText: raw, attempts: attempt };
     }
 

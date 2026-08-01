@@ -1,6 +1,4 @@
 {
-  "llamaEndpoint": "http://127.0.0.1:8080",
-  "modelName": "Jackrong-Qwen3.5-4B-Claude-Opus-Reasoning-Distilled-v2-Q4_K_M",
   "actuationMode": "pixel",
   "pixel": {
     "vlmEndpoint": "https://generativelanguage.googleapis.com/v1beta/openai",

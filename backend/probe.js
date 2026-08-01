@@ -3,8 +3,8 @@
 // filter, settle, screenshot again, diff.
 //
 // Usage: node probe.js <tableau-views-url>
-// Requires: backend server running (npm run dev) and llama-server is NOT
-// required for this probe (it only exercises perception/actuation, no VLM).
+// Requires: the backend running (npm run dev) for the host page. No VLM is
+// involved - this only exercises perception and bridge actuation.
 
 import path from "node:path";
 import fs from "node:fs";

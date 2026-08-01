@@ -216,6 +216,8 @@ Worth knowing before extending this:
 
 ## Project notes
 
-Earlier iterations ran a locally-hosted 4B vision model (llama.cpp) and actuated dashboards through structured Embedding API calls rather than clicks. That approach is retired — Gemini with coordinate clicking is the supported path. Some scaffolding from that era still exists (`backend/scripts/start-llama*.ps1`, the `"api"` actuation mode, benchmark results in `eval/reading/`) and is kept only for reference.
+Earlier iterations ran a locally-hosted 4B vision model (llama.cpp) and actuated dashboards through structured Embedding API calls rather than clicks. That approach is retired, and its scaffolding has been removed — there is no local model server, no `llamaEndpoint`, and no GPU requirement. A hosted VLM with coordinate clicking is the only supported path; an unconfigured endpoint now fails loudly at startup of a run rather than quietly pointing at a dead localhost port.
+
+Two things from that era remain on purpose. `config.actuationMode` still accepts `"api"`, which swaps in the structured-bridge prompt and lets the agent operate filters and parameters by id instead of by click — it runs against the same hosted endpoint, and is useful for comparing the two grounding strategies. And `eval/reading/` keeps the chart-reading crops and the measurements taken on the old local models, as archived data.
 
 Build plans and contracts, if you want the reasoning behind the design: [docs/AGENT_PLAN.md](docs/AGENT_PLAN.md), [docs/LIVE_TAKEOVER_PLAN.md](docs/LIVE_TAKEOVER_PLAN.md), [docs/DESIGN.md](docs/DESIGN.md).

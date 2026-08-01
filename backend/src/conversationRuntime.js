@@ -22,6 +22,7 @@ import { openSession, waitForSettle, screenshotViz } from "./perception.js";
 import * as store from "./store.js";
 import { FRAMES_DIR } from "./paths.js";
 import { inspectViz } from "./viability.js";
+import { activeModelName } from "./vlmClient.js";
 
 // Must match the id on <tableau-viz id="agentViz"> in public/host.html.
 // perception.js is the source of truth (VIZ_SELECTOR there) but is frozen and
@@ -128,7 +129,7 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     id,
     dashboard_url: dashboardUrl,
     dashboard_name: dashboardName ?? null,
-    model_id: config.modelName,
+    model_id: activeModelName(config),
     config_json: JSON.stringify(config),
   });
 

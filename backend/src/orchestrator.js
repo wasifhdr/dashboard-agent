@@ -9,7 +9,7 @@ import path from "node:path";
 import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
-import { getNextAction, refineClickPoint } from "./vlmClient.js";
+import { getNextAction, refineClickPoint, activeModelName } from "./vlmClient.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint } from "./pixelGuard.js";
@@ -132,7 +132,7 @@ export async function runSession({
     dashboard_url: dashboardUrl,
     dashboard_name: dashboardName ?? null,
     question,
-    model_id: config.modelName,
+    model_id: activeModelName(config),
     config_json: JSON.stringify(config),
     conversation_id: conversationId,
     turn_index: turnIndex,
@@ -391,7 +391,7 @@ export async function runSession({
     // the one it had reasoned about. Done here, before the loop key and the
     // dead-click guard, so every downstream consumer (guard, persistence,
     // history, cursor overlay, actuator) sees the one point actually clicked.
-    if (action.type === "click" && (config.actuationMode ?? "api") === "pixel") {
+    if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
       const refined = await refineClickPoint({
         config,
         imagePath: framePath,
@@ -502,7 +502,7 @@ export async function runSession({
     consecutiveWaits = 0;
 
     if (action.type === "click") {
-      if ((config.actuationMode ?? "api") !== "pixel") {
+      if ((config.actuationMode ?? "pixel") !== "pixel") {
         // Belt-and-suspenders: a click can only be produced in pixel mode.
         persistAndEmit({
           idx, thought, action, status: "rejected_target",

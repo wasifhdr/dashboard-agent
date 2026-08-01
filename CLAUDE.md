@@ -14,16 +14,16 @@ Public repo: <https://github.com/wasifhdr/dashboard-agent>. README.md is now wri
 
 **Actuation is pixel mode and the VLM is hosted Gemini.** `config.json` has `"actuationMode": "pixel"`, and `resolveVlmTarget` in `vlmClient.js` routes pixel mode to `config.pixel.vlmEndpoint` (`gemini-flash-lite-latest`, key read from the env var named by `vlmApiKeyEnv`). The key lives in the **repo-root** `.env` (git-ignored), loaded by `src/env.js`.
 
-The earlier locally-hosted approach is **retired**: no llama.cpp, no local Qwen, no 6GB-VRAM constraints. Do not reintroduce them or write docs that assume them.
+The earlier locally-hosted approach is **retired and its scaffolding deleted**: no llama.cpp, no local Qwen, no 6GB-VRAM constraints, no `llamaEndpoint`, no `backend/scripts/`. Do not reintroduce them or write docs that assume them.
 
-Vestigial and kept only for reference — do not build on these, and don't describe them as live:
+`resolveVlmTarget` now has exactly one supported shape — `config.pixel.vlmEndpoint` — and **throws** if it's missing rather than falling back to a dead localhost URL. It is deliberately independent of `actuationMode`: the mode selects which system prompt gets built, not where the request goes.
 
-- `config.llamaEndpoint` / `config.modelName` (the non-pixel fallback branch in `resolveVlmTarget`)
-- `"api"` actuation mode — the structured-bridge path
-- `backend/scripts/start-llama*.ps1`, `npm run reading-bench`, `npm run vision-smoke-test`
-- `eval/reading/` benchmark results
+Two things survive on purpose, and are genuinely live rather than vestigial:
 
-If asked to clean house, these are the removal candidates — but confirm first, they're referenced from `eval/` and old docs.
+- **`actuationMode: "api"`** — the structured-bridge prompt (operate filters/parameters by `F*`/`P*` id instead of clicking). It runs against the same hosted endpoint and still works; it's the comparison arm for the two grounding strategies. `config.json` ships `"pixel"`, and every `?? ` default in the code is now `"pixel"`.
+- **`eval/reading/`** — crops and measurements from the old local models, kept as archived data. `build-crops.js` is pure image cropping and calls no model.
+
+Use `activeModelName(config)` from `vlmClient.js` when recording which model answered — **never** `config.modelName`, which no longer exists. Sessions recorded before 2026-08-01 carry the old Qwen model id; that's history, not a bug.
 
 ## Layout
 
@@ -78,7 +78,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 - `npm run probe -- <tableau-url>` — validate a dashboard (inventory, screenshot, filter+settle+diff), no VLM. Note it launches its **own** browser and **mutates state** by applying a filter — never point it at a live session's page.
 - `npm run run-agent -- <tableau-url> "<question>"` — one agent run, streams steps to stdout.
 - `npm run eval -- eval/questions.json` — batch harness → `eval/results.csv`.
-- `npm test` — unit tests. Use this, **not** bare `node --test`, which picks up `scripts/vision-smoke-test.js` and fails for unrelated reasons.
+- `npm test` — unit tests (`node --test test/*.test.js`). Prefer it over a bare `node --test`, which discovers more broadly than intended.
 
 ## Backend module map (`backend/src/`)
 
@@ -87,7 +87,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 | `orchestrator.js` | The agent loop: perceive→inventory→prompt→validate→execute→settle→persist. Step budget (15), loop guard (exact-repeat + max-2-consecutive-waits + dead-click radius + escalating corrective feedback), zoom-refine pass on pixel clicks, forced best-effort answer on budget exhaustion. |
 | `perception.js` | Playwright open, **settle gate**, screenshot, coarse changed-region pixel diff. |
 | `inventory.js` | Normalizes controls to stable `S*`/`F*`/`P*` IDs; merges same-field filters across worksheets. Returns `{activeSheet, sheets, filters, parameters}` — note it does **not** preserve `isDashboard` from the raw bridge payload. |
-| `vlmClient.js` | Prompt builder (separate api/pixel system templates) + image resize + `response_format: json_object` + last-JSON-object fallback extractor + up to 2 re-prompts. `resolveVlmTarget` picks the Gemini endpoint in pixel mode. |
+| `vlmClient.js` | Prompt builder (separate api/pixel system templates) + image resize + `response_format: json_object` + last-JSON-object fallback extractor + up to 2 re-prompts. `resolveVlmTarget` returns the one configured hosted endpoint or throws; `activeModelName` is the safe read for bookkeeping. |
 | `actionSchema.js` | zod discriminated union — 8 action types (`set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `wait`, `answer`, `fail`, `click`). **None advances a story point.** |
 | `actuator.js` | Executes a validated action against `__agentBridge`; case-insensitive domain matching + near-match suggestions; 30s timeout. |
 | `pixelGuard.js` | Dead-click proximity guard for pixel mode. |
