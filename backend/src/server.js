@@ -436,8 +436,24 @@ async function startTurn({ conversationId, activeRuntime, question }) {
       // run itself (B2 review fix): releasing it earlier let a rapid next
       // turn start mid-cleanup and have its "agent" mode clobbered back to
       // "idle" by this stale callback once it finally resumed.
-      turnRunning = false;
-      currentTurn = null;
+      //
+      // Release the lock only if THIS turn still holds it. A turn can be
+      // abandoned and settle much later: POST /close aborts and then gives up
+      // after waitForTurnToStop's 8s, closing the page out from under a run
+      // that has not noticed yet (an abort is only observed at a step boundary
+      // or by the VLM fetch, so a turn still opening or settling the dashboard
+      // can outlast that wait). Clearing unconditionally would let that stale
+      // callback release the mutex while a NEWER turn is running - admitting a
+      // second concurrent turn, and making /api/conversations/active report no
+      // running turn, which is exactly what the resume path relies on.
+      //
+      // The `!currentTurn` arm is the safety net: the pair is only ever set and
+      // cleared together, so a null currentTurn means nobody holds the lock and
+      // turnRunning must not be left stuck true.
+      if (!currentTurn || currentTurn.id === turnId) {
+        turnRunning = false;
+        currentTurn = null;
+      }
     });
 
   return { turnId, turnIndex, takeover };
