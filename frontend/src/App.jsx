@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom";
 import AppShell from "./components/AppShell.jsx";
 import ConfirmDialog, { useConfirm } from "./components/ui/ConfirmDialog.jsx";
 import Landing from "./screens/Landing/Landing.jsx";
 import Watch from "./screens/Watch/Watch.jsx";
 import History from "./screens/History/History.jsx";
+import { getActiveConversation } from "./api.js";
 
 // Maps a pathname back to the coarse "view" AppShell styles itself around.
 // AppShell only needs to know which of the three layouts to use, not the
@@ -43,11 +44,47 @@ function SessionReplay({ onActiveRunChange, onDashboardChange }) {
   );
 }
 
-// Live watch. The dashboard to open arrives as router location state from
-// Landing (history.state, so it survives a reload). Task 3 replaces this body
-// with the resume-aware version; today a refresh with no state redirects home.
+// Live watch. On mount, ask the backend whether a conversation is already
+// running: after a refresh one usually is, and re-attaching to it preserves
+// the open dashboard, its filters, and the thread. Only when nothing is live
+// do we open the dashboard carried in router location state (set by Landing,
+// and preserved across reloads because it lives in history.state).
 function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
   const location = useLocation();
+  const [resolved, setResolved] = useState(null); // null = still checking
+
+  useEffect(() => {
+    let cancelled = false;
+    getActiveConversation()
+      .then((info) => {
+        if (cancelled) return;
+        setResolved(info.active ? { resume: info.conversationId } : { resume: null });
+      })
+      .catch(() => {
+        // Backend unreachable: fall back to whatever the URL carried rather
+        // than stranding the user on a spinner.
+        if (!cancelled) setResolved({ resume: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (resolved === null) return <div className="p-6 text-sm text-fg/60">Reconnecting…</div>;
+
+  if (resolved.resume) {
+    return (
+      <Watch
+        mode="live"
+        resumeConversationId={resolved.resume}
+        onActiveRunChange={onActiveRunChange}
+        onEnd={onEnd}
+        confirm={confirm}
+        onDashboardChange={onDashboardChange}
+      />
+    );
+  }
+
   const target = location.state?.dashboard ?? null;
   if (!target) return <Navigate to="/" replace />;
   return (

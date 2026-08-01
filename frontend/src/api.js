@@ -125,6 +125,15 @@ export async function getConversation(id) {
   return body; // { conversation, turns, takeovers }
 }
 
+// Which conversation is live on the backend right now, if any. Always 200:
+// { active: false } or { active: true, conversationId, dashboardUrl,
+// dashboardName, turnRunning }. Used on boot to re-attach after a refresh.
+export async function getActiveConversation() {
+  const res = await fetch("/api/conversations/active");
+  if (!res.ok) throw new Error(`GET /api/conversations/active failed: ${res.status}`);
+  return res.json();
+}
+
 export async function listConversations() {
   const res = await fetch("/api/conversations");
   if (!res.ok) throw new Error(`GET /api/conversations failed: ${res.status}`);

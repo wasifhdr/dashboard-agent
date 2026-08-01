@@ -169,7 +169,10 @@ function reduceEvent(run, evt) {
 // fetches a finished (or in-progress, for live re-attach) session once;
 // `live` starts brand-new sessions via startQuestion and reduces their SSE
 // stream incrementally. Both share the same Run/Step state shape.
-export function useSessionStream(mode, { sessionId, conversationId: replayConversationId, dashboardUrl, dashboardName }) {
+export function useSessionStream(
+  mode,
+  { sessionId, conversationId: replayConversationId, resumeConversationId, dashboardUrl, dashboardName },
+) {
   const [dashboard, setDashboard] = useState(mode === "live" ? { url: dashboardUrl, name: dashboardName } : null);
   const [runs, setRuns] = useState([]);
   const [loadError, setLoadError] = useState(null);
@@ -211,6 +214,13 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   // to, so it must trigger a re-render when the conversation is created.
   const conversationIdRef = useRef(null);
   const [conversationId, setConversationId] = useState(null);
+  // Resume (page refresh into a still-running conversation): adopt the
+  // existing conversation instead of creating one. Seeded synchronously so
+  // the eager-open effect below sees it and stands down, and so the live
+  // channel connects on the first render rather than a tick later.
+  if (resumeConversationId && conversationIdRef.current === null) {
+    conversationIdRef.current = resumeConversationId;
+  }
   // Holds the in-flight createConversation() promise for the window between
   // startQuestion's first call and that POST resolving - conversationIdRef is
   // still null for that whole window (up to ~90s: the dashboard is opening),
@@ -440,9 +450,13 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   // (and retried by the first question), not thrown into the effect.
   useEffect(() => {
     if (mode !== "live" || !dashboard?.url) return;
+    // Never create a conversation while resuming one. POST /api/conversations
+    // makes the server close the previous runtime - it would tear down the
+    // very session being resumed and silently reload the dashboard.
+    if (resumeConversationId) return;
     ensureConversation().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, dashboard?.url]);
+  }, [mode, dashboard?.url, resumeConversationId]);
 
   // Dashboard thumbnail (for Stage's loading state) + global maxSteps.
   useEffect(() => {
@@ -451,7 +465,9 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
       .then(([cfg, meta]) => {
         if (cancelled) return;
         setMaxSteps(cfg.maxSteps ?? DEFAULT_MAX_STEPS);
-        const targetUrl = mode === "live" ? dashboardUrl : dashboard?.url;
+        // On a resume there is no dashboardUrl prop; the url arrives from the
+        // fetched conversation instead.
+        const targetUrl = mode === "live" ? (dashboardUrl ?? dashboard?.url) : dashboard?.url;
         const entry = (meta.dashboards ?? []).find((d) => d.url === targetUrl);
         setThumbnailUrl(entry?.thumbnailUrl ?? null);
         const cfgEntry = (cfg.dashboards ?? []).find((d) => d.url === targetUrl);
@@ -467,7 +483,9 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
   }, [mode, dashboardUrl, dashboard?.url]);
 
   useEffect(() => {
-    if (mode !== "replay") return undefined;
+    // Also runs for a live resume, which needs exactly the same load: fetch
+    // the conversation, rebuild the thread, re-attach to a running turn.
+    if (mode !== "replay" && !resumeConversationId) return undefined;
     setDashboard(null);
     setRuns([]);
     setLoadError(null);
@@ -479,11 +497,20 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
     // precedence over the legacy single-session path below when both were
     // somehow passed - see useSessionStream's Watch/App callers, which never
     // do this in practice, but branch order keeps it deterministic if they did.
-    if (replayConversationId) {
-      getConversation(replayConversationId)
+    const loadConversationId = replayConversationId ?? resumeConversationId;
+    if (loadConversationId) {
+      getConversation(loadConversationId)
         .then(({ conversation, turns, takeovers }) => {
           if (cancelled) return;
           if (turns.length === 0) {
+            // Resuming a conversation whose first question was never asked is
+            // normal - show the live dashboard with an empty thread. In pure
+            // replay there is nothing to render, so it stays an error.
+            if (resumeConversationId) {
+              setDashboard({ url: conversation.dashboard_url, name: conversation.dashboard_name });
+              setConversationId(resumeConversationId);
+              return;
+            }
             // A conversation row is persisted as soon as the dashboard opens,
             // before any turn is ever posted (conversationRuntime.js) - if the
             // first postTurn never completes (tab closed, dropped network, a
@@ -497,6 +524,7 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
             return;
           }
           setDashboard({ url: conversation.dashboard_url, name: conversation.dashboard_name });
+          if (resumeConversationId) setConversationId(resumeConversationId);
 
           const turnIndices = new Set(turns.map((t) => t.session.turn_index));
           const newRuns = turns.map((t) => {
@@ -571,7 +599,7 @@ export function useSessionStream(mode, { sessionId, conversationId: replayConver
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sessionId, replayConversationId]);
+  }, [mode, sessionId, replayConversationId, resumeConversationId]);
 
   useEffect(() => {
     return () => unsubscribeRef.current?.();
