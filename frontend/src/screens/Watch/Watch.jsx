@@ -314,7 +314,9 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
   // mid-VLM-call.
   // Confirmed first because it is irreversible and instant: onEnd navigates away
   // before the backend cleanup has even been issued, so there is nothing to
-  // undo. The header nav routes are gated the same way, in App's navigate().
+  // undo. Header navigation is NOT gated any more - leaving does not end the
+  // conversation (nothing on unmount closes it), so only this control, which
+  // really does close the runtime, still confirms.
   async function handleEndSession() {
     const ok = await confirm({
       title: "End this session?",

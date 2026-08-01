@@ -216,8 +216,10 @@ export function useSessionStream(
   const [conversationId, setConversationId] = useState(null);
   // Resume (page refresh into a still-running conversation): adopt the
   // existing conversation instead of creating one. Seeded synchronously so
-  // the eager-open effect below sees it and stands down, and so the live
-  // channel connects on the first render rather than a tick later.
+  // the eager-open effect below sees it and stands down, and so startQuestion's
+  // `isFirstTurn` check is already false before any click can reach it. (The
+  // live channel keys on the conversationId STATE, which is set later, when
+  // getConversation resolves - not on this ref.)
   if (resumeConversationId && conversationIdRef.current === null) {
     conversationIdRef.current = resumeConversationId;
   }

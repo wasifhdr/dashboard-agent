@@ -46,11 +46,12 @@ function SessionReplay({ onActiveRunChange, onDashboardChange }) {
 
 // Live watch. On mount, ask the backend whether a conversation is already
 // running: after a refresh one usually is, and re-attaching to it preserves
-// the open dashboard, its filters, and the thread. Only when nothing is live
-// do we open the dashboard carried in router location state (set by Landing,
-// and preserved across reloads because it lives in history.state).
+// the open dashboard, its filters, and the thread. Otherwise we open the
+// dashboard carried in router location state (set by Landing, and preserved
+// across reloads because it lives in history.state).
 function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
   const location = useLocation();
+  const requested = location.state?.dashboard ?? null;
   const [resolved, setResolved] = useState(null); // null = still checking
 
   useEffect(() => {
@@ -58,22 +59,44 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
     getActiveConversation()
       .then((info) => {
         if (cancelled) return;
-        // runningTurn carries the in-flight turn's id and question when one
-        // exists. It is the only way to re-attach to a turn whose session row
-        // has not been written yet - see useSessionStream's placeholder run.
-        setResolved(info.active ? { resume: info.conversationId, runningTurn: info.runningTurn ?? null } : { resume: null });
+        // Resume ONLY when the live conversation is the one being asked for.
+        //
+        // This route is entered for every live watch, not just a refresh, and
+        // navigating away never closes a runtime - so after "New dashboard" the
+        // previous conversation is still active. Resuming on `active` alone
+        // silently handed the user their OLD dashboard and thread when they
+        // picked a new one, discarding the choice with no error. Comparing the
+        // url keeps the refresh case working (history.state survives a reload,
+        // so it matches) while letting a genuinely different pick fall through
+        // to the open path below, where ensureConversation replaces the old
+        // runtime exactly as it did before this feature.
+        const wantsSame = !requested || requested.url === info.dashboardUrl;
+        if (info.active && wantsSame) {
+          // runningTurn carries the in-flight turn's id and question when one
+          // exists. It is the only way to re-attach to a turn whose session row
+          // has not been written yet - see useSessionStream's placeholder run.
+          setResolved({ resume: info.conversationId, runningTurn: info.runningTurn ?? null });
+        } else {
+          setResolved({ resume: null });
+        }
       })
       .catch(() => {
-        // Backend unreachable: fall back to whatever the URL carried rather
-        // than stranding the user on a spinner.
-        if (!cancelled) setResolved({ resume: null });
+        // Do NOT fall through to opening `requested` here. Opening POSTs a new
+        // conversation, and the server closes the previous runtime when one is
+        // created - so a single dropped request would silently destroy a live
+        // session we merely failed to observe. Going home is the safe failure.
+        if (!cancelled) setResolved({ resume: null, lookupFailed: true });
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [requested?.url]);
 
-  if (resolved === null) return <div className="p-6 text-sm text-fg/60">Reconnecting…</div>;
+  if (resolved === null) {
+    return <div className="p-6 text-sm text-fg/60">{requested ? "Opening the dashboard…" : "Reconnecting…"}</div>;
+  }
+
+  if (resolved.lookupFailed) return <Navigate to="/" replace />;
 
   if (resolved.resume) {
     return (
@@ -89,12 +112,11 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
     );
   }
 
-  const target = location.state?.dashboard ?? null;
-  if (!target) return <Navigate to="/" replace />;
+  if (!requested) return <Navigate to="/" replace />;
   return (
     <Watch
       mode="live"
-      dashboardTarget={target}
+      dashboardTarget={requested}
       onActiveRunChange={onActiveRunChange}
       onEnd={onEnd}
       confirm={confirm}
