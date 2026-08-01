@@ -285,6 +285,14 @@ let sharedBrowser;
 // There is still only ever one turn running at a time (one active
 // conversation, per docs/LIVE_TAKEOVER_PLAN.md section 5/7).
 let turnRunning = false;
+// The in-flight turn, or null. Tracked alongside turnRunning (set and cleared at
+// exactly the same two points, so the pair can never drift) because turnRunning
+// alone is not enough to recover from: a client resuming after a refresh needs
+// the turn's id to subscribe to its event bus, and the question text to render
+// the thread. Neither is readable from the database yet - startTurn awaits a
+// takeover capture before runSession writes the session row, so there is a real
+// window where a turn is running and has no row.
+let currentTurn = null;
 // Guards the async dashboard-open+settle window inside
 // createConversationInternal. `turnRunning` alone doesn't cover this window
 // (it's only set once a conversation already exists), so without this flag
@@ -372,6 +380,10 @@ async function startTurn({ conversationId, activeRuntime, question }) {
   const stopController = new AbortController();
   stopControllers.set(turnId, stopController);
   turnRunning = true;
+  // Set here, synchronously with turnRunning and before the awaited capture
+  // below, so /api/conversations/active can report a running turn for the whole
+  // time one exists - including the window before its session row is written.
+  currentTurn = { id: turnId, question };
   // Live-view lock: tell any WS watchers the agent is now driving (veil on).
   activeRuntime.setMode("agent");
 
@@ -425,6 +437,7 @@ async function startTurn({ conversationId, activeRuntime, question }) {
       // turn start mid-cleanup and have its "agent" mode clobbered back to
       // "idle" by this stale callback once it finally resumed.
       turnRunning = false;
+      currentTurn = null;
     });
 
   return { turnId, turnIndex, takeover };
@@ -511,7 +524,7 @@ app.get("/api/conversations", (req, res) => {
 // MUST stay registered before /api/conversations/:id, or that route captures
 // "active" as an id.
 app.get("/api/conversations/active", (req, res) => {
-  res.json(describeActiveConversation(conversationRuntime.getActiveRuntime(), turnRunning));
+  res.json(describeActiveConversation(conversationRuntime.getActiveRuntime(), turnRunning, currentTurn));
 });
 
 app.get("/api/conversations/:id", (req, res) => {

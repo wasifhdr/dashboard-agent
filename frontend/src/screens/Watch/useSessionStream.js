@@ -171,7 +171,7 @@ function reduceEvent(run, evt) {
 // stream incrementally. Both share the same Run/Step state shape.
 export function useSessionStream(
   mode,
-  { sessionId, conversationId: replayConversationId, resumeConversationId, dashboardUrl, dashboardName },
+  { sessionId, conversationId: replayConversationId, resumeConversationId, resumeRunningTurn, dashboardUrl, dashboardName },
 ) {
   const [dashboard, setDashboard] = useState(mode === "live" ? { url: dashboardUrl, name: dashboardName } : null);
   const [runs, setRuns] = useState([]);
@@ -297,6 +297,26 @@ export function useSessionStream(
       onEvent: (evt) => applyEvent(runSessionId, evt),
       onError: () => setConnectionError(true),
     });
+  }
+
+  // A thread entry for a turn that is in flight but has no session row yet.
+  // Needed because applyEvent() drops events for a sessionId it doesn't already
+  // hold, so subscribing to the turn's bus without this would silently discard
+  // every replayed event. The bus fills the rest in immediately.
+  function placeholderRunFor(turn) {
+    return {
+      sessionId: turn.id,
+      question: turn.question ?? "",
+      status: "loading",
+      finalAnswer: null,
+      confidence: null,
+      error: null,
+      warnings: [],
+      steps: new Map(),
+      startedAt: new Date().toISOString(),
+      maxSteps,
+      precedingTakeover: null,
+    };
   }
 
   function reconnect() {
@@ -509,6 +529,19 @@ export function useSessionStream(
             if (resumeConversationId) {
               setDashboard({ url: conversation.dashboard_url, name: conversation.dashboard_name });
               setConversationId(resumeConversationId);
+              // The exact race this guards: refresh moments after the FIRST
+              // question. server.js sets turnRunning synchronously but awaits a
+              // takeover capture before runSession writes the session row, so
+              // the turn is genuinely in flight while getConversation still
+              // reports zero turns. Its id and question came from
+              // /api/conversations/active, and its event bus was created
+              // synchronously and has been buffering - so render a placeholder
+              // and attach, instead of showing an empty thread until the user
+              // happens to refresh again.
+              if (resumeRunningTurn?.id) {
+                setRuns([placeholderRunFor(resumeRunningTurn)]);
+                subscribeLive(resumeRunningTurn.id);
+              }
               return;
             }
             // A conversation row is persisted as soon as the dashboard opens,
@@ -551,6 +584,14 @@ export function useSessionStream(
           // it after the last run instead (see the state comment above).
           const trailing = takeovers.find((tk) => !turnIndices.has(tk.after_turn_index + 1));
           setTrailingTakeover(toPrecedingTakeover(trailing));
+
+          // Same race as the zero-turn branch above, but on a follow-up
+          // question: earlier turns have rows, the in-flight one does not yet.
+          if (resumeRunningTurn?.id && !turns.some((t) => t.session.id === resumeRunningTurn.id)) {
+            setRuns((prev) => [...prev, placeholderRunFor(resumeRunningTurn)]);
+            subscribeLive(resumeRunningTurn.id);
+            return;
+          }
 
           const lastTurn = turns[turns.length - 1];
           if (lastTurn && lastTurn.session.status === "running") {
@@ -599,7 +640,7 @@ export function useSessionStream(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sessionId, replayConversationId, resumeConversationId]);
+  }, [mode, sessionId, replayConversationId, resumeConversationId, resumeRunningTurn?.id]);
 
   useEffect(() => {
     return () => unsubscribeRef.current?.();

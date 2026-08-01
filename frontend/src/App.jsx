@@ -58,7 +58,10 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
     getActiveConversation()
       .then((info) => {
         if (cancelled) return;
-        setResolved(info.active ? { resume: info.conversationId } : { resume: null });
+        // runningTurn carries the in-flight turn's id and question when one
+        // exists. It is the only way to re-attach to a turn whose session row
+        // has not been written yet - see useSessionStream's placeholder run.
+        setResolved(info.active ? { resume: info.conversationId, runningTurn: info.runningTurn ?? null } : { resume: null });
       })
       .catch(() => {
         // Backend unreachable: fall back to whatever the URL carried rather
@@ -77,6 +80,7 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
       <Watch
         mode="live"
         resumeConversationId={resolved.resume}
+        resumeRunningTurn={resolved.runningTurn}
         onActiveRunChange={onActiveRunChange}
         onEnd={onEnd}
         confirm={confirm}

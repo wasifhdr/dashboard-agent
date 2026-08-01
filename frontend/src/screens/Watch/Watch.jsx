@@ -64,11 +64,12 @@ function flattenSteps(runs) {
 // `confirm` is App's promise-based ConfirmDialog opener (see ui/ConfirmDialog).
 // Taken as a prop rather than mounting a second dialog here so there is exactly
 // one overlay in the tree, anchored above Watch's fixed-viewport cockpit layout.
-export default function Watch({ mode, sessionId, conversationId, resumeConversationId, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange, confirm }) {
+export default function Watch({ mode, sessionId, conversationId, resumeConversationId, resumeRunningTurn, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange, confirm }) {
   const stream = useSessionStream(mode, {
     sessionId,
     conversationId,
     resumeConversationId,
+    resumeRunningTurn,
     dashboardUrl: dashboardTarget?.url,
     dashboardName: dashboardTarget?.name,
   });
