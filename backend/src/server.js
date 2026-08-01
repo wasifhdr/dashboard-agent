@@ -14,6 +14,7 @@ import * as store from "./store.js";
 import * as bus from "./sessionBus.js";
 import * as conversationRuntime from "./conversationRuntime.js";
 import { searchWorkbooks } from "./tableauSearch.js";
+import { describeActiveConversation } from "./activeConversation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -501,6 +502,16 @@ app.post("/api/conversations/:id/close", async (req, res) => {
 
 app.get("/api/conversations", (req, res) => {
   res.json(store.listConversationsWithSummary(50));
+});
+
+// Which conversation (if any) is live right now. The runtime is a singleton,
+// so this is unambiguous. Used by the frontend on boot to re-attach to a
+// running session after a page refresh instead of stranding it.
+//
+// MUST stay registered before /api/conversations/:id, or that route captures
+// "active" as an id.
+app.get("/api/conversations/active", (req, res) => {
+  res.json(describeActiveConversation(conversationRuntime.getActiveRuntime(), turnRunning));
 });
 
 app.get("/api/conversations/:id", (req, res) => {
