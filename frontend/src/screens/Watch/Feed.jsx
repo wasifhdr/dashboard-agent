@@ -92,6 +92,15 @@ function ThoughtDisclosure({ text, active }) {
   );
 }
 
+// "(0.43,0.68)" for a click action, or "" when the coordinates aren't there.
+// Only ever used to annotate a rejection, so an action without them degrades to
+// the message alone rather than printing "(NaN,NaN)".
+function formatPoint(action) {
+  const { nx, ny } = action ?? {};
+  if (typeof nx !== "number" || typeof ny !== "number") return "";
+  return `(${nx.toFixed(2)},${ny.toFixed(2)})`;
+}
+
 function ActionLine({ step, pending }) {
   if (pending) {
     return (
@@ -115,7 +124,20 @@ function ActionLine({ step, pending }) {
   } else if (status === "rejected_target") {
     icon = "✗";
     colorClass = "text-gold-ink";
-    explain = "rejected: unknown target — rethinking…";
+    // Two opposite failures share this status, and calling both "unknown
+    // target" sent readers hunting for a recognition problem that never
+    // happened. A pixel click is rejected when the zoom-refine pass looks
+    // around the aim and doesn't find the element the model NAMED correctly —
+    // the target is real, the coordinates are not (typically an ny magnitude
+    // error: 0.4 for a control that sits at 0.05). An api-mode action is
+    // rejected when its target_id isn't in the inventory, which is the
+    // genuinely-unknown case. Showing the coordinates makes the difference
+    // legible without digging through the stored steps.
+    const point = formatPoint(step.action);
+    explain =
+      step.action?.type === "click"
+        ? `rejected: wrong location${point ? ` ${point}` : ""} — rethinking…`
+        : "rejected: unknown target — rethinking…";
   } else if (status === "error") {
     icon = "✗";
     colorClass = "text-coral-ink";
