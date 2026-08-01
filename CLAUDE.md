@@ -135,4 +135,6 @@ Prefer large, clearly-labeled click targets. The small stacked rows in "Top Genr
 
 ## Git
 
-Real committed history — check `git log` before assuming anything about repo state. Work happens directly on `master` by the user's standing preference. Suggest committing before risky operations, stage only the files a change actually touches (never `git add -A`), and never run a destructive git/filesystem command without flagging it first.
+Real committed history — check `git log` before assuming anything about repo state. The branch is **`main`**, tracking `origin/main` at <https://github.com/wasifhdr/dashboard-agent> (older notes and the SDD ledger say `master`; it was renamed). Work happens directly on it by the user's standing preference.
+
+Suggest committing before risky operations, stage only the files a change actually touches (never `git add -A`), and never run a destructive git/filesystem command without flagging it first. Pushing is public — only on an explicit ask.
