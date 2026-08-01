@@ -28,6 +28,7 @@ That single constraint explains most of the architecture:
 - **Check whether a dashboard is even workable.** Unvetted public workbooks include Tableau *stories* (which the agent has no action to navigate) and dashboards that load but paint nothing. A read-only inspection runs after the dashboard opens and warns you instead of letting the run fail confusingly later.
 - **Multi-turn conversations on one live dashboard.** The dashboard is opened once and stays open. Turn two resumes from wherever turn one left it — no reload, no re-filtering.
 - **Take the wheel mid-conversation.** Between turns the input lock flips to you: click a bar, drag a slider, switch a tab directly on the live browser. The next turn continues from the state *you* left.
+- **Refresh without losing your place.** The dashboard is held open server-side, so reloading the page re-attaches to the running session rather than starting over — including mid-question. Replays have real URLs you can bookmark or share.
 - **Watch it work.** A live CDP screencast with the agent's cursor visible, or scrub the recorded frames afterwards.
 - **Ask out loud.** Browser-native dictation, with answers optionally read back.
 
