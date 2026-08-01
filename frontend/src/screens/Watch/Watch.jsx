@@ -87,6 +87,17 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
   // dashboard gets the whole canvas; the bubble expands it on demand.
   const [dockOpen, setDockOpen] = useState(false);
   const [inspectionDismissed, setInspectionDismissed] = useState(false);
+  // Reset on the SAME clock useLiveChannel resets `live.inspection` on. The
+  // banner renders on the AND of the two, so if this one only reset on unmount
+  // (plain useState) they'd tick differently: dismiss a banner, reach a second
+  // unusable conversation without leaving this screen, and the new verdict
+  // would arrive to a still-true dismissed flag and be silently suppressed.
+  // Unreachable today (App.jsx unmounts Watch between live conversations), but
+  // that's a routing coincidence, not a guarantee — and the failure is an
+  // un-shown warning, which is exactly the kind that goes unnoticed.
+  useEffect(() => {
+    setInspectionDismissed(false);
+  }, [liveConversationId]);
   // True when a turn finished while the dock was minimized, so the bubble can
   // advertise "Response ready" until the user looks at it.
   const [unread, setUnread] = useState(false);
