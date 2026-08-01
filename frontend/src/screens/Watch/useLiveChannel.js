@@ -31,6 +31,14 @@ export function useLiveChannel(conversationId) {
   const [closedReason, setClosedReason] = useState(null);
   const [cursor, setCursor] = useState(null);
   const [inspection, setInspection] = useState(null);
+  // Has this channel EVER opened for the current conversation? A plain
+  // !connected is true during the first connect too, so a "disconnected"
+  // indicator keyed on it would flash on every session open. This makes the
+  // difference between "not up yet" and "was up and dropped" expressible.
+  const [everConnected, setEverConnected] = useState(false);
+  // Bumped by retry(); in the effect deps, so incrementing it tears the
+  // channel down and reconnects with the failure counter and backoff reset.
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const frameUrlRef = useRef(null);
   // Set inside the effect below (per conversationId/channel) so sendInput -
@@ -63,6 +71,7 @@ export function useLiveChannel(conversationId) {
     setClosedReason(null);
     setCursor(null);
     setInspection(null);
+    setEverConnected(false);
 
     // Forwards one input message through whichever channel is currently open
     // (or no-ops if none is). Only outbound mouse-move is throttled - it's
@@ -100,6 +109,7 @@ export function useLiveChannel(conversationId) {
           backoff = 1000;
           failedAttempts = 0;
           setConnected(true);
+          setEverConnected(true);
           // Reset the veil baseline on every (re)connect: if a turn really is
           // running, the server's addClient re-primes 'lock' right after; if
           // not, we must not stay stuck on a 'lock' whose matching 'unlock' we
@@ -158,12 +168,20 @@ export function useLiveChannel(conversationId) {
         frameUrlRef.current = null;
       }
     };
-  }, [conversationId]);
+  }, [conversationId, retryNonce]);
 
   // Stable identity across renders (reads the ref, which the effect above
   // keeps pointed at the current channel/throttle state) so consumers can
   // depend on it without re-subscribing to anything.
   const sendInput = useCallback((msg) => sendInputRef.current(msg), []);
 
-  return { liveFrameUrl, vizBox, viewport, mode, connected, closedReason, sendInput, cursor, inspection };
+  // Manual reconnect for the UI. The automatic retry gives up after 6
+  // consecutive failures so a socket whose upgrade keeps 404ing can't spin
+  // forever - which leaves the live view permanently dead with no way back
+  // short of a page reload. This is that way back.
+  function retry() {
+    setRetryNonce((n) => n + 1);
+  }
+
+  return { liveFrameUrl, vizBox, viewport, mode, connected, everConnected, closedReason, sendInput, cursor, inspection, retry };
 }

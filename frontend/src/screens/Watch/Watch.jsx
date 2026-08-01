@@ -379,6 +379,18 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
 
   const showConnectionBanner = stream.connectionError && isRunning;
 
+  // The live SOCKET dying was previously invisible. showConnectionBanner covers
+  // the SSE step stream and only while a turn runs; the jump-to-live pill also
+  // needs isRunning. So a screencast that dropped after a turn finished swapped
+  // the interactive dashboard for a static frame (with diff overlay boxes drawn
+  // on it) and said nothing — looking like the dashboard had simply stopped
+  // working, recoverable only by reloading the page.
+  //
+  // Gated on everConnected, not just !connected, so it cannot flash during the
+  // first connect. Excludes closedReason: a conversation that really ended
+  // (idle timeout, crash, explicit close) is LiveStage's story to tell.
+  const showLiveDisconnectedBanner = !isPureReplay && live.everConnected && !live.connected && !live.closedReason;
+
   // Show the live screencast when following the running/idle conversation and
   // the WS is connected; scrubbing a past step or replaying falls back to the
   // per-step Stage frame (which is what's persisted). Also keep showing it
@@ -439,6 +451,15 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
           <span>Lost connection to the live session.</span>
           <Button size="sm" onClick={stream.reconnect}>
             Reconnect
+          </Button>
+        </div>
+      )}
+
+      {showLiveDisconnectedBanner && (
+        <div className="flex items-center justify-between gap-3 border-b border-gold/30 bg-gold/10 px-6 py-2 text-sm text-gold-ink">
+          <span>Live view disconnected — showing the last recorded frame, which isn&apos;t clickable.</span>
+          <Button size="sm" onClick={live.retry}>
+            Reconnect live view
           </Button>
         </div>
       )}
