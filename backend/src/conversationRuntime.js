@@ -93,11 +93,17 @@ export async function createRuntime({ browser, config, conversationId, dashboard
 
   let context;
   let page;
+  // waitForSettle RETURNS {settled,timedOut} on timeout rather than throwing, so
+  // a heavy-but-healthy dashboard can get here with a frame that is still
+  // painting. The viability check needs to know that - see the inspectViz call
+  // below - otherwise it screenshots mid-paint and calls a good dashboard blank.
+  let settleTimedOut = false;
   try {
     const opened = await openSession(browser, config.hostPageOrigin, dashboardUrl, { firstLoadTimeoutMs: 90000 });
     context = opened.context;
     page = opened.page;
-    await waitForSettle(page, config.settleGate);
+    const settle = await waitForSettle(page, config.settleGate);
+    settleTimedOut = Boolean(settle?.timedOut);
   } catch (e) {
     // Best-effort cleanup of a context that opened but never settled - same
     // thrown message format as runSession's "Dashboard failed to load: ...".
@@ -117,27 +123,6 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   page.once("crash", () => {
     close("browser_crashed").catch(() => {});
   });
-
-  // Advisory viability check for dashboards that didn't come from the local
-  // list. Fire-and-forget by design: the dashboard is already on screen, and
-  // this must never gate, delay, or fail the session.
-  const isLocallyListed = (config.dashboards ?? []).some((d) => d.url === dashboardUrl);
-  if (!isLocallyListed) {
-    inspectViz(page, { screenshotPath: path.join(FRAMES_DIR, `_inspect_${id}.png`) })
-      .then((result) => {
-        // Retain it BEFORE broadcasting, so the verdict survives even if
-        // zero clients are connected right now (the common case - the HTTP
-        // response + WS reconnect race almost always outlasts this). Any
-        // client already in `clients` at this exact moment gets it via the
-        // broadcast below and is marked sent so addClient's priming (below)
-        // doesn't hand it to them a second time.
-        lastInspection = { verdict: result.verdict, reasons: result.reasons };
-        for (const ws of clients) inspectionSentTo.add(ws);
-        broadcast({ type: "inspection", verdict: result.verdict, reasons: result.reasons });
-        console.log(`[viability] ${dashboardUrl} -> ${result.verdict} ${JSON.stringify(result.reasons)}`);
-      })
-      .catch(() => {});
-  }
 
   store.createConversation({
     id,
@@ -162,6 +147,38 @@ export async function createRuntime({ browser, config, conversationId, dashboard
   const heldMouseButtons = new Set(); // buttons dispatchInput has pressed but not yet released
   const heldKeys = new Set(); // keys dispatchInput has pressed but not yet released
   let idleTimer = null; // self-managed idle-auto-close timer (Phase B4) - see scheduleIdleTimer/cancelIdleTimer
+
+  // Advisory viability check for dashboards that didn't come from the local
+  // list. Fire-and-forget by design: the dashboard is already on screen, and
+  // this must never gate, delay, or fail the session.
+  //
+  // MUST stay below the live-view state declarations above: this callback closes
+  // over lastInspection/clients/inspectionSentTo/broadcast. Sited any earlier it
+  // would only work by luck - insert one `await` between the registration and
+  // those `let`s and the microtask fires inside their temporal dead zone, the
+  // ReferenceError lands in the catch below, and the whole feature goes silently
+  // dead with nothing in the log.
+  const isLocallyListed = (config.dashboards ?? []).some((d) => d.url === dashboardUrl);
+  if (!isLocallyListed) {
+    inspectViz(page, { screenshotPath: path.join(FRAMES_DIR, `_inspect_${id}.png`), settleTimedOut })
+      .then((result) => {
+        // Retain it BEFORE broadcasting, so the verdict survives even if
+        // zero clients are connected right now (the common case - the HTTP
+        // response + WS reconnect race almost always outlasts this). Any
+        // client already in `clients` at this exact moment gets it via the
+        // broadcast below and is marked sent so addClient's priming (below)
+        // doesn't hand it to them a second time.
+        lastInspection = { verdict: result.verdict, reasons: result.reasons };
+        for (const ws of clients) inspectionSentTo.add(ws);
+        broadcast({ type: "inspection", verdict: result.verdict, reasons: result.reasons });
+        console.log(`[viability] ${dashboardUrl} -> ${result.verdict} ${JSON.stringify(result.reasons)}`);
+      })
+      .catch((e) => {
+        // Still swallowed - inspection is advisory and must never take a session
+        // down - but no longer invisible, so a broken check can be diagnosed.
+        console.warn(`[viability] inspection failed for ${dashboardUrl}: ${e?.message ?? e}`);
+      });
+  }
 
   function broadcast(msg) {
     const payload = JSON.stringify(msg);

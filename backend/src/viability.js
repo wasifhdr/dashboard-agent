@@ -76,7 +76,13 @@ async function readActiveSheetType(page) {
   }
 }
 
-export async function inspectViz(page, { screenshotPath }) {
+// settleTimedOut: whether the caller's settle gate gave up before the dashboard
+// stopped changing. When it did, the frame we are about to capture may still be
+// mid-paint, and a mid-paint frame looks exactly like a blank one. Since this
+// check is advisory, it errs toward silence: an unsettled frame is not evidence
+// of a blank dashboard, and telling a user their perfectly good (merely heavy)
+// dashboard "rendered nothing" is worse than saying nothing at all.
+export async function inspectViz(page, { screenshotPath, settleTimedOut = false }) {
   try {
     const activeSheetType = await readActiveSheetType(page);
 
@@ -86,7 +92,7 @@ export async function inspectViz(page, { screenshotPath }) {
     }
 
     await screenshotViz(page, screenshotPath);
-    const blankFrame = await isBlankFrame(screenshotPath);
+    const blankFrame = settleTimedOut ? false : await isBlankFrame(screenshotPath);
 
     let inventory = null;
     try {

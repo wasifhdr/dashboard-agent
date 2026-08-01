@@ -418,7 +418,7 @@ export default function Watch({ mode, sessionId, conversationId, dashboardTarget
       {live.inspection?.verdict === "unusable" && !inspectionDismissed && (
         <div className="flex items-center justify-between gap-3 border-b border-coral/30 bg-coral/10 px-6 py-2 text-sm text-coral-ink">
           <span>
-            {INSPECTION_LABEL[live.inspection.reasons[0]] ?? "The agent may not be able to work this dashboard."}
+            {INSPECTION_LABEL[live.inspection.reasons?.[0]] ?? "The agent may not be able to work this dashboard."}
           </span>
           <span className="flex shrink-0 gap-2">
             <Button size="sm" onClick={handleEndSession}>
