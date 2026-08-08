@@ -77,10 +77,17 @@
       }
       window.__agentBridgeState.interactive = true;
       readyResolve();
+      // Start filling the domain cache now, in the background. Readiness is
+      // resolved FIRST so this can never delay the agent - see warmDomainCache.
+      warmDomainCache();
     });
     vizEl.addEventListener(TableauEventType.FilterChanged, () => logEvent("FilterChanged"));
     vizEl.addEventListener(TableauEventType.ParameterChanged, () => logEvent("ParameterChanged"));
-    vizEl.addEventListener(TableauEventType.TabSwitched, () => logEvent("TabSwitched"));
+    vizEl.addEventListener(TableauEventType.TabSwitched, () => {
+      logEvent("TabSwitched");
+      // A different tab has a different filter set; warm the new sheet's keys.
+      warmDomainCache();
+    });
     vizEl.addEventListener(TableauEventType.VizLoadError, (e) => {
       const msg = String(e?.detail?.message ?? "vizloaderror");
       window.__agentBridgeState.loadError = msg;
@@ -116,26 +123,121 @@
       return isDashboard ? container.getFiltersAsync() : worksheets[0].getFiltersAsync();
     }
 
+    // ---- domain cache -----------------------------------------------------
+    // getDomainAsync() is the single most expensive thing the bridge does: the
+    // Tableau API serializes the calls internally at ~0.8-1.1s each (measured;
+    // Promise.all is no faster), and a dashboard reports one filter object per
+    // WORKSHEET, not per field. Video Game Sales reports 51 filters covering 17
+    // distinct fields, so the naive loop asks "what airports exist?"-style
+    // questions up to 8x each: 28.2s of a ~30s agent step.
+    //
+    // Two fixes, both served by keying a Map on the PROMISE rather than the
+    // value: repeats within one call collapse onto the first in-flight fetch
+    // (dedup), and repeats across steps hit the resolved entry (cache).
+    //
+    // Cached values must not go stale. We therefore request the "database"
+    // domain, which is the field's full underlying value list, instead of the
+    // default "relevant" domain, which SHRINKS as other filters narrow the data
+    // (verified: after filtering to Electronic Arts, Publisher's relevant
+    // domain went 5 -> 1 while its database domain stayed 5). That makes the
+    // cache correct with no invalidation, and it is also the better prompt
+    // content - it tells the model a value exists even when currently filtered
+    // out, which is exactly what it needs to plan a filter change.
+    //
+    // Keyed by sheet as well as field, because switching tabs changes the
+    // filter set entirely.
+    const domainCache = new Map();
+    let domainCacheHits = 0;
+    let domainCacheMisses = 0;
+
+    function domainCacheKey(sheetName, fieldName) {
+      return `${sheetName}\u0000${fieldName}`;
+    }
+
+    function isEmptyDomain(f, d) {
+      if (!d) return true;
+      if (f.filterType === "categorical") return !(d.values || []).length;
+      if (f.filterType === "range") return d.min == null && d.max == null;
+      return true;
+    }
+
+    // Always RESOLVES (never rejects) so a failed lookup is cached as "no
+    // domain" rather than being retried on every step, and so one bad filter
+    // cannot reject the whole warm-up.
+    async function fetchDomain(f) {
+      const result = { domain: null, domainRange: null };
+      if (typeof f.getDomainAsync !== "function") return result;
+      try {
+        // "database" is what makes the cache safe; fall back to the default
+        // (relevant) domain on API versions that reject the argument, AND when
+        // it comes back EMPTY. Aggregate/calculated fields can have no database
+        // domain at all while still having a usable relevant one - on US Flight
+        // Delays, "AGG( Delay Categories )" returns 0 values for "database" but
+        // 2 for the default. Falling back only on throw silently dropped those.
+        let d = null;
+        try {
+          d = await f.getDomainAsync("database");
+        } catch (e) {
+          d = null;
+        }
+        if (isEmptyDomain(f, d)) {
+          try {
+            const fallback = await f.getDomainAsync();
+            if (!isEmptyDomain(f, fallback)) d = fallback;
+          } catch (e) {
+            // keep whatever "database" gave us, even if empty
+          }
+        }
+        if (!d) return result;
+        if (f.filterType === "categorical") {
+          result.domain = (d.values || []).map(plain);
+        } else if (f.filterType === "range") {
+          result.domainRange = { min: plain(d.min), max: plain(d.max) };
+        }
+      } catch (e) {
+        // domain enumeration not available for this filter/API version.
+      }
+      return result;
+    }
+
+    function getDomainCached(sheetName, f) {
+      const key = domainCacheKey(sheetName, f.fieldName);
+      if (domainCache.has(key)) {
+        domainCacheHits++;
+        return domainCache.get(key);
+      }
+      domainCacheMisses++;
+      const p = fetchDomain(f);
+      domainCache.set(key, p);
+      return p;
+    }
+
+    // Fire-and-forget warm-up. Deliberately NOT awaited by the caller: it costs
+    // ~10s on a dashboard like Video Game Sales even after dedup, and blocking
+    // readiness on it would just move the stall into the load. Run in the
+    // background, it is usually finished before the user has typed a question,
+    // and getInventory() falls back to a live fetch for anything not yet warm.
+    function warmDomainCache() {
+      (async () => {
+        try {
+          const sheetName = vizEl.workbook.activeSheet.name;
+          const raw = await getRawFilters();
+          for (const f of raw) await getDomainCached(sheetName, f);
+        } catch (e) {
+          // A Story has no getFiltersAsync; warm-up is best-effort everywhere.
+        }
+      })();
+    }
+
     // ---- bridge methods ---------------------------------------------------
     async function getInventory() {
       const { container, worksheets, isDashboard } = activeContainer();
+      const sheetName = vizEl.workbook.activeSheet.name;
 
       const rawFilters = await getRawFilters();
       const filters = [];
       for (const f of rawFilters) {
-        let domain = null;
-        let domainRange = null;
-        try {
-          if (f.filterType === "categorical" && typeof f.getDomainAsync === "function") {
-            const d = await f.getDomainAsync();
-            domain = (d.values || []).map(plain);
-          } else if (f.filterType === "range" && typeof f.getDomainAsync === "function") {
-            const d = await f.getDomainAsync();
-            domainRange = { min: plain(d.min), max: plain(d.max) };
-          }
-        } catch (e) {
-          // domain enumeration not available for this filter/API version; leave null.
-        }
+        const { domain, domainRange } = await getDomainCached(sheetName, f);
 
         filters.push({
           fieldName: f.fieldName,
@@ -248,6 +350,12 @@
       return eventLog.slice();
     }
 
+    // Diagnostics for the domain cache - lets a test assert that a second
+    // getInventory() actually served from cache instead of just being fast.
+    function getDomainCacheStats() {
+      return { entries: domainCache.size, hits: domainCacheHits, misses: domainCacheMisses };
+    }
+
     window.__agentBridge = {
       ready: readyPromise,
       getInventory,
@@ -256,6 +364,7 @@
       setParameter,
       switchSheet,
       getEventLog,
+      getDomainCacheStats,
     };
 
     // ---- dev-only manual test panel ---------------------------------------
