@@ -69,7 +69,10 @@ async function main() {
     console.log("applyCategoricalFilter result:", result);
 
     console.log("Waiting for settle...");
-    const settle = await waitForSettle(page, config.settleGate);
+    // A filter was just applied, so the settle gate must wait out the server
+    // round-trip too - otherwise the diff below can come back empty and the
+    // probe reports a working dashboard as unresponsive.
+    const settle = await waitForSettle(page, config.settleGate, { expectBridgeEvent: true });
     console.log("Settle result:", settle);
 
     const afterPath = path.join(outDir, "after.png");

@@ -51,14 +51,79 @@ async function rawSmallBuffer(page) {
   return { data, width: info.width, height: info.height };
 }
 
+// Pure settle decision, split out so the logic is unit-testable without a
+// browser (test/settleDecision.test.js).
+//
+// Pixel stability alone cannot tell "the dashboard finished redrawing" from
+// "the dashboard has not started redrawing yet". Clicking a mark does two
+// things at very different speeds: the clicked bar re-highlights immediately
+// (local, <300ms) and the OTHER worksheets re-filter only after a server
+// round-trip (measured 2.3-3.3s on Video Game Sales). The pixels go quiet in
+// the gap between them, so the old gate declared settled at ~1.1s and
+// screenshotted a dashboard that looked filtered but was not - the model then
+// read the stale chart and answered confidently wrong, with settle_timeout=0
+// and nothing logged as an error.
+//
+// The bridge fires filterchanged/markselectionchanged exactly when the
+// round-trip lands, so after an action we additionally require either
+//   - an event to have arrived AND gone quiet for eventQuietMs, or
+//   - eventGraceMs to have passed with no event at all (the click hit nothing).
+export function settleDecision({
+  pixelsStable,
+  expectBridgeEvent,
+  sawEvent,
+  msSinceLastEvent,
+  elapsedMs,
+  eventQuietMs,
+  eventGraceMs,
+}) {
+  if (!pixelsStable) return "wait";
+  // Load/no-op path keeps the original pixels-only behavior: nothing was done,
+  // so there is no pending round-trip to wait for.
+  if (!expectBridgeEvent) return "settled";
+  if (sawEvent) return msSinceLastEvent >= eventQuietMs ? "settled" : "wait";
+  return elapsedMs >= eventGraceMs ? "settled" : "wait";
+}
+
+// Reads the bridge's event log. msSinceLast is computed INSIDE the page so it
+// never depends on Node and browser clocks agreeing. Never throws - a page
+// without the bridge (or mid-navigation) simply reports no events, which
+// degrades to the grace-window path rather than breaking the gate.
+async function readBridgeEvents(page) {
+  try {
+    return await page.evaluate(() => {
+      const log = window.__agentBridge?.getEventLog?.() ?? [];
+      if (!log.length) return { count: 0, msSinceLast: null };
+      return { count: log.length, msSinceLast: Date.now() - log[log.length - 1].ts };
+    });
+  } catch {
+    return { count: 0, msSinceLast: null };
+  }
+}
+
 // Settle gate (AGENT_PLAN.md 6.4): Embedding API promises can resolve before
 // rendering finishes, so we poll a downscaled screenshot diff until it
 // stabilizes (or time out and proceed with a warning flag).
-export async function waitForSettle(page, settleConfig) {
-  const { postActionWaitMs, compareIntervalMs, diffThresholdPct, timeoutMs } = settleConfig;
+//
+// Pass { expectBridgeEvent: true } after anything that mutates the viz, so the
+// gate also waits out the server round-trip described on settleDecision above.
+export async function waitForSettle(page, settleConfig, { expectBridgeEvent = false } = {}) {
+  const {
+    postActionWaitMs,
+    compareIntervalMs,
+    diffThresholdPct,
+    timeoutMs,
+    eventQuietMs = 700,
+    eventGraceMs = 4500,
+  } = settleConfig;
+
+  const startedAt = Date.now();
+  // Baseline BEFORE the wait, so an event that fires during postActionWaitMs
+  // still counts as "seen" rather than being silently folded into the baseline.
+  const baseline = expectBridgeEvent ? (await readBridgeEvents(page)).count : 0;
   await page.waitForTimeout(postActionWaitMs);
 
-  const deadline = Date.now() + timeoutMs;
+  const deadline = startedAt + timeoutMs;
   let prev = await rawSmallBuffer(page);
 
   while (Date.now() < deadline) {
@@ -73,12 +138,31 @@ export async function waitForSettle(page, settleConfig) {
 
     const diffCount = pixelmatch(prev.data, curr.data, null, curr.width, curr.height, { threshold: 0.1 });
     const diffPct = (diffCount / (curr.width * curr.height)) * 100;
-    if (diffPct < diffThresholdPct) {
-      return { settled: true, timedOut: false };
-    }
     prev = curr;
+
+    const pixelsStable = diffPct < diffThresholdPct;
+    let sawEvent = false;
+    let msSinceLastEvent = null;
+    if (pixelsStable && expectBridgeEvent) {
+      const ev = await readBridgeEvents(page);
+      sawEvent = ev.count > baseline;
+      msSinceLastEvent = ev.msSinceLast;
+    }
+
+    const decision = settleDecision({
+      pixelsStable,
+      expectBridgeEvent,
+      sawEvent,
+      msSinceLastEvent,
+      elapsedMs: Date.now() - startedAt,
+      eventQuietMs,
+      eventGraceMs,
+    });
+    if (decision === "settled") {
+      return { settled: true, timedOut: false, sawBridgeEvent: sawEvent };
+    }
   }
-  return { settled: false, timedOut: true };
+  return { settled: false, timedOut: true, sawBridgeEvent: false };
 }
 
 export async function screenshotViz(page, outPath) {

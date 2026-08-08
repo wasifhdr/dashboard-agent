@@ -558,7 +558,12 @@ export async function runSession({
         continue;
       }
 
-      const settleResult = await waitForSettle(page, config.settleGate);
+      // expectBridgeEvent: a mark click re-highlights the bar locally within
+      // ~300ms but only re-filters the other worksheets after a server
+      // round-trip (~2.3-3.3s). Without this the gate settles in the quiet gap
+      // between the two and screenshots a dashboard that looks filtered but
+      // is not - see settleDecision in perception.js.
+      const settleResult = await waitForSettle(page, config.settleGate, { expectBridgeEvent: true });
       if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
 
       // Did the click visibly change anything? Diff a fresh post-click frame
@@ -656,7 +661,7 @@ export async function runSession({
       continue;
     }
 
-    const settleResult = await waitForSettle(page, config.settleGate);
+    const settleResult = await waitForSettle(page, config.settleGate, { expectBridgeEvent: true });
     if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
 
     persistAndEmit({
