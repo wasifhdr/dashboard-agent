@@ -36,7 +36,7 @@ dashboard-agent/
   backend/                 Node ESM, Express, Playwright, better-sqlite3  (:8990)
     src/                   core modules (see map below)
     public/host.html       <tableau-viz> embed page + window.__agentBridge
-    eval/reading/          archived chart-reading crops (no question sets ship - see below)
+    eval/                  questions.json (self-scoring, current dashboards), smoke-questions.json, reading/ (archived crops)
     test/                  node:test unit tests (`npm test`)
     config.json            VLM endpoints, timeouts, settle gate, starter dashboards
     run.js probe.js eval.js  CLI entry points
@@ -77,7 +77,8 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 
 - `npm run probe -- <tableau-url>` — validate a dashboard (inventory, screenshot, filter+settle+diff), no VLM. Note it launches its **own** browser and **mutates state** by applying a filter — never point it at a live session's page.
 - `npm run run-agent -- <tableau-url> "<question>"` — one agent run, streams steps to stdout.
-- `npm run eval -- <path/to/questions.json>` — batch harness → `eval/results.csv`. **No question set ships with the repo.** The old `questions.json` / `smoke-questions.json` targeted Zillow, CAInfectiousDiseases and EHS — none of which are in `config.dashboards` any more — so they measured nothing about the shipping system and were deleted (2026-08-08) rather than left as a green tick that only proved "nothing crashed". Write a set against the current dashboards before relying on this.
+- `npm run eval -- eval/questions.json` — batch harness → `eval/results.csv`, and **scores itself**: entries carry an `expect` list, the run prints `Accuracy: n/m`, and it exits non-zero on a failure so it works as a gate. `eval/smoke-questions.json` is a 3-question subset (~1 min) for a pre-demo check. Both target the **current** `config.dashboards`; the previous sets pointed at Zillow/CAInfectiousDiseases/EHS and recorded most ground truth as "unknown", so they could only ever prove "nothing crashed" — they were deleted rather than left as a misleading green tick.
+- **The eval ground truth can rot silently.** These are third-party Tableau Public workbooks; if an author republishes with new data, `expect` values go stale and a passing run means nothing. Truth was read by eye from clean captures on **2026-08-08** (`verified_on` in the file). Re-verify against fresh captures before trusting a result. Two questions are deliberately `scored: false` — the Spotify bubble chart has no establishable truth even by manual inspection, and the salaries remote-ratio question asks for a description and may not be answerable at all (the `100` option looks to sit below the fold, and there is no scroll action).
 - `npm test` — unit tests (`node --test test/*.test.js`). Prefer it over a bare `node --test`, which discovers more broadly than intended.
 
 ## Backend module map (`backend/src/`)
@@ -102,7 +103,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 
 ## Frozen vs. mutable
 
-The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, or `perception.js`. Changes there need a real reason and a measured re-run — these modules fail *silently*, degrading answer quality without throwing, so no unit test catches a regression in them. With no question set in the repo, that means writing one against the current dashboards; a green tick from a stale set is worse than none. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
+The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, or `perception.js`. Changes there need a real reason and a re-run of `npm run eval -- eval/questions.json` — these modules fail *silently*, degrading answer quality without throwing, so no unit test catches a regression in them. Check the accuracy number, not just that it completed. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
 
 ## `config.dashboards` is a shortcut, not a class
 

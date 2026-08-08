@@ -1,0 +1,36 @@
+{
+  "about": "Fast subset of questions.json - one pure read, one click-actuation, one on a second dashboard. Runs in a couple of minutes; use before a demo or after touching the agent core. Entries are copied verbatim from questions.json; if you change one there, change it here.",
+  "verified_on": "2026-08-08",
+  "questions": [
+    {
+      "id": "vgs_top_publisher",
+      "dashboard_url": "https://public.tableau.com/views/VideoGameSales-Dashboard/VideoGamePublishers",
+      "kind": "read",
+      "question": "Which publisher has the highest total sales in the Top 5 Publishers chart?",
+      "scored": true,
+      "expect": ["nintendo"],
+      "expected_answer": "Nintendo",
+      "notes": "Baseline sanity check - 1 step, large labelled bars."
+    },
+    {
+      "id": "vgs_ea_click",
+      "dashboard_url": "https://public.tableau.com/views/VideoGameSales-Dashboard/VideoGamePublishers",
+      "kind": "actuate",
+      "question": "Click the 'Electronic Arts' bar in the Top 5 Publishers chart to filter to that publisher, then report which single game has the highest global sales in the Top 10 Games chart",
+      "scored": true,
+      "expect": ["fifa 15"],
+      "expected_answer": "FIFA 15",
+      "notes": "The settle-gate regression canary. An answer of 'Wii Sports' means the frame was captured before the action filter propagated."
+    },
+    {
+      "id": "netflix_pct_movies",
+      "dashboard_url": "https://public.tableau.com/views/NetflixMoviesandTVShowsDashboard_17065467710800/Netflix",
+      "kind": "read",
+      "question": "According to the Movies and TV Shows Distribution, what percentage of the Netflix catalog are Movies?",
+      "scored": true,
+      "expect": ["68.4"],
+      "expected_answer": "68.42%",
+      "notes": "Second dashboard, so a workbook-specific failure does not hide behind VGS passing."
+    }
+  ]
+}
