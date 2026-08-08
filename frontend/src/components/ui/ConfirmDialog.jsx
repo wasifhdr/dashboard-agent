@@ -83,7 +83,7 @@ export default function ConfirmDialog({ request, onResolve }) {
         aria-describedby="confirm-body"
         className="glass-raised w-full max-w-md rounded-card-lg p-6"
       >
-        <h2 id="confirm-title" className="docent-title text-fg">
+        <h2 id="confirm-title" className="agent-title text-fg">
           {title}
         </h2>
         <p id="confirm-body" className="mt-2 text-[15px] leading-relaxed text-fg/70">

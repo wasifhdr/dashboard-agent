@@ -179,9 +179,9 @@ export default function ChatPanel({ open, onMinimize, title = "Ask the Agent", t
       <div className="thread-blur-veil-top pointer-events-none absolute inset-x-0 top-0 z-20 h-[4.5rem] backdrop-blur-2xl" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 px-4 pb-3 pt-3">
-        {/* Editorial serif (see .docent-title in index.css) — the docent's own
+        {/* Editorial serif (see .agent-title in index.css) — the agent's own
             voice, distinct from the Inter UI around it. */}
-        <span className="docent-title text-teal-ink">{title}</span>
+        <span className="agent-title text-teal-ink">{title}</span>
         <button
           type="button"
           onClick={onMinimize}

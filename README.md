@@ -1,6 +1,6 @@
-# Docent — an agent that *operates* Tableau dashboards to answer questions
+# Dashboard Agent — it *operates* Tableau dashboards to answer questions
 
-Most "chat with your data" tools answer questions by querying a database. Docent doesn't have the database. It gets the same thing a human analyst gets — a published, interactive Tableau dashboard — and answers by **looking at it and clicking on it**: filtering, drilling in, switching views, then reading the result off the screen.
+Most "chat with your data" tools answer questions by querying a database. Dashboard Agent doesn't have the database. It gets the same thing a human analyst gets — a published, interactive Tableau dashboard — and answers by **looking at it and clicking on it**: filtering, drilling in, switching views, then reading the result off the screen.
 
 Every step is recorded — the model's reasoning, the action it chose, and a screenshot of the dashboard at that moment — so you can watch a run live or replay it later, frame by frame.
 
@@ -14,13 +14,13 @@ You cannot screenshot a Tableau dashboard from a web page.
 
 Tableau renders its marks to a `<canvas>` inside a **cross-origin iframe**. Page JavaScript can't read pixels from it, can't walk its DOM, can't find where anything is on screen. There is no HTML to parse — the "bar chart" is paint.
 
-So the browser doing the work can't be yours. Docent runs a **Playwright-controlled browser server-side**, which operates one level below the page and *can* screenshot the canvas. Your browser only ever receives frames and events streamed from the backend — it never embeds the viz at all.
+So the browser doing the work can't be yours. Dashboard Agent runs a **Playwright-controlled browser server-side**, which operates one level below the page and *can* screenshot the canvas. Your browser only ever receives frames and events streamed from the backend — it never embeds the viz at all.
 
 That single constraint explains most of the architecture:
 
 - **Perception is visual.** A screenshot of the rendered viz, sent to a vision model. There's no accessibility tree to fall back on.
 - **Actuation is by coordinate.** The model returns a normalized `(x, y)` and a description of what it's aiming at; the backend clicks there in the real browser.
-- **You need a settle gate.** Tableau's own API promises resolve *before* rendering finishes. Screenshot too early and you capture a half-drawn dashboard and confidently misread it. Docent waits for the pixels to stop changing before every frame.
+- **You need a settle gate.** Tableau's own API promises resolve *before* rendering finishes. Screenshot too early and you capture a half-drawn dashboard and confidently misread it. Dashboard Agent waits for the pixels to stop changing before every frame.
 
 ## What it does
 
@@ -35,7 +35,7 @@ That single constraint explains most of the architecture:
 ## Architecture
 
 ```
-┌──────────── React "Docent" UI (Vite, :5173) ─────────────┐
+┌──────── React "Dashboard Agent" UI (Vite, :5173) ────────┐
 │  Landing (search + picker) · Watch (live) · History       │
 └────▲──────────────────▲───────────────────▲──────────────┘
      │ REST             │ SSE               │ WebSocket

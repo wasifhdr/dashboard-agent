@@ -54,9 +54,9 @@ export default function AppShell({ view, onNavigate, headerCenter, children }) {
           <button
             type="button"
             onClick={() => onNavigate("landing")}
-            className="rounded-control font-sans text-lg font-extrabold tracking-tight text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
+            className="brand-wordmark rounded-control text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
           >
-            Docent
+            Dashboard Agent
           </button>
           {headerCenter?.name && (
             <a

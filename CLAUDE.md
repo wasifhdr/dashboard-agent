@@ -6,7 +6,13 @@ Guidance for Claude Code working in this repo. Keep it accurate — if the runni
 
 An agent that answers questions about interactive Tableau Public dashboards **by operating them** — clicking marks, filtering, switching views — and records every step (reasoning + action + screenshot) into a trajectory you can watch live or replay. It's the _showcase/system_ half of an NSU CSE499B senior-design project built around the **DashboardQA** benchmark. The user owns the system; teammates own the research (accuracy scores) — so prioritize demo-ability, reliability, and clarity over squeezing benchmark points.
 
-Branded **"Docent"** in the frontend (UI strings only; the repo/code is `dashboard-agent`).
+Branded **"Dashboard Agent"** in the frontend, matching the repo name. It was called *Docent*
+until 2026-08-09; that name is gone from the code, the docs, and the `localStorage` keys, so a
+`Docent` hit anywhere means something was missed. The wordmark (header + footer) is the sole user
+of the **Transcity** display face via `.brand-wordmark`; everything else stays on Inter/JetBrains
+Mono. Transcity is not on any CDN — it loads from `frontend/public/fonts/` and falls back to Inter
+if that file is absent (see the README there, and the `@font-face` comment in `index.css` for why
+the URL is a `public/` path and not a `src/` import).
 
 Public repo: <https://github.com/wasifhdr/dashboard-agent>. README.md is now written for that audience — keep it public-facing, not a build log.
 

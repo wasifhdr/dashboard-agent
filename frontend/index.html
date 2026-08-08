@@ -3,12 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Docent — dashboard QA agent</title>
+    <title>Dashboard Agent — dashboard QA agent</title>
+    <!-- Tab icon. Generated from the brand master (repo-root logo.png) cropped
+         to the mark's alpha bounding box, so the glyph fills the tab slot
+         instead of shipping ~200px of empty canvas on every edge. The PNGs are
+         transparent; apple-touch-icon is flattened onto white because iOS
+         composites transparency onto black, which would swallow the mark's
+         dark teal strokes. favicon.ico (16/32/48) is only for clients that
+         request /favicon.ico blindly instead of reading these tags. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <script>
       // Set the theme before first paint so there is no flash. Light is the
       // product default (demo theme); "system" is deliberately not used.
       try {
-        var t = localStorage.getItem("docent-theme");
+        var t = localStorage.getItem("dashboard-agent-theme");
         document.documentElement.dataset.theme = t === "dark" ? "dark" : "light";
       } catch (e) {
         document.documentElement.dataset.theme = "light";

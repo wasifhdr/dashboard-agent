@@ -1,4 +1,4 @@
-export const READ_ALOUD_STORAGE_KEY = "docent-read-aloud";
+export const READ_ALOUD_STORAGE_KEY = "dashboard-agent-read-aloud";
 
 export function loadReadAloudPref() {
   try {

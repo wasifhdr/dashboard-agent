@@ -37,13 +37,17 @@
   --t-focus: #0f6b66;
 
   /* Elevation */
-  --t-shadow-glass-sm: 0 2px 10px rgba(23, 32, 43, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  --t-shadow-glass: 0 8px 28px rgba(23, 32, 43, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  --t-shadow-glass-lg: 0 16px 48px rgba(23, 32, 43, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --t-shadow-glass-sm:
+    0 2px 10px rgba(23, 32, 43, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --t-shadow-glass:
+    0 8px 28px rgba(23, 32, 43, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --t-shadow-glass-lg:
+    0 16px 48px rgba(23, 32, 43, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   /* Same inset offset as shadow-glass-lg, alpha 0 - box-shadow only interpolates
      smoothly when both sides have the same number of layers; this lets
      clickable-card hovers (panel -> glass-lg) animate instead of snapping. */
-  --t-shadow-panel: 0 2px 10px rgba(23, 32, 43, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0);
+  --t-shadow-panel:
+    0 2px 10px rgba(23, 32, 43, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0);
   --t-shadow-teal-glow: 0 4px 24px rgba(43, 168, 162, 0.3);
   --t-shadow-coral-glow: 0 4px 24px rgba(212, 82, 51, 0.3);
   --t-shadow-gold-glow: 0 4px 24px rgba(230, 184, 0, 0.35);
@@ -82,10 +86,14 @@
 
   --t-focus: #ffd23f;
 
-  --t-shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  --t-shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --t-shadow-glass-lg: 0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-  --t-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0);
+  --t-shadow-glass-sm:
+    0 2px 12px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --t-shadow-glass:
+    0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --t-shadow-glass-lg:
+    0 16px 56px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --t-shadow-panel:
+    0 2px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0);
   --t-shadow-teal-glow: 0 4px 28px rgba(62, 217, 207, 0.38);
   --t-shadow-coral-glow: 0 4px 28px rgba(255, 122, 92, 0.38);
   --t-shadow-gold-glow: 0 4px 28px rgba(255, 210, 63, 0.4);
@@ -137,7 +145,9 @@
 @theme {
   /* Fonts */
   --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --font-mono:
+    "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, Consolas,
+    monospace;
 
   /* Accent palette (Flip7-derived) — same hex in both themes; solid fills
      always pair with the constant `night`/`snow` text colors below. */
@@ -156,7 +166,7 @@
 
   /* Constant on-accent text (do NOT flip with theme) */
   --color-night: #0a0d12; /* text on bright accent fills */
-  --color-snow: #f4f6f9;  /* text on -deep accent fills (hover) */
+  --color-snow: #f4f6f9; /* text on -deep accent fills (hover) */
 
   /* Radii */
   --radius-dot: 8px;
@@ -247,7 +257,8 @@
    read as "the agent" without losing the glassmorphism. */
 @utility glass-teal {
   background: color-mix(in srgb, var(--color-teal) 20%, var(--t-glass-hover));
-  border: 1px solid color-mix(in srgb, var(--color-teal) 42%, var(--t-glass-border-strong));
+  border: 1px solid
+    color-mix(in srgb, var(--color-teal) 42%, var(--t-glass-border-strong));
   box-shadow: var(--t-shadow-glass-lg);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
@@ -273,28 +284,58 @@
   border: 1px solid var(--t-glass-border);
 }
 @utility panel-tint-teal {
-  background: color-mix(in srgb, var(--color-teal) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-teal) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-teal) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-teal) 38%, var(--t-glass-border));
 }
 @utility panel-tint-coral {
-  background: color-mix(in srgb, var(--color-coral) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-coral) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-coral) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-coral) 38%, var(--t-glass-border));
 }
 @utility panel-tint-gold {
-  background: color-mix(in srgb, var(--color-gold) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-gold) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-gold) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-gold) 38%, var(--t-glass-border));
 }
 @utility panel-tint-sky {
-  background: color-mix(in srgb, var(--color-sky) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-sky) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-sky) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-sky) 38%, var(--t-glass-border));
 }
 @utility panel-tint-green {
-  background: color-mix(in srgb, var(--color-green) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-green) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-green) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-green) 38%, var(--t-glass-border));
 }
 @utility panel-tint-violet {
-  background: color-mix(in srgb, var(--color-violet) var(--t-tint), var(--t-panel));
-  border: 1px solid color-mix(in srgb, var(--color-violet) 38%, var(--t-glass-border));
+  background: color-mix(
+    in srgb,
+    var(--color-violet) var(--t-tint),
+    var(--t-panel)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--color-violet) 38%, var(--t-glass-border));
 }
 
 /* Background orbs — fixed, blurred color blooms behind all content. This is
@@ -305,10 +346,26 @@
   z-index: -10;
   pointer-events: none;
   background:
-    radial-gradient(600px circle at 12% 18%, color-mix(in srgb, var(--color-teal) var(--t-orb-teal), transparent), transparent 65%),
-    radial-gradient(700px circle at 88% 12%, color-mix(in srgb, var(--color-gold) var(--t-orb-gold), transparent), transparent 65%),
-    radial-gradient(800px circle at 78% 88%, color-mix(in srgb, var(--color-coral) var(--t-orb-coral), transparent), transparent 65%),
-    radial-gradient(900px circle at 10% 95%, color-mix(in srgb, var(--color-violet) var(--t-orb-violet), transparent), transparent 65%);
+    radial-gradient(
+      600px circle at 12% 18%,
+      color-mix(in srgb, var(--color-teal) var(--t-orb-teal), transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      700px circle at 88% 12%,
+      color-mix(in srgb, var(--color-gold) var(--t-orb-gold), transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      800px circle at 78% 88%,
+      color-mix(in srgb, var(--color-coral) var(--t-orb-coral), transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      900px circle at 10% 95%,
+      color-mix(in srgb, var(--color-violet) var(--t-orb-violet), transparent),
+      transparent 65%
+    );
 }
 
 body {
@@ -317,8 +374,15 @@ body {
 
 /* Glow pulse — live/recording indicators, active steps. */
 @keyframes glow-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(1.08); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.08);
+  }
 }
 .animate-glow-pulse {
   animation: glow-pulse 2s ease-in-out infinite;
@@ -326,8 +390,14 @@ body {
 
 /* Success flourish — a single soft ring ping, used once on the agent's final answer. */
 @keyframes ring-ping {
-  0% { opacity: 0.6; transform: scale(0.8); }
-  100% { opacity: 0; transform: scale(1.8); }
+  0% {
+    opacity: 0.6;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
 }
 .ring-ping::after {
   content: "";
@@ -377,15 +447,71 @@ body {
   );
 }
 
-/* Agent panel title. Deliberately OFF the Inter/JetBrains pair: the product is
-   "Docent" — a museum guide that talks you through an exhibit — so the one place
+/* Brand wordmark — the product name in the header and footer, and nowhere else.
+   Transcity is not on Google Fonts or fontsource, so it ships as a local file
+   from public/fonts/ (converted from the vendor .otf) rather than as a
+   dependency. It carries LETTERS AND SPACE ONLY — no digits, no punctuation —
+   so it must never be applied to anything but the two-word product name.
+
+   The URL is a /public path rather than a src/ import on purpose: Vite resolves
+   src/ url() references at build time and fails the build outright if the file
+   is absent, whereas this degrades to the Inter fallback below. NOTE that in
+   dev a missing file here does NOT 404 — Vite answers unknown /public paths
+   with the SPA index.html at 200, so the browser logs "OTS parsing error"
+   repeatedly instead. That is the signature of the font having gone missing. */
+@font-face {
+  font-family: "Transcity";
+  src: url("/fonts/Transcity.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bilderberg";
+  src: url("/fonts/bilderberg.regular.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bungee Shade";
+  src: url("/fonts/bungee.shade-regular.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.brand-wordmark {
+  font-family: "Bungee Shade", "Inter Variable", "Inter", system-ui, sans-serif;
+  /* 400 because the face ships a single Regular master (usWeightClass 400).
+     Asking for a heavier weight would make the browser synthesise one by
+     smearing the strokes, which on a display face reads as a rendering fault.
+     The fallback consequence is deliberate: if Bungee Shade fails to load, the
+     wordmark comes back as regular-weight Inter rather than the old extrabold. */
+  font-weight: 400;
+  /* Size and tracking live here, not as `text-lg` on the elements, so the
+     wordmark's type is defined in exactly one place.
+     22px/0.04em is not arbitrary: Transcity is condensed, so the name set at
+     the old 18px measured 117px against the 152px the previous Inter-800
+     wordmark occupied — visibly smaller in the same slot. This lands at 150px,
+     restoring the original footprint. Re-measure if the name ever changes. */
+  font-size: 1.75rem;
+  letter-spacing: 0.04em;
+}
+
+/* Agent panel title. Deliberately OFF the Inter/JetBrains pair: the one place
    the agent introduces itself gets an editorial serif voice, against Inter for
    UI and JetBrains Mono for data. Fraunces is the warm end of that family of
    faces: SOFT rounds the terminals, WONK swaps in its quirkier letterforms, and
    a display-range opsz gives it the stroke contrast a title wants. */
-.docent-title {
+.agent-title {
   font-family: "Fraunces Variable", Georgia, "Times New Roman", serif;
-  font-variation-settings: "opsz" 48, "SOFT" 45, "WONK" 1;
+  font-variation-settings:
+    "opsz" 48,
+    "SOFT" 45,
+    "WONK" 1;
   font-weight: 600;
   font-size: 1.4rem;
   line-height: 1.15;
@@ -407,21 +533,38 @@ body {
 
 /* Minimized chat dock, "Thinking" state — three dots fading in sequence. */
 @keyframes thinking-dot {
-  0%, 80%, 100% { opacity: 0.2; }
-  40% { opacity: 1; }
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 .thinking-dot {
   animation: thinking-dot 1.4s ease-in-out infinite both;
 }
-.thinking-dot:nth-of-type(2) { animation-delay: 0.2s; }
-.thinking-dot:nth-of-type(3) { animation-delay: 0.4s; }
+.thinking-dot:nth-of-type(2) {
+  animation-delay: 0.2s;
+}
+.thinking-dot:nth-of-type(3) {
+  animation-delay: 0.4s;
+}
 
 /* Minimized chat dock, "Response ready" state — a repeating outward ping that
    keeps drawing the eye until the panel is reopened (unlike the one-shot
    .ring-ping used on a settled answer card). */
 @keyframes ready-ping {
-  0% { opacity: 0.5; transform: scale(0.96); }
-  70%, 100% { opacity: 0; transform: scale(1.35); }
+  0% {
+    opacity: 0.5;
+    transform: scale(0.96);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
 }
 .ready-ping::after {
   content: "";

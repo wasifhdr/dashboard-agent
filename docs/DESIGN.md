@@ -1,4 +1,4 @@
-# Docent Glass v2 — Visual Design System
+# Dashboard Agent Glass v2 — Visual Design System
 
 **Status:** the active design contract for this app. Implement it as written; when a value you
 need is missing, use the nearest token in this file — never invent new hex values, font sizes, or
@@ -47,7 +47,7 @@ live in a normal `@theme` block. See `src/index.css` — it is the source of tru
 this doc describes roles and rules, not hexes.
 
 Theme selection: `index.html` sets `document.documentElement.dataset.theme` **pre-paint** from
-`localStorage("docent-theme")`, defaulting to `light` (system preference deliberately unused —
+`localStorage("dashboard-agent-theme")`, defaulting to `light` (system preference deliberately unused —
 demos must be predictable). `src/hooks/useTheme.js` mirrors + toggles it; the AppShell header has
 the sun/moon toggle.
 

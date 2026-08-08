@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-const STORAGE_KEY = "docent-theme";
+const STORAGE_KEY = "dashboard-agent-theme";
 
 // Theme state lives on <html data-theme="...">, set pre-paint by the inline
 // script in index.html; this hook just mirrors and toggles it.

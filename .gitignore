@@ -4,3 +4,14 @@ data/
 .env
 *.log
 frontend/dist/
+
+# Transcity (brand wordmark) is a free-for-PERSONAL-USE demo font. The 1001Fonts
+# FFP licence permits webfont conversion and embedding, but NOT publishing or
+# redistribution (§6, §7) — and this repo is public, so committing the file
+# would be distributing it. It stays local; a fresh clone falls back to Inter.
+# See frontend/public/fonts/README.md before changing this.
+transcity/
+frontend/public/fonts/*.woff2
+frontend/public/fonts/*.woff
+frontend/public/fonts/*.otf
+frontend/public/fonts/*.ttf
