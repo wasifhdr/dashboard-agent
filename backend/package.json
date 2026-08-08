@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "probe": "node probe.js",
-    "dev": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
     "run-agent": "node run.js",
     "eval": "node eval.js",
     "test": "node --test test/*.test.js"

@@ -15,6 +15,7 @@ import * as bus from "./sessionBus.js";
 import * as conversationRuntime from "./conversationRuntime.js";
 import { searchWorkbooks } from "./tableauSearch.js";
 import { describeActiveConversation } from "./activeConversation.js";
+import { withTimeout, openGuardDecision } from "./openGuard.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -299,10 +300,23 @@ let currentTurn = null;
 // two overlapping POST /api/conversations calls could both proceed
 // concurrently and leak a Playwright context (B0 review fix).
 let conversationOpening = false;
+// When the flag was raised, so a hung open cannot latch it forever. Only the
+// awaited steps inside createConversationInternal are individually bounded;
+// this timestamp is the backstop for anything that escapes those bounds.
+let conversationOpeningSince = 0;
 // Per-turn AbortControllers, keyed by turnId. Stop requests abort the
 // controller, which both flips shouldStop() and aborts the in-flight VLM
 // request so a stop takes effect immediately instead of at the next step.
 const stopControllers = new Map();
+
+// openSession allows 90s for a first load and waitForSettle another 12s, so a
+// legitimately slow dashboard can take ~110s; the cap has to sit above that or
+// it would abort healthy opens.
+const OPEN_TIMEOUT_MS = config.conversationOpenTimeoutMs ?? 150000;
+const PREV_CLOSE_TIMEOUT_MS = config.conversationCloseTimeoutMs ?? 15000;
+// Above OPEN + PREV_CLOSE, so this only ever fires for a hang that somehow
+// escaped both individual timeouts (i.e. never, unless there is a new bug).
+const OPEN_STALE_MS = OPEN_TIMEOUT_MS + PREV_CLOSE_TIMEOUT_MS + 30000;
 
 // Resolves once no turn is running (or after timeoutMs). Used before closing a
 // conversation whose turn we just aborted, so the Playwright context isn't torn
@@ -330,24 +344,51 @@ function waitForTurnToStop(timeoutMs) {
 // `conversationOpening` (checked/set here, synchronously, before the first
 // await) protects against two overlapping calls racing each other.
 async function createConversationInternal({ dashboardUrl, dashboardName }) {
-  if (conversationOpening) {
+  const guard = openGuardDecision({
+    opening: conversationOpening,
+    openingSince: conversationOpeningSince,
+    now: Date.now(),
+    staleMs: OPEN_STALE_MS,
+  });
+  if (guard === "reject") {
     throw Object.assign(new Error("A conversation is already being opened. Try again in a moment."), { statusCode: 409 });
   }
+  if (guard === "override") {
+    console.warn(
+      `[conversations] open flag held ${Math.round((Date.now() - conversationOpeningSince) / 1000)}s - treating as stale and overriding.`,
+    );
+  }
   conversationOpening = true;
+  conversationOpeningSince = Date.now();
   try {
     const conversationId = crypto.randomUUID();
-    const runtime = await conversationRuntime.createRuntime({
+    const runtimePromise = conversationRuntime.createRuntime({
       browser: sharedBrowser,
       config,
       conversationId,
       dashboardUrl,
       dashboardName: dashboardName ?? null,
     });
+    let runtime;
+    try {
+      runtime = await withTimeout(runtimePromise, OPEN_TIMEOUT_MS, "Opening the dashboard");
+    } catch (e) {
+      // We gave up, but createRuntime may still be in flight and may still
+      // succeed. If it does, nobody holds a reference to that Playwright
+      // context, so close it rather than leak it for the process lifetime.
+      runtimePromise.then((rt) => rt?.close?.().catch(() => {})).catch(() => {});
+      throw e;
+    }
 
     const prev = conversationRuntime.getActiveRuntime();
     conversationRuntime.setActiveRuntime(runtime);
     if (prev) {
-      await prev.close();
+      // The new runtime is already active, so a slow teardown of the old one
+      // must not fail (or stall) the open. Worst case we leak one context;
+      // that beats latching the open flag on a healthy new conversation.
+      await withTimeout(prev.close(), PREV_CLOSE_TIMEOUT_MS, "Closing the previous conversation").catch((e) => {
+        console.error("Previous conversation did not close cleanly:", e.message);
+      });
     }
     return runtime;
   } finally {
