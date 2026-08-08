@@ -132,7 +132,7 @@ Run from `backend/`, no UI needed:
 ```bash
 npm run run-agent -- <tableau-url> "<question>"   # one run, streams to stdout
 npm run probe -- <tableau-url>                    # inspect a dashboard, no model involved
-npm run eval -- eval/questions.json               # batch harness → eval/results.csv
+npm run eval -- <path/to/questions.json>          # batch harness → eval/results.csv
 npm test                                          # unit tests
 ```
 

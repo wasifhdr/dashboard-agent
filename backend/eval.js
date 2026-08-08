@@ -3,7 +3,14 @@
 // collection tool for the research track (every run is fully persisted in
 // the same SQLite DB / frames dir as any other session).
 //
-// Usage: node eval.js [path/to/questions.json]   (defaults to eval/questions.json)
+// Usage: node eval.js <path/to/questions.json>
+//
+// There is no default set any more. The old eval/questions.json and
+// eval/smoke-questions.json targeted Zillow / CAInfectiousDiseases / EHS -
+// dashboards that are no longer in config.dashboards - so running them measured
+// nothing about the shipping system. They were removed rather than left as a
+// green tick that proved only "nothing crashed". Point this at a set written
+// against the current dashboards.
 
 import "./src/env.js";
 import path from "node:path";
@@ -16,7 +23,15 @@ import * as store from "./src/store.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf-8"));
 
-const questionsPath = process.argv[2] || path.join(__dirname, "eval", "questions.json");
+const questionsPath = process.argv[2];
+if (!questionsPath) {
+  console.error(
+    "Usage: node eval.js <path/to/questions.json>\n\n" +
+      "No default question set ships with the repo - see the note at the top of this file.\n" +
+      'Each entry needs at least { "dashboard_url", "question" }; "id" is used for the CSV.',
+  );
+  process.exit(1);
+}
 const questions = JSON.parse(fs.readFileSync(questionsPath, "utf-8"));
 
 function csvEscape(v) {
@@ -79,6 +94,8 @@ async function main() {
 
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
   const outPath = path.join(__dirname, "eval", "results.csv");
+  // eval/ holds only the archived reading/ crops now, so don't assume it exists.
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, csv);
   console.log(`\nWrote ${outPath}`);
 
