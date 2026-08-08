@@ -36,7 +36,7 @@ dashboard-agent/
   backend/                 Node ESM, Express, Playwright, better-sqlite3  (:8990)
     src/                   core modules (see map below)
     public/host.html       <tableau-viz> embed page + window.__agentBridge
-    eval/                  questions.json, smoke-questions.json, results.csv
+    eval/reading/          archived chart-reading crops (no question sets ship - see below)
     test/                  node:test unit tests (`npm test`)
     config.json            VLM endpoints, timeouts, settle gate, starter dashboards
     run.js probe.js eval.js  CLI entry points
@@ -77,7 +77,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 
 - `npm run probe -- <tableau-url>` — validate a dashboard (inventory, screenshot, filter+settle+diff), no VLM. Note it launches its **own** browser and **mutates state** by applying a filter — never point it at a live session's page.
 - `npm run run-agent -- <tableau-url> "<question>"` — one agent run, streams steps to stdout.
-- `npm run eval -- eval/questions.json` — batch harness → `eval/results.csv`.
+- `npm run eval -- <path/to/questions.json>` — batch harness → `eval/results.csv`. **No question set ships with the repo.** The old `questions.json` / `smoke-questions.json` targeted Zillow, CAInfectiousDiseases and EHS — none of which are in `config.dashboards` any more — so they measured nothing about the shipping system and were deleted (2026-08-08) rather than left as a green tick that only proved "nothing crashed". Write a set against the current dashboards before relying on this.
 - `npm test` — unit tests (`node --test test/*.test.js`). Prefer it over a bare `node --test`, which discovers more broadly than intended.
 
 ## Backend module map (`backend/src/`)
@@ -102,7 +102,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 
 ## Frozen vs. mutable
 
-The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, `perception.js`, or the `eval/` sets. Changes there need a real reason and a re-run of the smoke/batch evals. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
+The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, or `perception.js`. Changes there need a real reason and a measured re-run — these modules fail *silently*, degrading answer quality without throwing, so no unit test catches a regression in them. With no question set in the repo, that means writing one against the current dashboards; a green tick from a stale set is worse than none. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
 
 ## `config.dashboards` is a shortcut, not a class
 
@@ -114,8 +114,11 @@ The five entries in `config.json` are a **landing-page starting list and demo sa
 - **`getInventory()` throws on a Tableau story** — `host.html` calls `getRawFilters()` unguarded and a Story has no `getFiltersAsync` (`TypeError: worksheets[0].getFiltersAsync is not a function`). Detect a story by reading `activeSheet.sheetType` off the element **before** touching the bridge, as `viability.js` does.
 - **`waitForSettle` RETURNS `{settled, timedOut}` — it does not throw on timeout.** Discard that value and you'll screenshot a still-painting dashboard. This caused a real bug where slow-but-healthy dashboards were reported as blank.
 - **Settle gate is required** — Embedding API promises resolve _before_ render finishes. `settle_timeout` (>12s) is a flag, not a crash; frequent ones mean a poor-fit dashboard.
+- **After any action the settle gate needs `{ expectBridgeEvent: true }`** — pixel stability alone cannot tell "finished redrawing" from "hasn't started redrawing yet". A mark click re-highlights the clicked bar locally in <300ms but re-filters the other worksheets only after a server round-trip (measured 2.3–3.3s on Video Game Sales; `filterchanged` fires at that moment). The pixels go quiet in the gap, so a pixels-only gate settled at ~1.1s and screenshotted a dashboard that _looked_ filtered but wasn't — the model then read the stale chart and answered confidently wrong, with `settle_timeout=0` and nothing logged as an error. This made the "known-good" 2-step EA click demo pass only 4/10; with the flag it is 10/10. `settleDecision` in `perception.js` is the pure, unit-tested form of the rule.
 - **`Dashboard.applyFilterAsync` broadcasts natively** to every worksheet sharing a field (when the active sheet is a dashboard). **Range filters** have no dashboard-level equivalent — still per-worksheet.
 - **`getDomainAsync` works reliably** — `domain: null` is a true edge case, not the common path.
+- **Filter domains are cached in `host.html`, and the cache is the reason `getInventory` is fast.** `getDomainAsync` is the bridge's dominant cost (~0.8–1.1s per call, serialized internally — `Promise.all` is measurably no faster), and a dashboard reports one filter object **per worksheet, not per field**: Video Game Sales lists 51 filters covering 17 distinct fields, US Flight Delays 27 covering 8 (`Action (Airport)` appears 8×). The naive loop therefore asked the same question up to 8× and cost 28.2s on VGS. `domainCache` keys a Map on the **promise**, so duplicates within one call collapse onto the first in-flight fetch (dedup) and later steps hit the resolved value (cache): **28.2s → 1.6s**. It is warmed by a fire-and-forget `warmDomainCache()` at `FirstInteractive` and on `TabSwitched` — never awaited, or the ~10s cost just moves into the load. `getDomainCacheStats()` exposes hits/misses; misses should equal the distinct-field count.
+- **The cache stores the `"database"` domain, not the default.** `getDomainAsync()` returns the *relevant* domain, which shrinks as other filters narrow the data (measured: after filtering to Electronic Arts, `Publisher` went 5 → 1), so caching it would serve stale lists. `getDomainAsync("database")` is the field's full underlying list and is invariant under filtering (5 → 5), which is what makes the cache correct **with no invalidation**. It is also better prompt content: the model learns a value exists even when currently filtered out. Prompt size is safe because `truncateList` in `vlmClient.js` caps domains at 30 values.
 - **Decoy/orphaned controls exist** in real workbooks (an unwired "Select Region" parameter next to the real `RegionName` filter). Loop guard + escalating feedback recovers; decoys aren't directly detectable.
 - **Dead margin** when `sheet.size.behavior === "automatic"` — no published size to snap to, so frames waste image tokens. The host page auto-shrinks when it can.
 - **Backend port dies on Windows, and Express lies about it** — Hyper-V/WinNAT auto-reservations land on dev ports; a bind inside a reserved range fails `EACCES` but `app.listen`'s callback **still fires** with `address() === null`. `server.js` gates the banner on `address()`. Permanent fix in README → Troubleshooting. `BACKEND_PORT` overrides `config.backendPort` for backend and Vite proxy alike; `hostPageOrigin` must stay in sync (startup asserts this).
