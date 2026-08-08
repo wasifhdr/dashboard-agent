@@ -19,6 +19,28 @@ import { cx } from "../../components/ui/cx.js";
 // coordinate contract (docs/LIVE_TAKEOVER_PLAN.md's B2 input coordinate
 // contract).
 
+// Agent-cursor glyph: the "cursor-pointer" outline hand from SVG Repo
+// (svgrepo.com), inlined rather than imported so it paints with the frame
+// instead of costing a request on first click.
+const CURSOR_GLYPH_PATH =
+  "M38.1,16.1a4.8,4.8,0,0,0-2.7.2A4.9,4.9,0,0,0,31.2,14l-1.3.2A4.8,4.8,0,0,0,25.4,11h-1V7.2a5,5,0,0,0-5.8-5.1,5.1,5.1,0,0,0-4,5V21.9l-2.4-2.4A4.9,4.9,0,0,0,8.7,18a4.6,4.6,0,0,0-3.4,1.5,4.1,4.1,0,0,0-1.3,3,7.9,7.9,0,0,0,1.3,4C6.5,28.7,13.8,41.3,16,45a1.9,1.9,0,0,0,1.7,1H36.5a2,2,0,0,0,2-1.5l3.4-13.2a1.3,1.3,0,0,0,.1-.6V21.2A5.2,5.2,0,0,0,38.1,16.1ZM35.1,42H18.8c-2.7-4.5-9-15.5-10.1-17.5-.1-.2-1.1-1.8-.7-2.2l.7-.3a1.1,1.1,0,0,1,.7.3l5.8,6a2,2,0,0,0,3.3-1.4V7a1,1,0,0,1,2,0V21a1.9,1.9,0,0,0,1.9,2h0a2,2,0,0,0,2-2V16a1,1,0,0,1,1-1,1,1,0,0,1,.9,1v6a2,2,0,0,0,2,2h0a2,2,0,0,0,2-2V19a.9.9,0,0,1,.9-1,.9.9,0,0,1,1,1v5a2,2,0,0,0,2,2h0a1.9,1.9,0,0,0,1.9-2V21a1,1,0,0,1,2,0v9.5a1.3,1.3,0,0,1-.1.6Z";
+const CURSOR_VIEWBOX = 48; // the source icon's coordinate space
+const CURSOR_GLYPH_PX = 26; // rendered size on the frame
+
+// Where the glyph actually "points": the index fingertip, NOT the glyph's
+// top-left corner. Measured off the real path rather than eyeballed - sampling
+// it with getPointAtLength puts the topmost point at y=2.04, and the finger's
+// edges at x=14.6/24.4 (so centre 19.5). The wrapper is shifted by this much so
+// the fingertip lands exactly on the clicked point, and the click ripple is
+// centred on it. Swap the glyph and you MUST redo this, or the hand points
+// somewhere other than where the agent clicked - which reads as authoritative
+// while being wrong, and is worse than showing no cursor at all.
+const CURSOR_HOTSPOT_VB = { x: 19.5, y: 2.04 };
+const CURSOR_HOTSPOT = {
+  x: (CURSOR_HOTSPOT_VB.x / CURSOR_VIEWBOX) * CURSOR_GLYPH_PX,
+  y: (CURSOR_HOTSPOT_VB.y / CURSOR_VIEWBOX) * CURSOR_GLYPH_PX,
+};
+
 // Maps the browser's numeric MouseEvent/PointerEvent.button code to the
 // string the WS contract (and Playwright's page.mouse API) expects.
 const BUTTON_NAMES = { 0: "left", 1: "middle", 2: "right" };
@@ -236,17 +258,40 @@ export default function LiveStage({
                 {mode === "agent" && cursor && (
                   <div
                     className="pointer-events-none absolute z-30 transition-all duration-200 ease-out"
-                    style={{ left: `${cursor.nx * 100}%`, top: `${cursor.ny * 100}%`, transform: "translate(-2px, -2px)" }}
+                    style={{
+                      left: `${cursor.nx * 100}%`,
+                      top: `${cursor.ny * 100}%`,
+                      transform: `translate(${-CURSOR_HOTSPOT.x}px, ${-CURSOR_HOTSPOT.y}px)`,
+                    }}
                   >
-                    {/* pointer glyph */}
-                    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-                      <path d="M2 2 L2 16 L6 12 L9 19 L12 18 L9 11 L15 11 Z" fill="white" stroke="black" strokeWidth="1.2" />
+                    {/* pointer glyph. The icon is an OUTLINE (hollow palm), so a
+                        plain black fill vanishes on a dark dashboard - the
+                        Netflix one is near-black. paint-order:stroke lays a white
+                        stroke BEHIND the fill, giving a halo that keeps it legible
+                        on any background without altering the icon's geometry. */}
+                    <svg
+                      width={CURSOR_GLYPH_PX}
+                      height={CURSOR_GLYPH_PX}
+                      viewBox={`0 0 ${CURSOR_VIEWBOX} ${CURSOR_VIEWBOX}`}
+                      aria-hidden="true"
+                    >
+                      <path
+                        d={CURSOR_GLYPH_PATH}
+                        fill="black"
+                        stroke="white"
+                        strokeWidth="2.5"
+                        strokeLinejoin="round"
+                        style={{ paintOrder: "stroke" }}
+                      />
                     </svg>
-                    {/* click ripple */}
+                    {/* click ripple - centred on the fingertip, not the glyph box */}
                     {cursor.phase === "click" && (
-                      <span className="absolute -left-2 -top-2 block h-6 w-6 animate-ping rounded-full bg-teal/60" />
+                      <span
+                        className="absolute block h-6 w-6 animate-ping rounded-full bg-teal/60"
+                        style={{ left: CURSOR_HOTSPOT.x, top: CURSOR_HOTSPOT.y, transform: "translate(-50%, -50%)" }}
+                      />
                     )}
-                    <span className="absolute left-5 top-3 whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    <span className="absolute left-[21px] top-2 whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                       agent
                     </span>
                   </div>
