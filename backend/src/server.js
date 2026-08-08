@@ -16,6 +16,7 @@ import * as conversationRuntime from "./conversationRuntime.js";
 import { searchWorkbooks } from "./tableauSearch.js";
 import { describeActiveConversation } from "./activeConversation.js";
 import { withTimeout, openGuardDecision } from "./openGuard.js";
+import { ensureHealthyBrowser } from "./browserHealth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -361,6 +362,19 @@ async function createConversationInternal({ dashboardUrl, dashboardName }) {
   conversationOpening = true;
   conversationOpeningSince = Date.now();
   try {
+    // The shared browser can go dead while the process stays up (see
+    // browserHealth.js). It reports itself connected when that happens, so the
+    // only reliable check is a bounded round-trip, done here rather than at
+    // startup because the browser is fine at startup - it dies later. Without
+    // this, every open from that point on burned the full OPEN_TIMEOUT_MS and
+    // the only cure was restarting the backend.
+    const health = await ensureHealthyBrowser({
+      browser: sharedBrowser,
+      launch: launchBrowser,
+      onRelaunch: () => console.warn("[browser] shared browser was unusable - relaunched it."),
+    });
+    sharedBrowser = health.browser;
+
     const conversationId = crypto.randomUUID();
     const runtimePromise = conversationRuntime.createRuntime({
       browser: sharedBrowser,
