@@ -195,6 +195,7 @@ function buildSessionTrajectory(session) {
   const steps = store.getSteps(session.id).map((s) => ({
     idx: s.step_idx,
     thought: s.thought,
+    discovery: s.discovery ?? null,
     action: s.action_json ? JSON.parse(s.action_json) : null,
     action_status: s.action_status,
     error_msg: s.error_msg,
@@ -228,7 +229,7 @@ function adaptAndPublish(sessionId, evt) {
       bus.publish(sessionId, { type: "step_started", idx: evt.idx });
       break;
     case "thought":
-      bus.publish(sessionId, { type: "thought", idx: evt.idx, text: evt.text });
+      bus.publish(sessionId, { type: "thought", idx: evt.idx, text: evt.text, discovery: evt.discovery ?? null });
       break;
     case "frame_captured":
       bus.publish(sessionId, {
@@ -455,6 +456,15 @@ async function startTurn({ conversationId, activeRuntime, question }) {
   activeRuntime.setMode("agent");
 
   const takeover = await activeRuntime.captureTakeoverEnd();
+  // captureTakeoverEnd returns null unless something actually changed (it
+  // compares inventories AND the bridge event log), so a non-null result means
+  // the human really did touch the dashboard. Mark rather than clear: they may
+  // have only panned, and discarding correct facts is the worse error.
+  if (takeover) {
+    activeRuntime.discoveryLog.addNote(
+      "— the user changed the dashboard here; readings above may predate that change —",
+    );
+  }
 
   runSession({
     browser: sharedBrowser,
@@ -467,6 +477,7 @@ async function startTurn({ conversationId, activeRuntime, question }) {
     ownsPage: false,
     conversationId,
     turnIndex,
+    discoveryLog: activeRuntime.discoveryLog,
     onEvent: (evt) => {
       if (evt.type === "agent_cursor") {
         activeRuntime.broadcastCursor(evt.nx, evt.ny, evt.phase);

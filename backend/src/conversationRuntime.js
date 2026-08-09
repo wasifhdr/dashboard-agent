@@ -23,6 +23,7 @@ import * as store from "./store.js";
 import { FRAMES_DIR } from "./paths.js";
 import { inspectViz } from "./viability.js";
 import { activeModelName } from "./vlmClient.js";
+import { createDiscoveryLog } from "./discoveries.js";
 
 // Must match the id on <tableau-viz id="agentViz"> in public/host.html.
 // perception.js is the source of truth (VIZ_SELECTOR there) but is frozen and
@@ -132,6 +133,13 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     model_id: activeModelName(config),
     config_json: JSON.stringify(config),
   });
+
+  // Session-scoped hard-data memory, shared by every turn on this dashboard.
+  // Owned here rather than inside runSession so facts survive across turns -
+  // a follow-up question starts with `const history = []` but keeps this.
+  // Dropped with the runtime when the conversation closes, which IS the hard
+  // delete: nothing writes the aggregate anywhere.
+  const discoveryLog = createDiscoveryLog();
 
   // --- Live-view state (Phase B1) ---------------------------------------
   const clients = new Set(); // connected WebSocket instances
@@ -776,6 +784,7 @@ export async function createRuntime({ browser, config, conversationId, dashboard
     context,
     dashboardUrl,
     dashboardName: dashboardName ?? null,
+    discoveryLog,
     close,
     // Phase B1 live-view surface (used by server.js's WebSocket wiring):
     addClient,
