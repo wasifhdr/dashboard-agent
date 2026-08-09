@@ -179,3 +179,26 @@ test("entries() returns copies, so a caller cannot mutate the log", () => {
   log.entries()[0].text = "tampered";
   assert.ok(log.format().includes("fact"));
 });
+
+// --- StepResponseSchema tolerance ------------------------------------------
+
+import { StepResponseSchema } from "../src/actionSchema.js";
+
+const VALID_STEP = { thought: "Reading the chart.", action: { type: "wait" } };
+
+test("REGRESSION: a response with no discovery field still validates", () => {
+  // Making the field required would turn a cosmetic omission into an
+  // invalid_json step, and three of those in a row end the run. In a module
+  // that fails silently, a new field must not be able to do that.
+  assert.equal(StepResponseSchema.safeParse(VALID_STEP).success, true);
+});
+
+test("an explicit null discovery validates", () => {
+  assert.equal(StepResponseSchema.safeParse({ ...VALID_STEP, discovery: null }).success, true);
+});
+
+test("a string discovery validates and is preserved", () => {
+  const out = StepResponseSchema.safeParse({ ...VALID_STEP, discovery: "House avg beds = 3.3" });
+  assert.equal(out.success, true);
+  assert.equal(out.data.discovery, "House avg beds = 3.3");
+});

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import sharp from "sharp";
 import { StepResponseSchema } from "./actionSchema.js";
+import { normalizeDiscoveryText } from "./discoveries.js";
 
 // ---- inventory / history formatting (AGENT_PLAN.md 6.8) --------------------
 
@@ -534,9 +535,22 @@ export async function getNextAction({ config, question, inventory, history, imag
       parsed.action = normalizeClickAction(parsed.action, await frameDims());
     }
 
+    // Normalized BEFORE validation, so a model that writes "None", echoes the
+    // field label, or returns a number can never fail the schema over it.
+    if (parsed && typeof parsed === "object") {
+      parsed.discovery = normalizeDiscoveryText(parsed.discovery);
+    }
+
     const result = StepResponseSchema.safeParse(parsed);
     if (result.success && !((config.actuationMode ?? "pixel") !== "pixel" && result.data.action.type === "click")) {
-      return { valid: true, thought: result.data.thought, action: result.data.action, rawText: raw, attempts: attempt };
+      return {
+        valid: true,
+        discovery: result.data.discovery ?? null,
+        thought: result.data.thought,
+        action: result.data.action,
+        rawText: raw,
+        attempts: attempt,
+      };
     }
 
     feedback = result.success
@@ -548,6 +562,7 @@ export async function getNextAction({ config, question, inventory, history, imag
 
   return {
     valid: false,
+    discovery: null,
     thought: null,
     action: null,
     rawText: lastRaw,

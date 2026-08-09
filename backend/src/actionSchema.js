@@ -65,6 +65,11 @@ export const ActionSchema = z.discriminatedUnion("type", [
 // Generous cap, not a strict sentence-count check - the "<=2 sentences" rule
 // is enforced via the prompt, not technically here.
 export const StepResponseSchema = z.object({
+  // Optional AND nullable on purpose. A required field would turn a cosmetic
+  // omission into an invalid_json step, and three of those in a row end the
+  // run - see orchestrator.js's invalidCount. The prompt asks for it every
+  // turn; the schema must never punish a model that forgets.
+  discovery: z.union([z.string(), z.null()]).optional(),
   thought: z.string().min(1).max(600),
   action: ActionSchema,
 });
