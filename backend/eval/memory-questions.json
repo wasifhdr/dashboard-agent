@@ -1,0 +1,35 @@
+{
+  "source": "DashboardQA",
+  "verified_on": "2026-08-09",
+  "note": "Multi-hop questions that cannot be answered without carrying a reading across steps. Ground truth comes from the DashboardQA dataset, NOT from our own inspection of a live capture - so it can rot exactly like eval/questions.json, and additionally may not match how these particular workbooks render today. Dashboard URLs are kept verbatim in the dataset's browse form; eval.js rewrites them to the embed form at run time. Every entry starts scored:false: expect values are written only after observing the answer text the agent actually produces (see docs/superpowers/plans/2026-08-09-discoveries-memory.md Task 10).",
+  "questions": [
+    {
+      "id": "berlin-beds-compare",
+      "dashboard_url": "https://public.tableau.com/app/profile/chloedotbrown/viz/AirBnBinEastvs_WestBerlin/AirBnBBerlin",
+      "question": "Is the average number of beds for Houses higher than that of All types, Apartments, and Hotels/Hostels?",
+      "expected_answer": "No",
+      "scored": false
+    },
+    {
+      "id": "energy-growth-compare",
+      "dashboard_url": "https://public.tableau.com/app/profile/alexandervar/viz/EnergyConsumptionAnimated/EnergyConsumption",
+      "question": "If both nuclear and natural gas consumption increased from 1960 to 2010, which one grew faster during that time based on the charts?",
+      "expected_answer": "Natural gas",
+      "scored": false
+    },
+    {
+      "id": "crsi-pledges-metro-vs-regional",
+      "dashboard_url": "https://public.tableau.com/app/profile/refugee.council.of.australia/viz/CRSIPledges/CRSIPledges",
+      "question": "Between NSW, QLD, and TAS State, can you list which of these have more pledges that states 'I am interested in providing friendship or recreational activities', and 'I am interested in helping a refugee get set up with school enrolments opening bank accounts, transport etc', in the 'Metropolitan' compared to 'Regional' location?",
+      "expected_answer": "NSW, QLD",
+      "scored": false
+    },
+    {
+      "id": "cities-rental-fluctuation",
+      "dashboard_url": "https://public.tableau.com/app/profile/olivier.maene8069/viz/Citiesv2_2-Econ/Econ_Dashboard2",
+      "question": "Between the trends in office rental growth and retail rental growth from 2017-2022, which one fluctuates more?",
+      "expected_answer": "Office Rental Growth",
+      "scored": false
+    }
+  ]
+}

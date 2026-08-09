@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "./src/perception.js";
 import { runSession } from "./src/orchestrator.js";
 import * as store from "./src/store.js";
+import { normalizeTableauViewUrl } from "./src/tableauUrl.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf-8"));
@@ -77,6 +78,9 @@ async function main() {
     const label = q.id ?? q.question.slice(0, 60);
     console.log(`[${i + 1}/${questions.length}] ${label}`);
     const startedAt = Date.now();
+    // Question files keep the dataset's URL verbatim for provenance; the
+    // embed-form rewrite happens here at run time. See tableauUrl.js.
+    const { url: dashboardUrl } = normalizeTableauViewUrl(q.dashboard_url);
 
     let result;
     try {
@@ -86,7 +90,7 @@ async function main() {
       result = await runSession({
         browser,
         config,
-        dashboardUrl: q.dashboard_url,
+        dashboardUrl,
         dashboardName: null,
         question: q.question,
         onEvent: () => {}, // per-step detail already lands in the DB

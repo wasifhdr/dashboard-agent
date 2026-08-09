@@ -8,15 +8,21 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { launchBrowser } from "./src/perception.js";
 import { runSession } from "./src/orchestrator.js";
+import { normalizeTableauViewUrl } from "./src/tableauUrl.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf-8"));
 
-const [, , vizUrl, question] = process.argv;
-if (!vizUrl || !question) {
-  console.error('Usage: node run.js <tableau-views-url> "<question>"');
+const [, , vizUrlRaw, question] = process.argv;
+if (!vizUrlRaw || !question) {
+  console.error('Usage: node run.js <tableau-url> "<question>"');
   process.exit(1);
 }
+// Tableau Public shows /app/profile/<p>/viz/<wb>/<view> in the address bar, so
+// that is the URL a user copies - but only /views/<wb>/<view> embeds. Both
+// return 200, so an un-rewritten browse URL just burns the 90s open timeout.
+const { url: vizUrl, rewritten } = normalizeTableauViewUrl(vizUrlRaw);
+if (rewritten) console.log(`Rewrote browse URL to embed form: ${vizUrl}`);
 
 function onEvent(evt) {
   switch (evt.type) {
