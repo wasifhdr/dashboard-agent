@@ -8,28 +8,32 @@
       "dashboard_url": "https://public.tableau.com/app/profile/chloedotbrown/viz/AirBnBinEastvs_WestBerlin/AirBnBBerlin",
       "question": "Is the average number of beds for Houses higher than that of All types, Apartments, and Hotels/Hostels?",
       "expected_answer": "No",
-      "scored": false
+      "scored": true,
+      "expect": [{ "first": ["no", "yes"] }]
     },
     {
       "id": "energy-growth-compare",
       "dashboard_url": "https://public.tableau.com/app/profile/alexandervar/viz/EnergyConsumptionAnimated/EnergyConsumption",
       "question": "If both nuclear and natural gas consumption increased from 1960 to 2010, which one grew faster during that time based on the charts?",
       "expected_answer": "Natural gas",
-      "scored": false
+      "scored": true,
+      "expect": [{ "first": ["natural gas", "nuclear"] }]
     },
     {
       "id": "crsi-pledges-metro-vs-regional",
       "dashboard_url": "https://public.tableau.com/app/profile/refugee.council.of.australia/viz/CRSIPledges/CRSIPledges",
       "question": "Between NSW, QLD, and TAS State, can you list which of these have more pledges that states 'I am interested in providing friendship or recreational activities', and 'I am interested in helping a refugee get set up with school enrolments opening bank accounts, transport etc', in the 'Metropolitan' compared to 'Regional' location?",
       "expected_answer": "NSW, QLD",
-      "scored": false
+      "scored": true,
+      "expect": [{ "word": "nsw" }, { "word": "qld" }, { "not": { "word": "tas" } }]
     },
     {
       "id": "cities-rental-fluctuation",
       "dashboard_url": "https://public.tableau.com/app/profile/olivier.maene8069/viz/Citiesv2_2-Econ/Econ_Dashboard2",
       "question": "Between the trends in office rental growth and retail rental growth from 2017-2022, which one fluctuates more?",
       "expected_answer": "Office Rental Growth",
-      "scored": false
+      "scored": true,
+      "expect": [{ "first": ["office", "retail"] }]
     }
   ]
 }

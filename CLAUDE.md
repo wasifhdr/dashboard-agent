@@ -98,6 +98,7 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 | `actionSchema.js` | zod discriminated union — 8 action types (`set_filter`, `set_range_filter`, `set_parameter`, `switch_sheet`, `wait`, `answer`, `fail`, `click`). **None advances a story point.** |
 | `actuator.js` | Executes a validated action against `__agentBridge`; case-insensitive domain matching + near-match suggestions; 30s timeout. |
 | `pixelGuard.js` | Dead-click proximity guard for pixel mode. |
+| `discoveries.js` | Session-scoped hard-data memory: the model's per-step `discovery` string, normalized, deduped on the STAMPED form, capped at 40, and rendered back into every prompt as `CONFIRMED DISCOVERIES`. `stampFromInventory` derives the filter state a reading was taken under. Pure; owned by `conversationRuntime` so it spans turns and dies with the conversation. |
 | `store.js` | better-sqlite3: `conversations`, `sessions` (one row per turn), `steps`, `takeovers`. WAL, frames never deleted. Migrations are guarded `ALTER TABLE` / table-rebuild. |
 | `server.js` | Express: sessions + conversations REST, `/events` SSE, `/api/config`, `/api/dashboards/meta`, `/api/search`, `/api/tts`, static `/frames`, plus the WebSocket screencast/input endpoint. `adaptAndPublish()` translates internal step events into the SSE contract. One-turn-at-a-time mutex. `/api/conversations/active` MUST stay registered before `/api/conversations/:id`, or the `:id` route captures the literal string "active". |
 | `sessionBus.js` | Per-session event buffer + fan-out so a mid-run SSE client gets full replay then live. |
@@ -110,6 +111,10 @@ No local model server is involved. The backend needs `GEMINI_API_KEY` in the rep
 ## Frozen vs. mutable
 
 The **agent core is frozen**: don't casually rewrite `vlmClient.js` prompts, `actionSchema.js`, `actuator.js`, or `perception.js`. Changes there need a real reason and a re-run of `npm run eval -- eval/questions.json` — these modules fail *silently*, degrading answer quality without throwing, so no unit test catches a regression in them. Check the accuracy number, not just that it completed. Normal edit surface: `frontend/src/`, server event plumbing, `config.json`, and the newer modules (`tableauSearch.js`, `viability.js`, `conversationRuntime.js`).
+
+`StepResponseSchema.discovery` is optional **and** nullable on purpose: making it
+required turns a cosmetic omission into an `invalid_json` step, and three of those
+in a row end the run.
 
 ## `config.dashboards` is a shortcut, not a class
 
@@ -132,6 +137,15 @@ The five entries in `config.json` are a **landing-page starting list and demo sa
 - **The Browser pane can't test debounce** — synthetic keystrokes land 4–11s apart, exceeding any debounce in the app. Verify debounce by reading code, never by counting requests.
 - **Dense fine-grained charts** are hard to verify even by manual human inspection — don't treat a model answer on that class as ground truth.
 - **Tableau Public has two URL shapes and only one of them embeds.** The address bar shows `/app/profile/<profile>/viz/<workbook>/<view>` while you browse a viz — so that is what a user copies — but `<tableau-viz>` can only load `/views/<workbook>/<view>`. Both return HTTP 200 (Tableau serves the same SPA shell), so you cannot tell them apart with a fetch; the browse form simply never reports interactive, burning openSession's full 90s and then failing. `tableauUrl.js` rewrites it at the top of `createConversationInternal`, so both the REST route and the `/api/sessions` shim get it and the conversation row stores the URL that works.
+- **The prompt carries all prior ACTIONS but only the current frame.** `history` is
+  never truncated, but no earlier screenshot, thought, or raw response is ever
+  re-sent. That is why `discoveries.js` exists — before it, a question needing two
+  readings could not be answered, because nothing carried a number from one
+  screenshot to the next.
+- **`eval.js` and `run.js` normalize the dashboard URL themselves.** `server.js` is
+  not the only place that needs `normalizeTableauViewUrl` — a browse-form URL in a
+  question file burns the 90s open timeout and fails with no visible cause, because
+  both URL forms return HTTP 200.
 - **`api.js` must never call `res.json()` unguarded.** The Vite dev proxy answers with an **empty 500** when the backend is down or mid-restart, and parsing that threw `Failed to execute 'json' on 'Response': Unexpected end of JSON input` — which the Watch screen then rendered *as the reason the dashboard failed to open*, hiding the real cause. `jsonOrThrow` reads the body defensively and falls back to the status. Beware when diagnosing: PowerShell 5.1's `Invoke-WebRequest` error path often reports `bodyLen=0` for a response that really did have a JSON body, so confirm an "empty body" from the browser, not from PowerShell.
 - **The shared browser can die while the backend stays up, and it lies about it.** Observed: every dashboard open — curated, pasted _and_ searched — failed with "opening the dashboard timed out after 150s", permanently, until the backend was restarted. The headless process was alive and `Responding`, `isConnected()` returned true, but it sat at zero CPU with **no renderer child** and `browser.newContext()` never resolved. Playwright puts no default timeout on `newContext()`, so the open burned the full `conversationOpenTimeoutMs` every time. Diagnostic that settles it in one shot: `Get-CimInstance Win32_Process -Filter "ParentProcessId = <backend pid>"` — a healthy open spawns a renderer and moves the browser's CPU; a wedged one does neither. `browserHealth.js` now runs a **bounded** `newContext`+`close` round-trip before each open and relaunches the browser if it fails, so this self-heals (~6s) instead of bricking the session. Don't "optimize" that probe into an `isConnected()` check — that flag was true the whole time — and never `await` the dead browser's `close()`, which hangs for the same reason.
 - **The resume path must never call `ensureConversation()`** — `POST /api/conversations` makes the server close the previous runtime, so "simplifying" the two live-mode entry points in `useSessionStream` into one destroys the session being resumed. The symptom is a dashboard that silently reloads and loses its filters, not an error.
