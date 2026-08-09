@@ -448,17 +448,22 @@ body {
 }
 
 /* Brand wordmark — the product name in the header and footer, and nowhere else.
-   Transcity is not on Google Fonts or fontsource, so it ships as a local file
-   from public/fonts/ (converted from the vendor .otf) rather than as a
-   dependency. It carries LETTERS AND SPACE ONLY — no digits, no punctuation —
-   so it must never be applied to anything but the two-word product name.
+   Bungee Shade (a free Google Font, OFL) ships as a local file from
+   public/fonts/ rather than a CDN/npm dependency, and — unlike the two unused
+   @font-face rules below it — is actually committed to the repo (see
+   public/fonts/README.md for why that's licence-safe here).
 
    The URL is a /public path rather than a src/ import on purpose: Vite resolves
    src/ url() references at build time and fails the build outright if the file
    is absent, whereas this degrades to the Inter fallback below. NOTE that in
    dev a missing file here does NOT 404 — Vite answers unknown /public paths
    with the SPA index.html at 200, so the browser logs "OTS parsing error"
-   repeatedly instead. That is the signature of the font having gone missing. */
+   repeatedly instead. That is the signature of the font having gone missing.
+
+   Transcity and Bilderberg were earlier wordmark candidates, now unused —
+   their rules are kept only because the font files may still exist locally
+   (both are git-ignored; see public/fonts/README.md). Neither is referenced
+   by any font-family below. */
 @font-face {
   font-family: "Transcity";
   src: url("/fonts/Transcity.woff2") format("woff2");

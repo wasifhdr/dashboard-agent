@@ -9,10 +9,12 @@ An agent that answers questions about interactive Tableau Public dashboards **by
 Branded **"Dashboard Agent"** in the frontend, matching the repo name. It was called *Docent*
 until 2026-08-09; that name is gone from the code, the docs, and the `localStorage` keys, so a
 `Docent` hit anywhere means something was missed. The wordmark (header + footer) is the sole user
-of the **Transcity** display face via `.brand-wordmark`; everything else stays on Inter/JetBrains
-Mono. Transcity is not on any CDN — it loads from `frontend/public/fonts/` and falls back to Inter
-if that file is absent (see the README there, and the `@font-face` comment in `index.css` for why
-the URL is a `public/` path and not a `src/` import).
+of the **Bungee Shade** display face via `.brand-wordmark`; everything else stays on Inter/JetBrains
+Mono. Bungee Shade is a free Google Font (OFL) — unlike the two earlier wordmark candidates it
+replaced (Transcity, Bilderberg, both git-ignored for licence reasons), it's committed to the repo
+normally at `frontend/public/fonts/bungee.shade-regular.woff2` and falls back to Inter only as a
+loading-state safety net, not a licence dodge (see the README there, and the `@font-face` comment in
+`index.css` for why the URL is a `public/` path and not a `src/` import).
 
 Public repo: <https://github.com/wasifhdr/dashboard-agent>. README.md is now written for that audience — keep it public-facing, not a build log.
 

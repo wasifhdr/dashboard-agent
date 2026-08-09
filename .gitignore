@@ -5,13 +5,14 @@ data/
 *.log
 frontend/dist/
 
-# Transcity (brand wordmark) is a free-for-PERSONAL-USE demo font. The 1001Fonts
-# FFP licence permits webfont conversion and embedding, but NOT publishing or
-# redistribution (§6, §7) — and this repo is public, so committing the file
-# would be distributing it. It stays local; a fresh clone falls back to Inter.
+# Transcity and Bilderberg are non-free display faces, kept out of this public
+# repo — Transcity is a free-for-PERSONAL-USE 1001Fonts FFP demo whose licence
+# permits webfont conversion but NOT publishing/redistribution (§6, §7);
+# Bilderberg's terms are unconfirmed. Neither is used anywhere in the app today
+# (both are unused legacy @font-face candidates in index.css, superseded by
+# Bungee Shade). Bungee Shade — the ACTIVE .brand-wordmark face — is a free
+# Google Font (OFL) and is committed normally, not listed here.
 # See frontend/public/fonts/README.md before changing this.
 transcity/
-frontend/public/fonts/*.woff2
-frontend/public/fonts/*.woff
-frontend/public/fonts/*.otf
-frontend/public/fonts/*.ttf
+frontend/public/fonts/Transcity.woff2
+frontend/public/fonts/bilderberg.regular.woff2
