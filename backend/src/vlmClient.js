@@ -90,9 +90,10 @@ On each turn you are shown:
 - The current dashboard screenshot
 - An inventory of the controls you can operate, each with a stable id (e.g. F1, P2, S1)
 - A short history of your previous actions and their outcomes
+- CONFIRMED DISCOVERIES: hard facts you recorded on earlier steps of this session
 
 Respond with STRICT JSON ONLY (no markdown, no extra commentary, no text outside the JSON object), matching exactly this shape:
-{"thought": "<= 2 sentences explaining your reasoning", "action": { ... }}
+{"discovery": "<hard data visible in this screenshot, or null>", "thought": "<= 2 sentences explaining your reasoning", "action": { ... }}
 
 The "action" object must be exactly one of these shapes:
 - {"type":"set_filter","target_id":"F1","values":["Asia"]}
@@ -106,11 +107,19 @@ The "action" object must be exactly one of these shapes:
 Rules:
 1. Exactly one action per turn.
 2. Only use target_id values that appear in the CURRENT inventory below - ids can change between turns if the dashboard changes.
-3. Prefer "answer" as soon as the current screenshot shows everything needed - do not take extra actions once you already have enough information.
+3. Prefer "answer" as soon as CONFIRMED DISCOVERIES plus the current screenshot contain everything needed - do not take extra actions once you already have enough information.
 4. Never repeat an action you have already performed successfully - check the history below first; repeating is rejected and wastes a turn.
 5. Only use "wait" if the dashboard visibly appears to still be loading or updating; never use it more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it.
-7. set_filter is for categorical filters only; set_range_filter is for range (numeric/date) filters only - check each filter's "type" in the inventory.`;
+7. set_filter is for categorical filters only; set_range_filter is for range (numeric/date) filters only - check each filter's "type" in the inventory.
+
+RECORDING DISCOVERIES:
+"discovery" records hard data visible in the CURRENT screenshot that you will need later.
+- Numbers, names, labels, textual facts. Max 15 words.
+- ALWAYS name what the value belongs to. Write "House avg beds = 3.3", never "avg beds = 3.3".
+- Record NOTHING about the UI: not what is open or closed, not where a control is, not what you clicked.
+- If this screenshot shows no new hard data, use null.
+Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.`;
 
 const PIXEL_SYSTEM_TEMPLATE = (question) => `You are an agent that answers a question about a live, interactive Tableau dashboard by OPERATING IT WITH MOUSE CLICKS, then answering.
 
@@ -120,6 +129,7 @@ On each turn you are shown:
 - The current dashboard screenshot
 - An inventory of the controls that exist (for reference — it tells you WHAT is there, but you must act by CLICKING, not by id)
 - A short history of your previous actions and their outcomes
+- CONFIRMED DISCOVERIES: hard facts you recorded on earlier steps of this session
 
 You interact ONLY by clicking. Emit a click as normalized fractions of the image: nx is the horizontal fraction (0 = left edge, 1 = right edge), ny is the vertical fraction (0 = top edge, 1 = bottom edge). Aim at the CENTER of the control you want.
 
@@ -130,7 +140,7 @@ Estimate that center as accurately as you can. Your point is then checked by zoo
 "target" must name the exact element you are clicking — the specific row, bar, tab or button (e.g. "the 'TV Show' row in the open Type list"), never a general area or the parent control.
 
 Respond with STRICT JSON ONLY (no markdown, no commentary), matching exactly:
-{"thought": "<= 2 sentences", "action": { ... }}
+{"discovery": "<hard data visible in this screenshot, or null>", "thought": "<= 2 sentences", "action": { ... }}
 
 The "action" object must be exactly one of:
 - {"type":"click","nx":0.42,"ny":0.13,"target":"ZRI tab"}
@@ -141,17 +151,32 @@ The "action" object must be exactly one of:
 Rules:
 1. Exactly one action per turn.
 2. To operate a control that opens (a dropdown, a filter list), click it once, then WAIT for the next screenshot and click the value you want.
-3. Prefer "answer" as soon as the screenshot shows everything needed.
+3. Prefer "answer" as soon as CONFIRMED DISCOVERIES plus the screenshot show everything needed.
 4. If a click produces no visible change, you missed the control or it is not on screen — NEVER repeat the same or a nearby click. Move to a clearly different location. If several clicks in a row change nothing, stop targeting that control: answer from what is visible, or fail.
 5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
-6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.`;
+6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.
 
-function buildPrompt({ question, inventory, history, correctiveFeedback, mode = "api" }) {
+RECORDING DISCOVERIES:
+"discovery" records hard data visible in the CURRENT screenshot that you will need later.
+- Numbers, names, labels, textual facts. Max 15 words.
+- ALWAYS name what the value belongs to. Write "House avg beds = 3.3", never "avg beds = 3.3".
+- Record NOTHING about the UI: not what is open or closed, not where a control is, not what you clicked.
+- If this screenshot shows no new hard data, use null.
+Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.`;
+
+function buildPrompt({ question, inventory, history, discoveries = "", correctiveFeedback, mode = "api" }) {
   const systemText = mode === "pixel" ? PIXEL_SYSTEM_TEMPLATE(question) : SYSTEM_TEMPLATE(question);
   const historyText = history.length ? history.map(formatHistoryLine).join("\n") : "(no actions taken yet)";
   const invText = formatInventoryForPrompt(inventory);
 
   let userText = `CURRENT INVENTORY:\n${invText}\n\nHISTORY:\n${historyText}\n`;
+  // After HISTORY and before FEEDBACK: "what I did" then "what I learned"
+  // read together, and the facts sit closest to the decision point. Omitted
+  // entirely when empty - an empty labeled section costs tokens and invites
+  // the model to fill it.
+  if (discoveries) {
+    userText += `\n${discoveries}\n`;
+  }
   if (correctiveFeedback) {
     userText += `\nFEEDBACK ON YOUR LAST RESPONSE:\n${correctiveFeedback}\n`;
   }
@@ -478,7 +503,7 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
 // Up to 3 total attempts (1 initial + 2 re-prompts) before giving up
 // (AGENT_PLAN.md 6.2: "up to 2 re-prompts... a 3rd failure records the step
 // as invalid_json").
-export async function getNextAction({ config, question, inventory, history, imagePath, correctiveFeedback, onAttempt = () => {}, stopSignal }) {
+export async function getNextAction({ config, question, inventory, history, discoveries = "", imagePath, correctiveFeedback, onAttempt = () => {}, stopSignal }) {
   let feedback = correctiveFeedback;
   let lastRaw = null;
   let lastNetworkError = null;
@@ -506,7 +531,7 @@ export async function getNextAction({ config, question, inventory, history, imag
     // the orchestrator's post-call shouldStop() check ends the run promptly.
     if (stopSignal?.aborted) break;
     if (attempt >= 2) onAttempt(attempt);
-    const { systemText, userText } = buildPrompt({ question, inventory, history, correctiveFeedback: feedback, mode: config.actuationMode ?? "pixel" });
+    const { systemText, userText } = buildPrompt({ question, inventory, history, discoveries, correctiveFeedback: feedback, mode: config.actuationMode ?? "pixel" });
 
     let raw;
     try {
