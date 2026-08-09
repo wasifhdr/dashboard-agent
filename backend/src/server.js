@@ -17,6 +17,7 @@ import { searchWorkbooks } from "./tableauSearch.js";
 import { describeActiveConversation } from "./activeConversation.js";
 import { withTimeout, openGuardDecision } from "./openGuard.js";
 import { ensureHealthyBrowser } from "./browserHealth.js";
+import { normalizeTableauViewUrl } from "./tableauUrl.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -345,6 +346,17 @@ function waitForTurnToStop(timeoutMs) {
 // `conversationOpening` (checked/set here, synchronously, before the first
 // await) protects against two overlapping calls racing each other.
 async function createConversationInternal({ dashboardUrl, dashboardName }) {
+  // Done here rather than in either caller so both entry points (this REST
+  // route and the /api/sessions shim) get it, and so the conversation row is
+  // stored with the URL that actually works. See tableauUrl.js: the browse-form
+  // URL is what a user copies out of the address bar, and without this it just
+  // burns openSession's 90s timeout and fails.
+  const normalized = normalizeTableauViewUrl(dashboardUrl);
+  if (normalized.rewritten) {
+    console.log(`[conversations] rewrote browse URL to embed form: ${dashboardUrl} -> ${normalized.url}`);
+    dashboardUrl = normalized.url;
+  }
+
   const guard = openGuardDecision({
     opening: conversationOpening,
     openingSince: conversationOpeningSince,

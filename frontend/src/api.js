@@ -1,6 +1,42 @@
 // Thin REST/SSE client. Relative URLs go through the Vite dev proxy to the
 // backend (see vite.config.js), so no base URL or CORS handling is needed.
 
+// A response body is NOT guaranteed to be JSON, even from our own endpoints:
+// when the backend is down or mid-restart the Vite dev proxy answers with an
+// empty 500 of its own. Calling res.json() on that throws "Failed to execute
+// 'json' on 'Response': Unexpected end of JSON input", which then got rendered
+// to the user as the reason the dashboard failed to open - hiding the real
+// cause behind a parser message. Read the body defensively and let the caller
+// report the status instead.
+async function readJsonBody(res) {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+// Shared shape for the mutating endpoints: parse if we can, and on failure
+// prefer the backend's own { error } message, falling back to something that
+// still says what happened.
+async function jsonOrThrow(res, label) {
+  const body = await readJsonBody(res);
+  if (!res.ok) {
+    const err = new Error(
+      body?.error ||
+        (body === null
+          ? `${label} failed: ${res.status} — no readable response from the backend. Is it still running?`
+          : `${label} failed: ${res.status}`),
+    );
+    err.status = res.status;
+    throw err;
+  }
+  if (body === null) throw new Error(`${label} returned an empty response.`);
+  return body;
+}
+
 export async function getConfig() {
   const res = await fetch("/api/config");
   if (!res.ok) throw new Error(`GET /api/config failed: ${res.status}`);
@@ -64,24 +100,12 @@ export async function startSession({ dashboardUrl, dashboardName, question }) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dashboard_url: dashboardUrl, dashboard_name: dashboardName, question }),
   });
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `POST /api/sessions failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { id }
+  return jsonOrThrow(res, "POST /api/sessions"); // { id }
 }
 
 export async function stopSession(id) {
   const res = await fetch(`/api/sessions/${id}/stop`, { method: "POST" });
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `POST /api/sessions/${id}/stop failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { ok: true }
+  return jsonOrThrow(res, `POST /api/sessions/${id}/stop`); // { ok: true }
 }
 
 export async function createConversation({ dashboardUrl, dashboardName }) {
@@ -90,13 +114,7 @@ export async function createConversation({ dashboardUrl, dashboardName }) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dashboard_url: dashboardUrl, dashboard_name: dashboardName }),
   });
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `POST /api/conversations failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { conversation_id }
+  return jsonOrThrow(res, "POST /api/conversations"); // { conversation_id }
 }
 
 export async function postTurn(conversationId, question) {
@@ -105,24 +123,12 @@ export async function postTurn(conversationId, question) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
   });
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `POST /api/conversations/${conversationId}/turns failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { session_id, turn_index }
+  return jsonOrThrow(res, `POST /api/conversations/${conversationId}/turns`); // { session_id, turn_index }
 }
 
 export async function getConversation(id) {
   const res = await fetch(`/api/conversations/${id}`);
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `GET /api/conversations/${id} failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { conversation, turns, takeovers }
+  return jsonOrThrow(res, `GET /api/conversations/${id}`); // { conversation, turns, takeovers }
 }
 
 // Which conversation is live on the backend right now, if any. Always 200:
@@ -142,13 +148,7 @@ export async function listConversations() {
 
 export async function closeConversation(id) {
   const res = await fetch(`/api/conversations/${id}/close`, { method: "POST" });
-  const body = await res.json();
-  if (!res.ok) {
-    const err = new Error(body.error || `POST /api/conversations/${id}/close failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  return body; // { ok: true }
+  return jsonOrThrow(res, `POST /api/conversations/${id}/close`); // { ok: true }
 }
 
 // Opens the live-view WebSocket for a conversation. The server streams
