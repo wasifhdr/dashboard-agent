@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS steps (
   session_id TEXT REFERENCES sessions(id),
   step_idx INTEGER,
   thought TEXT,
+  discovery TEXT,
   action_json TEXT,
   action_status TEXT,
   error_msg TEXT,
@@ -120,6 +121,12 @@ try {
   if (!String(e.message).includes("duplicate column")) throw e;
 }
 
+try {
+  db.exec(`ALTER TABLE steps ADD COLUMN discovery TEXT`);
+} catch (e) {
+  if (!String(e.message).includes("duplicate column")) throw e;
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS takeovers (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,8 +174,8 @@ export function createSession({
 
 export function insertStep(step) {
   db.prepare(
-    `INSERT INTO steps (session_id, step_idx, thought, action_json, action_status, error_msg, frame_raw_path, overlay_json, inventory_json, settle_timeout, started_at, duration_ms)
-     VALUES (@session_id, @step_idx, @thought, @action_json, @action_status, @error_msg, @frame_raw_path, @overlay_json, @inventory_json, @settle_timeout, @started_at, @duration_ms)`,
+    `INSERT INTO steps (session_id, step_idx, thought, discovery, action_json, action_status, error_msg, frame_raw_path, overlay_json, inventory_json, settle_timeout, started_at, duration_ms)
+     VALUES (@session_id, @step_idx, @thought, @discovery, @action_json, @action_status, @error_msg, @frame_raw_path, @overlay_json, @inventory_json, @settle_timeout, @started_at, @duration_ms)`,
   ).run(step);
 }
 
