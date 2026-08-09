@@ -13,6 +13,7 @@ import { getNextAction, refineClickPoint, activeModelName } from "./vlmClient.js
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint } from "./pixelGuard.js";
+import { createDiscoveryLog, stampFromInventory } from "./discoveries.js";
 
 function actionKey(action) {
   switch (action.type) {
@@ -52,7 +53,7 @@ async function findWidgetBbox(page, labelText) {
   return null;
 }
 
-async function forceBestEffortAnswer({ config, question, inventory, history, framePath }) {
+async function forceBestEffortAnswer({ config, question, inventory, history, discoveries, framePath }) {
   const feedback =
     "You have reached the maximum number of steps. Based on everything you have seen so far, provide your " +
     'best-effort final answer NOW. You must respond with an "answer" action (or "fail" only if truly impossible).';
@@ -61,6 +62,7 @@ async function forceBestEffortAnswer({ config, question, inventory, history, fra
     question,
     inventory,
     history,
+    discoveries,
     imagePath: framePath,
     correctiveFeedback: feedback,
   });
@@ -101,6 +103,10 @@ export async function runSession({
   ownsPage = true,
   conversationId = null,
   turnIndex = null,
+  // Session-scoped hard-data memory. The conversation runtime passes its own
+  // so facts survive across turns on one dashboard; standalone callers (CLI,
+  // eval) get a fresh per-run log and need no change.
+  discoveryLog: providedDiscoveryLog = null,
 }) {
   // Allows a caller (the server, for POST /api/sessions) to generate and
   // return the id synchronously before the run completes; the CLI just lets
@@ -140,6 +146,10 @@ export async function runSession({
   onEvent({ type: "session_started", sessionId, dashboardUrl, question });
 
   const tracker = createInventoryTracker();
+  const discoveryLog = providedDiscoveryLog ?? createDiscoveryLog();
+  // Emitted at most once per session - a cap warning per step would be noise.
+  let discoveryCapWarned = false;
+  let stepDiscovery = null;
   const history = [];
   let invalidCount = 0;
   let consecutiveWaits = 0;
@@ -187,6 +197,7 @@ export async function runSession({
       session_id: sessionId,
       step_idx: idx,
       thought,
+      discovery: stepDiscovery,
       action_json: action ? JSON.stringify(action) : null,
       action_status: status,
       error_msg: errorMsg,
@@ -209,6 +220,7 @@ export async function runSession({
       type: "step",
       idx,
       thought,
+      discovery: stepDiscovery,
       action,
       action_status: status,
       error_msg: errorMsg,
@@ -254,6 +266,7 @@ export async function runSession({
     }
 
     idx++;
+    stepDiscovery = null;
     const stepStartedAt = Date.now();
     onEvent({ type: "step_started", idx });
 
@@ -279,11 +292,12 @@ export async function runSession({
       }
     }
 
-    const { valid, thought, action, rawText, errorKind, errorMessage } = await getNextAction({
+    const { valid, discovery, thought, action, rawText, errorKind, errorMessage } = await getNextAction({
       config,
       question,
       inventory: inv,
       history,
+      discoveries: discoveryLog.format(),
       imagePath: framePath,
       correctiveFeedback,
       onAttempt: (attempt) => onEvent({ type: "vlm_attempt", idx, attempt }),
@@ -341,7 +355,27 @@ export async function runSession({
     // 15-step run killed the session and blamed a streak that never happened.
     invalidCount = 0;
 
-    onEvent({ type: "thought", idx, text: thought });
+    // Recorded BEFORE the action runs, and kept even if the action is then
+    // rejected by the loop guard or the zoom-refine pass: a rejected click
+    // does not invalidate the reading. The model looked at this frame and read
+    // a number off it; whether its aim was any good is a separate question.
+    // Rejected steps are common in pixel mode, so discarding their readings
+    // would throw away a large share of what the agent learns.
+    const recorded = discoveryLog.add({
+      text: discovery,
+      turnIndex,
+      stepIdx: idx,
+      stateStamp: stampFromInventory(inv),
+    });
+    // What is shown and stored is what actually entered memory, so the UI can
+    // never imply the agent learned something it discarded as a duplicate.
+    stepDiscovery = recorded.accepted ? recorded.text : null;
+    if (recorded.evicted && !discoveryCapWarned) {
+      discoveryCapWarned = true;
+      onEvent({ type: "warning", idx, kind: "discovery_cap" });
+    }
+
+    onEvent({ type: "thought", idx, text: thought, discovery: stepDiscovery });
 
     onEvent({
       type: "action_planned",
@@ -687,7 +721,14 @@ export async function runSession({
     onEvent({ type: "warning", idx, kind: "max_steps" });
     const rawInv = await page.evaluate(() => window.__agentBridge.getInventory());
     const inv = tracker.normalize(rawInv);
-    const forced = await forceBestEffortAnswer({ config, question, inventory: inv, history, framePath: prevFramePath });
+    const forced = await forceBestEffortAnswer({
+      config,
+      question,
+      inventory: inv,
+      history,
+      discoveries: discoveryLog.format(),
+      framePath: prevFramePath,
+    });
     idx++;
     persistAndEmit({
       idx,
