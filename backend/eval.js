@@ -22,6 +22,7 @@ import { launchBrowser } from "./src/perception.js";
 import { runSession } from "./src/orchestrator.js";
 import * as store from "./src/store.js";
 import { normalizeTableauViewUrl } from "./src/tableauUrl.js";
+import { matchesExpect } from "./src/evalMatch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf-8"));
@@ -46,23 +47,6 @@ if (parsed.verified_on) {
 function csvEscape(v) {
   const s = String(v ?? "");
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-// An `expect` entry is a list of requirements, ALL of which must hold:
-//   "nintendo"            -> the answer must contain this substring
-//   ["kennedy", "jfk"]    -> the answer must contain at least ONE of these
-// Matching is case-insensitive. Returns null when the question is not scored,
-// which is deliberately distinct from false - two questions in the shipped set
-// have no establishable ground truth and must not be counted either way.
-function matchesExpect(answer, q) {
-  if (q.scored === false || !q.expect || !q.expect.length) return null;
-  const hay = String(answer ?? "").toLowerCase();
-  if (!hay) return false;
-  return q.expect.every((req) =>
-    Array.isArray(req)
-      ? req.some((alt) => hay.includes(String(alt).toLowerCase()))
-      : hay.includes(String(req).toLowerCase()),
-  );
 }
 
 async function main() {
