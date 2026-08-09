@@ -30,6 +30,7 @@ function mapStoredStepToStep(s) {
     pending: false,
     attempt: null,
     thought: s.thought,
+    discovery: s.discovery ?? null,
     planned: s.action ? { action: s.action, label: s.overlay?.action_badge?.text ?? s.action.type } : null,
     action: s.action,
     actionStatus: s.action_status,
@@ -80,6 +81,7 @@ function blankStep(idx) {
     pending: false,
     attempt: null,
     thought: null,
+    discovery: null,
     planned: null,
     action: null,
     actionStatus: null,
@@ -134,7 +136,7 @@ function reduceEvent(run, evt) {
     case "vlm_attempt":
       return { ...run, steps: upsertStep(run.steps, evt.idx, { attempt: evt.attempt }) };
     case "thought":
-      return { ...run, steps: upsertStep(run.steps, evt.idx, { thought: evt.text }) };
+      return { ...run, steps: upsertStep(run.steps, evt.idx, { thought: evt.text, discovery: evt.discovery ?? null }) };
     case "action_planned":
       return { ...run, steps: upsertStep(run.steps, evt.idx, { planned: { action: evt.action, label: evt.label } }) };
     case "widget_bbox": {

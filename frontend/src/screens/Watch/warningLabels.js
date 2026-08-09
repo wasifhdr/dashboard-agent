@@ -5,6 +5,7 @@ export const WARNING_LABEL = {
   settle_timeout: "A dashboard update took longer than expected to visually settle before being screenshotted.",
   wall_clock_timeout: "The session exceeded its overall time budget.",
   max_steps: "Reached the maximum step budget before answering.",
+  discovery_cap: "The agent has recorded a lot of facts this session — the oldest are being dropped from its memory.",
 };
 
 // Verdict reasons from the read-only viability inspection (viability.js).

@@ -92,6 +92,20 @@ function ThoughtDisclosure({ text, active }) {
   );
 }
 
+// A fact the model recorded off this step's screenshot. Unlike the thought,
+// this is NOT hidden behind a disclosure: it is data the agent will still be
+// using ten steps from now, and the whole point of showing it is to make the
+// accumulating memory visible while the run happens.
+function DiscoveryLine({ text }) {
+  if (!text) return null;
+  return (
+    <div className="mt-1 flex items-baseline gap-2 pl-3.5">
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-gold-ink/70">Discovery</span>
+      <span className="font-mono text-xs leading-relaxed text-fg/75">{text}</span>
+    </div>
+  );
+}
+
 // "(0.43,0.68)" for a click action, or "" when the coordinates aren't there.
 // Only ever used to annotate a rejection, so an action without them degrades to
 // the message alone rather than printing "(NaN,NaN)".
@@ -189,6 +203,7 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
       {revealMode !== "pending" && !isInvalid && (
         <>
           <ThoughtDisclosure text={step.thought} active={revealMode === "typing"} />
+          <DiscoveryLine text={step.discovery} />
           {step.planned && step.planned.label !== "Answer" && (revealMode === "action-pending" || revealMode === "resolved") && (
             <ActionLine step={step} pending={revealMode === "action-pending"} />
           )}
@@ -237,6 +252,7 @@ function LiveStepCard({ step, isSelected, onSelect }) {
       {step.thought && !isInvalid && (
         <>
           <ThoughtDisclosure text={step.thought} active={!step.planned} />
+          <DiscoveryLine text={step.discovery} />
           {step.planned && step.planned.label !== "Answer" && <ActionLine step={step} pending={step.actionStatus == null} />}
         </>
       )}
