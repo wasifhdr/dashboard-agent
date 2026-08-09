@@ -57,7 +57,7 @@ async function forceBestEffortAnswer({ config, question, inventory, history, dis
   const feedback =
     "You have reached the maximum number of steps. Based on everything you have seen so far, provide your " +
     'best-effort final answer NOW. You must respond with an "answer" action (or "fail" only if truly impossible).';
-  const { valid, thought, action } = await getNextAction({
+  const { valid, discovery, thought, action } = await getNextAction({
     config,
     question,
     inventory,
@@ -68,11 +68,12 @@ async function forceBestEffortAnswer({ config, question, inventory, history, dis
   });
 
   if (valid && (action.type === "answer" || action.type === "fail")) {
-    return { thought, action };
+    return { thought, action, discovery };
   }
   return {
     thought: thought ?? "(no valid final response within the step budget)",
     action: { type: "fail", reason: "Model did not provide a usable answer within the step budget." },
+    discovery: null,
   };
 }
 
@@ -730,6 +731,21 @@ export async function runSession({
       framePath: prevFramePath,
     });
     idx++;
+    // The forced call gets the same treatment as every regular step: its own
+    // discovery (if any) is recorded into the log, and stepDiscovery is set
+    // from what actually entered the log - not left over from the last
+    // regular loop iteration, and not the raw model output.
+    const forcedRecorded = discoveryLog.add({
+      text: forced.discovery,
+      turnIndex,
+      stepIdx: idx,
+      stateStamp: stampFromInventory(inv),
+    });
+    stepDiscovery = forcedRecorded.accepted ? forcedRecorded.text : null;
+    if (forcedRecorded.evicted && !discoveryCapWarned) {
+      discoveryCapWarned = true;
+      onEvent({ type: "warning", idx, kind: "discovery_cap" });
+    }
     persistAndEmit({
       idx,
       thought: forced.thought,
