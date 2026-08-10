@@ -13,7 +13,7 @@ import { getNextAction, refineClickPoint, locateTarget, activeModelName } from "
 import { resolveClickPoint } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
-import { isNearDeadPoint } from "./pixelGuard.js";
+import { isNearDeadPoint, isNearDeadScroll, clearStaleGuards } from "./pixelGuard.js";
 import { createDiscoveryLog, stampFromInventory } from "./discoveries.js";
 
 function actionKey(action) {
@@ -28,6 +28,8 @@ function actionKey(action) {
       return `switch_sheet:${action.target_id}`;
     case "click":
       return `click:${action.nx.toFixed(2)},${action.ny.toFixed(2)}`;
+    case "scroll":
+      return `scroll:${action.nx.toFixed(2)},${action.ny.toFixed(2)}:${action.direction}`;
     default:
       return `${action.type}:${action.target_id ?? ""}`;
   }
@@ -167,6 +169,19 @@ export async function runSession({
   // nothing was clicked, so nothing about the dashboard's state changed.
   const rejectedAimPoints = [];
   const deadClickRadius = config.pixel?.deadClickRadius ?? 0.05; // normalized radius for the repeat guard
+  // {nx,ny,direction} of scrolls that produced no visible change - the pane was
+  // already at its end, or nothing there scrolls. Those two are indistinguishable
+  // (both give 0 changed regions), hence one message for both. Direction-keyed so
+  // a bottomed-out pane stays scrollable back up.
+  const deadScrollPoints = [];
+  // Deliberately larger than deadClickRadius: the unit of scrolling is a whole
+  // pane, so a control-sized radius lets the model nibble around inside one dead
+  // pane and evade the guard.
+  const scrollDeadRadius = config.pixel?.scrollDeadRadius ?? 0.10;
+  const scrollNotchPx = config.pixel?.scrollNotchPx ?? 300;
+  // One bundle so a view-changing action can invalidate every stale judgement at
+  // once - see clearStaleGuards. Holds the SAME array instances, not copies.
+  const guards = { deadClickPoints, rejectedAimPoints, deadScrollPoints };
   const isPixelMode = (config.actuationMode ?? "pixel") === "pixel";
 
   function withEscalation(feedback) {
@@ -217,8 +232,15 @@ export async function runSession({
     actionBadge = null,
     widgetBbox = null,
     clickPoint = null,
+    scrollPoint = null,
   }) {
-    const overlay = { action_badge: actionBadge, widget_bbox: widgetBbox, changed_regions: changedRegions, ...(clickPoint ? { click_point: clickPoint } : {}) };
+    const overlay = {
+      action_badge: actionBadge,
+      widget_bbox: widgetBbox,
+      changed_regions: changedRegions,
+      ...(clickPoint ? { click_point: clickPoint } : {}),
+      ...(scrollPoint ? { scroll_point: scrollPoint } : {}),
+    };
     store.insertStep({
       session_id: sessionId,
       step_idx: idx,
@@ -513,8 +535,10 @@ export async function runSession({
     }
 
     const key = actionKey(action);
+    // scroll is exempt like click: repeating a scroll is the normal way to travel
+    // further down a long pane, so it must not be rejected as a duplicate.
     const dup =
-      action.type !== "wait" && action.type !== "click"
+      action.type !== "wait" && action.type !== "click" && action.type !== "scroll"
         ? history.find((h) => h.key === key && h.status === "ok")
         : null;
 
@@ -685,8 +709,190 @@ export async function runSession({
         // The view moved — prior dead spots are stale and must not over-reject.
         // Rejected aims go with them: the frame they were judged against is
         // gone, so a point that held nothing before may hold the target now.
-        deadClickPoints.length = 0;
-        rejectedAimPoints.length = 0;
+        // Dead SCROLLS go too: a pane with nothing scrollable in it may have
+        // just been replaced by one that scrolls.
+        clearStaleGuards(guards);
+        noDiffClicks = 0;
+        consecutiveNonProgress = 0;
+      }
+      prevFramePath = framePath;
+      continue;
+    }
+
+    if (action.type === "scroll") {
+      if (!isPixelMode) {
+        // Belt-and-suspenders: a scroll can only be produced in pixel mode.
+        persistAndEmit({
+          idx, thought, action, status: "rejected_target",
+          errorMsg: "scroll is only valid in pixel actuation mode",
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: scroll not allowed", type: "scroll" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation("This mode does not support scroll actions. Use the provided action types.");
+        history.push({ idx, key, type: "scroll", status: "rejected_target", nx: action.nx, ny: action.ny, direction: action.direction, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // Cheap guard on the raw aim first, so a pane already known not to move in
+      // this direction costs no model call.
+      if (isNearDeadScroll({ nx: action.nx, ny: action.ny, direction: action.direction }, deadScrollPoints, scrollDeadRadius)) {
+        persistAndEmit({
+          idx, thought, action, status: "rejected_loop",
+          errorMsg: `Repeat scroll ${action.direction} near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}), which already produced no change`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: repeat dead scroll", type: "scroll" },
+          scrollPoint: { nx: action.nx, ny: action.ny, direction: action.direction, target: action.target ?? null },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(
+          `You already scrolled ${action.direction} near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) and nothing changed. ` +
+            `That area is either already scrolled to its end or has nothing scrollable in it. Scroll somewhere clearly different, or answer from what is visible.`,
+        );
+        history.push({ idx, key, type: "scroll", status: "rejected_loop", nx: action.nx, ny: action.ny, direction: action.direction, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // Aiming: locate ONLY, and never a rejection.
+      //
+      // No zoom-refine: refine's window is sized for a ~2.6%-tall dropdown row,
+      // while a scrollable pane is ~0.10 x 0.61 of the frame. Pane-level
+      // precision is all a wheel needs.
+      //
+      // locate stays, and NOT to save a wasted step. A bad aim can land on a
+      // DIFFERENT pane that is also scrollable, so the agent scrolls the wrong
+      // chart, the pixels change, the guard reads success, and the model then
+      // reads a chart it never meant to move. That is a wrong-answer risk, not a
+      // cost. Never rejecting is safe because a wheel that hits nothing is inert
+      // (measured: 0 changed regions, 0.0000% diff) - unlike a stray click it
+      // cannot dismiss a dropdown or select a mark.
+      if (action.target) {
+        const located = await locateTarget({ config, imagePath: framePath, target: action.target, stopSignal });
+        if (located && !located.notFound) {
+          action.nx = located.nx;
+          action.ny = located.ny;
+        }
+      }
+
+      // `key` was computed from the model's raw aim, before locate moved it. Once
+      // aiming has run, the history line must describe the point actually acted
+      // on, or the log disagrees with its own nx/ny.
+      const aimedKey = actionKey(action);
+
+      // Re-check after aiming: locate may have snapped the point onto a pane
+      // already known to be dead. Free — it is a pure function.
+      if (isNearDeadScroll({ nx: action.nx, ny: action.ny, direction: action.direction }, deadScrollPoints, scrollDeadRadius)) {
+        persistAndEmit({
+          idx, thought, action, status: "rejected_loop",
+          errorMsg: `Located target sits on a pane that already produced no change when scrolled ${action.direction}`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: repeat dead scroll", type: "scroll" },
+          scrollPoint: { nx: action.nx, ny: action.ny, direction: action.direction, target: action.target ?? null },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(
+          `"${action.target ?? "That area"}" is in a pane that would not scroll ${action.direction} — it is at its end, or nothing there scrolls. ` +
+            `Scroll a different chart, or answer from what is visible.`,
+        );
+        history.push({ idx, key: aimedKey, type: "scroll", status: "rejected_loop", nx: action.nx, ny: action.ny, direction: action.direction, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      onEvent({ type: "agent_cursor", idx, nx: action.nx, ny: action.ny, phase: "scroll" });
+      // beforeWheel fires after the cursor is in position and before the wheel,
+      // giving the guard below a baseline that ALREADY contains the hover
+      // artifact our own mouse.move creates. See the diff for why that matters.
+      const preWheelPath = framePath.replace(/\.png$/, "_prewheel.png");
+      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs, {
+        notchPx: scrollNotchPx,
+        beforeWheel: () => screenshotViz(page, preWheelPath),
+      });
+
+      if (!execResult.ok) {
+        fs.rmSync(preWheelPath, { force: true });
+        persistAndEmit({
+          idx, thought, action, status: "error", errorMsg: execResult.error,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Error: scroll", type: "scroll" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(execResult.error);
+        history.push({ idx, key: aimedKey, type: "scroll", status: "error", nx: action.nx, ny: action.ny, direction: action.direction, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // NO expectBridgeEvent. A scroll is a local re-render: it fires no
+      // FilterChanged/ParameterChanged/TabSwitched, so demanding an event would
+      // burn the full eventGraceMs on every scroll waiting for one that can never
+      // arrive. This is the case settleDecision's !expectBridgeEvent branch is for.
+      const settleResult = await waitForSettle(page, config.settleGate);
+      if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
+
+      // Host containment. If the wheel bubbled past every pane to the host page,
+      // the viz box moves, vizExtractRect returns null, and every LATER capture
+      // falls onto the clipped-screenshot path that makes the live view stutter -
+      // a rendering regression with no obvious link to scrolling. Undo it and
+      // treat the step as having moved nothing.
+      const hostScrolled = await page
+        .evaluate(() => {
+          const moved = window.scrollX !== 0 || window.scrollY !== 0;
+          if (moved) window.scrollTo(0, 0);
+          return moved;
+        })
+        .catch(() => false);
+
+      // Did the pane actually move? scrollTop is useless here - Tableau leaves it
+      // at 0 and re-renders instead - so the pixel diff is the only witness.
+      //
+      // Diffed against the PRE-WHEEL frame, not this step's persisted frame. Our
+      // own mouse.move leaves a highlight on the row beneath it, and that
+      // highlight PERSISTS after the cursor leaves; against the step's original
+      // frame, a wheel on a pane already at its end still shows the highlight
+      // appearing and would read as a successful scroll.
+      const postPath = framePath.replace(/\.png$/, "_post.png");
+      // Initialized to the fail-OPEN value, matching the click branch: if the
+      // capture itself throws, assume the scroll worked rather than recording a
+      // dead point on an infrastructure error. A false dead point is the worse
+      // failure - it permanently blocks a pane that really does scroll.
+      let scrollChanged = !hostScrolled;
+      try {
+        await screenshotViz(page, postPath);
+        const regions = await computeChangedRegions(preWheelPath, postPath).catch(() => []);
+        scrollChanged = regions.length > 0 && !hostScrolled;
+      } finally {
+        fs.rmSync(postPath, { force: true });
+        fs.rmSync(preWheelPath, { force: true });
+      }
+
+      persistAndEmit({
+        idx, thought, action, status: "ok",
+        framePath, inventory: inv, changedRegions,
+        settleTimeout: settleResult.timedOut,
+        startedAt: stepStartedAt, durationMs,
+        actionBadge: { text: describeAction(action, null), type: "scroll" },
+        scrollPoint: { nx: action.nx, ny: action.ny, direction: action.direction, target: action.target ?? null },
+      });
+      history.push({ idx, key: aimedKey, type: "scroll", status: "ok", nx: action.nx, ny: action.ny, direction: action.direction, changed: scrollChanged });
+
+      if (!scrollChanged) {
+        deadScrollPoints.push({ nx: action.nx, ny: action.ny, direction: action.direction });
+        correctiveFeedback = hostScrolled
+          ? `Your scroll moved the page instead of the chart, so the dashboard did not change. Aim INSIDE a chart that is visibly cut off, not at the dashboard's edge or margin.`
+          : `Your scroll ${action.direction} at (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) changed nothing — that area is either already scrolled to its end or has nothing scrollable in it. ` +
+            `Scroll somewhere clearly different, or answer from what is visible.`;
+        consecutiveNonProgress++;
+      } else {
+        // The view moved, so every guard judgement made against the old frame is
+        // stale — including the CLICK ones.
+        clearStaleGuards(guards);
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
       }
