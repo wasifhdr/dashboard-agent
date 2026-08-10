@@ -3,6 +3,12 @@
 **Date:** 2026-08-10
 **Status:** Approved, not yet implemented
 **Deferred from:** `2026-08-09-discoveries-memory-design.md` ("Deferred")
+**Implementation plan:** `docs/superpowers/plans/2026-08-10-scroll-action.md`
+
+Revised twice after the initial design was approved: once from a self-review that
+found five gaps, and once after probing a scrollable filter dropdown, which
+disproved one of that review's own proposed fixes. Both rounds are folded in
+below; findings 8 and 9 are the later ones.
 
 ## Problem
 
@@ -37,7 +43,13 @@ Deliberately excluded:
 - **A semantic "scroll until X is visible" action** that loops internally. It
   would hide N VLM calls inside one step and make one trajectory step opaque.
 - **Programmatic scrolling via the DOM.** Rejected on evidence — see below.
-- **Restoring scroll position** after a filter change or on a new turn.
+- **Restoring scroll position** after a filter change or on a new turn. **This
+  one rests on an unverified assumption** and is the weakest item here: the probe
+  that would have settled whether a filter change resets a pane's scroll silently
+  never ran. If scroll position *survives*, a later turn of a live conversation
+  can open on a mid-scrolled pane with nothing indicating it, and the model reads
+  a partial chart as a whole one. Task 1 of the plan settles it before any code
+  is written.
 
 ## Findings from the probe
 
@@ -102,6 +114,43 @@ round-trip and no `FilterChanged` / `ParameterChanged` / `TabSwitched`.
 **7. The host page never scrolled.** `window.scrollY` stayed `0` throughout and
 the viz bounding box never moved, on a viz (1920×600) that fits the viewport.
 
+Findings 8 and 9 come from a second dashboard, added after the design was first
+approved: the World Government Summit workbook
+(`https://public.tableau.com/views/worlddata_16751035927180/DASHBOARD`, viz
+1600×1100), whose **Select Country dropdown** is scrollable when expanded.
+
+**8. The wheel also scrolls an open filter dropdown, and does not close it.** A
+different structure from a worksheet pane: the list is a `div.tabMenu` popup that
+exists only while open, holds ~172 rows (`scrollHeight` 3612 against
+`clientHeight` 711 — **2903px of overflow**), and opens *upward* from its trigger
+(trigger at `y:718`, list at `y:4`). One `wheel(0, 300)` moved it from
+Romania–United Kingdom to Slovakia–Zimbabwe; the list element was still present
+afterwards, `window.scrollY` stayed `0`, and the viz box did not move. This also
+exercises the click-then-scroll sequence the pixel prompt's rule 2 describes,
+since the dropdown must be opened first. A wheel with the list already at its
+bottom gave **0 changed regions**, matching finding 5's at-end signal on a
+completely different widget.
+
+**9. Positioning the cursor leaves a highlight that PERSISTS after it leaves, so
+"park the mouse somewhere harmless" is not a fix.** Moving onto the open dropdown
+highlights the row beneath the pointer. Moving the cursor off the list again
+produced **0 changed regions**, with the highlight still visible in both frames —
+it is not a live hover state that ends when the pointer leaves.
+
+Two consequences, one of which invalidated a fix proposed during the self-review:
+
+- The dead-scroll diff must be baselined **after** the cursor is in position.
+  Against the step's original frame (captured before any mouse movement), the
+  highlight appearing is the only difference on a pane already at its end, and
+  would read as a *successful* scroll — so no dead-scroll point is recorded and
+  the model is told nothing. Parking the cursor afterwards removes nothing,
+  because the highlight stays.
+- The highlight remains in the frame the model reads on the next step, and on a
+  dropdown a highlighted row looks like a *selected* one. Accepted rather than
+  fixed: the frame still shows the real selection in the filter card's own label,
+  so the cues are contradictory rather than uniformly wrong. Watched for during
+  integration testing.
+
 ## Design
 
 ### Action shape
@@ -121,6 +170,12 @@ const ScrollAction = z.object({
   target: z.string().optional(),
 });
 ```
+
+`direction: "up"` is **speculative, not load-bearing**. No case here needs it —
+the prompt tells the model to bank its readings *before* scrolling, and nothing
+tells it that it over-scrolled. It is in the schema and the guard key because it
+is nearly free and makes an over-scroll recoverable, but if a later change finds
+it unused, dropping it is a simplification rather than a regression.
 
 **No magnitude field, deliberately.** The model's documented failure mode is
 writing the right digits at the wrong scale — decade slips, percentages, 0-1000
@@ -153,11 +208,16 @@ case "scroll": {
 }
 ```
 
-`notchPx` comes from `config.pixel.scrollNotchPx ?? 300`. `executeAction` has no
-`config` parameter today, so it is threaded in as a field on the action by the
-orchestrator before execution, or passed as a new optional argument to
-`executeActionWithTimeout` — the latter, since it keeps the action object exactly
-what the schema validated.
+`notchPx` comes from `config.pixel.scrollNotchPx ?? 300`, passed as a new optional
+fifth argument (`opts`) to `executeActionWithTimeout` rather than smuggled onto
+the action object, so what the schema validated is exactly what gets executed and
+persisted. `executeAction` has no `config` parameter today.
+
+`opts` also carries **`beforeWheel`**, an optional `() => Promise<void>` awaited
+between the `mouse.move` and the `mouse.wheel`. That window is the only place a
+caller can capture a frame containing the cursor's highlight artifact but not yet
+the scroll, which is what finding 9 makes necessary. Keeping the hook here leaves
+all the coordinate geometry in the actuator.
 
 `page.mouse.move` first is required — `wheel` dispatches at the current cursor
 position. `vizPointToPagePixels` is reused unchanged.
@@ -180,13 +240,20 @@ One `locateTarget` call, **no** `refineClickPoint`, and **never a rejection**.
 
 - `refine`'s 22% window is built for a ~2.6%-tall dropdown row; a scrollable pane
   is 186×364 of a 1920×600 frame. Pane-level precision is all a wheel needs.
-- `locate` stays because it is the pass that actually fixed the wrong-coordinate
-  pathology, where the model named the right control while emitting a point 60%
-  of the frame away.
-- Never reject, because a mis-aimed wheel is now *proven* harmless: over empty
-  margin it produced 0 regions and 0.0000% diff. Unlike a stray click, it cannot
-  dismiss an open dropdown or select a mark. The cost of a miss is one step,
-  which the guard below then explains.
+- `locate` stays, but **not** to save a wasted step. "A miss is harmless, so a
+  miss is cheap" would argue for dropping it and letting the guard catch misses,
+  which is how this section originally justified itself — self-undercutting,
+  since it also justified paying a VLM call to prevent that harmless miss. The
+  real reason is narrower and stronger: a bad aim can land on a *different pane
+  that is also scrollable*, so the agent scrolls the wrong chart, the pixels
+  change, the guard reads success, and the model then reads a chart it never
+  meant to move. That is a wrong-answer risk, not a wasted step — the same family
+  as the label-desync trap in finding 4. `locate` is also the pass that fixed the
+  wrong-coordinate pathology, where the model named the right control while
+  emitting a point 60% of the frame away.
+- Never reject, because a mis-aimed wheel is *proven* inert: over empty margin it
+  produced 0 regions and 0.0000% diff. Unlike a stray click, it cannot dismiss an
+  open dropdown or select a mark.
 
 So `scroll` does **not** enter `resolveClickPoint`. It gets its own smaller path:
 call `locate`, use its point if it returns one, otherwise fall back to the
@@ -194,15 +261,28 @@ model's own `nx`/`ny`, and scroll either way.
 
 ### Dead-scroll guard
 
-Reuses the existing post-action diff: capture a `_post` frame, run
-`computeChangedRegions` against the pre-action frame, and treat
-`regions.length === 0` as "did not scroll".
+Reuses the existing post-action diff mechanism, but **not** its baseline: capture
+a `_prewheel` frame via `beforeWheel` and a `_post` frame after settling, run
+`computeChangedRegions` between *those two*, and treat `regions.length === 0` as
+"did not scroll". Both temporary frames are deleted; the persisted trajectory
+frame remains the step's pre-action screenshot.
+
+Baselining against the step's own frame — the obvious choice, and what this spec
+originally said — is wrong for the reason in finding 9: that frame predates the
+cursor movement, so the highlight our own `mouse.move` creates is a difference all
+by itself, and a wheel on an already-at-end pane reads as a success.
 
 A new `deadScrollPoints` list in `orchestrator.js`, keyed on
 **`{nx, ny, direction}`** — direction included because a pane that has bottomed
 out must still be scrollable back up, and a key without direction would block
 the recovery. Proximity test reuses `isNearDeadPoint` from `pixelGuard.js` after
 filtering to the same direction; no new geometry code.
+
+**The radius is its own config key**, `pixel.scrollDeadRadius` (default `0.10`),
+not the click guard's `deadClickRadius` (`0.05`). The unit of scrolling is a whole
+pane, and the measured pie pane is ~0.10 × 0.61 of the frame — at a click-sized
+radius the model can evade the guard by shifting its aim a few percent while
+staying inside the same dead pane.
 
 Because "at the end" and "nothing there scrolls" are indistinguishable (finding
 5), the corrective feedback covers both:
@@ -248,6 +328,23 @@ subsequent capture falls onto the clipped-screenshot path that causes the
 live-view stutter — presenting as an unrelated rendering regression. Three lines
 to make it structurally impossible.
 
+### Live view
+
+The one action whose entire point is "the view moved" must not be the one action
+with nothing on screen explaining it. Without this, a scroll makes the live view
+jump for no visible reason — and demo-ability is this half of the project's
+deliverable.
+
+`persistAndEmit` gains a `scrollPoint` parameter and writes
+`scroll_point: {nx, ny, direction, target}` into `overlay_json`, mirroring how
+`click_point` already works. The orchestrator also emits
+`{type:"agent_cursor", idx, nx, ny, phase:"scroll"}` so the cursor is placed
+before the view moves.
+
+`Stage.jsx` renders it as a **dashed** ring with a direction arrow — dashed so it
+reads as distinct at a glance from a click's solid ring — reusing the same
+`naturalSize` scaling as the existing overlays.
+
 ### Prompt
 
 `PIXEL_SYSTEM_TEMPLATE` only. The api-mode template is untouched, so the
@@ -290,10 +387,13 @@ scroll; the prompt just has to tell the model to use it.
 **Normal edit surface:**
 
 - `backend/src/actuator.js` — `scroll` case, `describeAction` case, and the
-  optional `notchPx` argument on `executeActionWithTimeout`
+  optional `opts` argument (`notchPx`, `beforeWheel`) on
+  `executeActionWithTimeout`
 - `backend/src/pixelGuard.js` — the direction-aware dead-scroll test, plus the
-  extracted pure helper for cross-clearing the two guard lists
-- `backend/config.json` — `pixel.scrollNotchPx: 300`
+  extracted pure helper for cross-clearing the guard lists
+- `frontend/src/screens/Watch/Stage.jsx` — the `scroll_point` overlay
+- `backend/config.json` — `pixel.scrollNotchPx: 300`,
+  `pixel.scrollDeadRadius: 0.10`
 - `backend/eval/questions.json` — rewrite the Remote Ratio question as a scored
   one now that it is answerable
 - `CLAUDE.md` — the action count (8 → 9), and the two gotchas from findings 3
@@ -337,9 +437,18 @@ fail silently. So:
    baseline. The scroll question stays `scored: false` for this run so the
    denominator matches.
 2. Implement.
-3. Re-run and compare. The Remote Ratio question moving from unanswerable to
-   answered is the intended delta; any *other* question changing is a
-   regression to investigate, not noise.
+3. Re-run and compare.
+
+**The delta will not be cleanly attributable, and it is worth being honest that
+this weakens the reason for deferring the work in the first place.** Adding an
+action and two rules to `PIXEL_SYSTEM_TEMPLATE` changes the prompt for *every*
+question, including the ones with nothing to scroll, so unrelated results can move
+without anything being broken. Treat a change as signal only if it reproduces on a
+second run.
+
+The rewritten Remote Ratio question is **not** part of the accuracy comparison at
+all — it is a different question from the one in the baseline, so before/after
+would be scoring different sets. It is a standalone pass/fail check.
 
 Ground truth in `questions.json` was read by eye on 2026-08-08 and can rot —
 re-verify the new Remote Ratio expectation against a fresh capture before
