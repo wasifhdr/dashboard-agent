@@ -327,7 +327,7 @@ git commit -m "Add the scroll action to the schema, with the same coordinate res
 
 ---
 
-### Task 3: Direction-aware dead-scroll guard and stale-guard clearing
+### Task 3: Direction-aware dead-scroll guard and stale-guard clearing — DONE 2026-08-10 (`5992bde`)
 
 Two pure helpers, so the trickiest bookkeeping in the change is testable without a browser.
 
@@ -341,7 +341,7 @@ Two pure helpers, so the trickiest bookkeeping in the change is testable without
   - `isNearDeadScroll(point, deadScrolls, radius)` — `point` is `{nx, ny, direction}`, `deadScrolls` is an array of the same shape; returns `boolean`. Only entries with a matching `direction` are considered.
   - `clearStaleGuards(guards)` — `guards` is `{deadClickPoints, rejectedAimPoints, deadScrollPoints}`, all arrays; empties all three **in place** and returns nothing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `backend/test/pixelGuard.test.js`:
 
@@ -399,7 +399,7 @@ test("clearStaleGuards tolerates a missing list", () => {
 });
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 npm test
@@ -407,7 +407,7 @@ npm test
 
 Expected: FAIL with `SyntaxError: The requested module '../src/pixelGuard.js' does not provide an export named 'isNearDeadScroll'`.
 
-- [ ] **Step 3: Implement both helpers**
+- [x] **Step 3: Implement both helpers**
 
 Append to `backend/src/pixelGuard.js`:
 
@@ -442,7 +442,7 @@ export function clearStaleGuards(guards) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 npm test
@@ -450,7 +450,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/pixelGuard.js backend/test/pixelGuard.test.js
@@ -459,7 +459,7 @@ git commit -m "Add the direction-aware dead-scroll guard and stale-guard clearin
 
 ---
 
-### Task 4: Actuator scroll branch and config keys
+### Task 4: Actuator scroll branch and config keys — DONE 2026-08-10 (`ad536ae`)
 
 **Files:**
 - Modify: `backend/src/actuator.js`
@@ -472,7 +472,7 @@ git commit -m "Add the direction-aware dead-scroll guard and stale-guard clearin
   - On success for a scroll: `{ok: true, point: {nx, ny, px, py}}`.
   - `describeAction(action, resolved)` returns `Scroll down: <target>` / `Scroll down (0.830, 0.490)` for a scroll.
 
-- [ ] **Step 1: Add the config keys**
+- [x] **Step 1: Add the config keys**
 
 In `backend/config.json`, extend the `pixel` block. Leave the existing `vlmApiKeyEnv` line exactly as it is on disk:
 
@@ -488,7 +488,7 @@ In `backend/config.json`, extend the `pixel` block. Leave the existing `vlmApiKe
 
 `300` is measured: it traverses the whole 222px overflow of the salaries pie pane in one step, and `40`/`80`/`120` produce proportional partial scrolls.
 
-- [ ] **Step 2: Thread `opts` through the timeout wrapper**
+- [x] **Step 2: Thread `opts` through the timeout wrapper**
 
 In `backend/src/actuator.js`, change the two signatures. Replace:
 
@@ -529,7 +529,7 @@ export async function executeActionWithTimeout(page, resolved, action, timeoutMs
     return await Promise.race([executeAction(page, resolved, action, opts), timeout]);
 ```
 
-- [ ] **Step 3: Add the scroll branch**
+- [x] **Step 3: Add the scroll branch**
 
 In `executeAction`, immediately after the `case "click"` block and before `default:`:
 
@@ -555,7 +555,7 @@ In `executeAction`, immediately after the `case "click"` block and before `defau
       }
 ```
 
-- [ ] **Step 4: Add the `describeAction` case**
+- [x] **Step 4: Add the `describeAction` case**
 
 In `describeAction`, after the `case "click"` line:
 
@@ -564,7 +564,7 @@ In `describeAction`, after the `case "click"` line:
       return `Scroll ${action.direction}${action.target ? `: ${action.target}` : ` (${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
 ```
 
-- [ ] **Step 5: Verify nothing regressed**
+- [x] **Step 5: Verify nothing regressed**
 
 ```bash
 npm test
@@ -572,7 +572,7 @@ npm test
 
 Expected: PASS. No test covers the actuator directly (it needs a browser), so this only confirms the module still parses and its importers are unaffected.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/actuator.js backend/config.json
