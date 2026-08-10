@@ -25,7 +25,9 @@
 
 ### Task 1: Close the two open assumptions and record the eval baseline
 
-Two design assumptions were never verified, and both change later tasks. This task must run **before** any frozen-core edit, because it also captures the accuracy baseline that Task 10 compares against.
+One design assumption remains unverified, and it changes Task 10. This task must run **before** any frozen-core edit, because it also captures the accuracy baseline that Task 10 compares against.
+
+The hover-artifact question this task originally carried is **already settled** — measured on the World Government Summit dashboard on 2026-08-10, the highlight our own `mouse.move` creates persists after the cursor leaves, which is why Task 5 baselines the guard diff with `beforeWheel` instead of parking the cursor. Do not re-probe it.
 
 **Files:**
 - Create: `<scratchpad>/probe-openq.mjs` (throwaway, not committed)
@@ -34,7 +36,7 @@ Two design assumptions were never verified, and both change later tasks. This ta
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: two documented facts consumed by Task 5 (`tooltipAfterWheel: true|false`) and Task 8 (`scrollSurvivesFilter: true|false`), plus the verified expected answer string for the new eval question in Task 9.
+- Produces: one documented fact (does a pane's scroll position survive a filter change?), plus the verified expected answer string for the new eval question in Task 10.
 
 - [ ] **Step 1: Record the eval baseline before touching frozen code**
 
@@ -54,7 +56,7 @@ cp eval/results.csv eval/baseline-2026-08-10.csv
 
 - [ ] **Step 3: Write the probe for the two open questions**
 
-Create `probe-openq.mjs` in the scratchpad directory. It answers: (a) does the cursor resting over a mark after a wheel leave a Tableau tooltip on screen, and (b) does a filter change reset a pane's scroll position?
+Create `probe-openq.mjs` in the scratchpad directory. It answers one question — does a filter change reset a pane's scroll position? — and captures the `100` row cleanly for Task 10's ground truth. The tooltip/hover section is deliberately absent; that is already settled.
 
 ```js
 import { pathToFileURL } from "node:url";
@@ -82,24 +84,7 @@ try {
   const cx = box.x + PANE.x + PANE.w / 2;
   const cy = box.y + PANE.y + PANE.h / 2;
 
-  // (a) TOOLTIP: wheel with the cursor parked on the pane, then compare against
-  // the same state with the cursor parked far away in the empty margin.
-  await page.mouse.move(cx, cy, { steps: 8 });
-  await page.mouse.wheel(0, 300);
-  await waitForSettle(page, SETTLE);
-  await screenshotViz(page, "./oq_parked.png");
-
-  await page.mouse.move(box.x + 5, box.y + box.height - 5, { steps: 8 });
-  await waitForSettle(page, SETTLE);
-  await screenshotViz(page, "./oq_moved.png");
-
-  const tipRegions = await computeChangedRegions("./oq_parked.png", "./oq_moved.png").catch(() => []);
-  console.log(`TOOLTIP: regions between cursor-parked and cursor-away = ${tipRegions.length}`);
-  console.log(tipRegions.length > 0
-    ? "  -> a parked cursor DOES change the frame (tooltip or hover highlight). Task 5 must park the cursor."
-    : "  -> a parked cursor changes nothing. Task 5 can skip the park step.");
-
-  // (b) FILTER RESET: scroll to the bottom, apply a filter, see if it snaps back.
+  // FILTER RESET: scroll to the bottom, apply a filter, see if it snaps back.
   await page.mouse.move(cx, cy, { steps: 8 });
   await page.mouse.wheel(0, 600);
   await waitForSettle(page, SETTLE);
@@ -142,15 +127,15 @@ Expected: `200`. Then run the probe from the scratchpad directory:
 node probe-openq.mjs
 ```
 
-- [ ] **Step 5: Read the captures by eye and settle all three questions**
+- [ ] **Step 5: Read the captures by eye and settle both questions**
 
-Open `oq_parked.png` vs `oq_moved.png`: is there a tooltip box or a highlighted mark in the parked one? Open `oq_scrolled.png` vs `oq_afterfilter.png`: does the pane show the same rows, or has it jumped back to showing `0`? Open `oq_scrolled.png`: which Company Size colour dominates the `100` pie, per the Company Size legend (`L` blue, `M` orange, `S` red)?
+Open `oq_scrolled.png` vs `oq_afterfilter.png`: does the pane show the same rows, or has it jumped back to showing `0`? Open `oq_scrolled.png`: which Company Size colour dominates the `100` pie, per the Company Size legend (`L` blue, `M` orange, `S` red)?
 
-Do not infer from the region counts alone — a count of 0 is meaningful, but any non-zero count needs the eye check to say what changed.
+Do not infer from the region counts alone — a count of 0 is meaningful, but any non-zero count needs the eye check to say what changed. This is the mistake that produced a confident, wrong "the wheel does nothing" during the design probe.
 
 - [ ] **Step 6: Append the findings to the spec**
 
-Add a `## Findings, round 2` section to `docs/superpowers/specs/2026-08-10-scroll-action-design.md` recording, in one sentence each with the evidence: whether a parked cursor alters the frame, whether a filter change resets scroll position, and what the `100` pie shows. If the filter change does *not* reset scroll, also strike the "Restoring scroll position" non-goal and add a `## Deferred` bullet noting that a stale scroll position can persist into a later turn of a live conversation.
+Add a `## Findings, round 2` section to `docs/superpowers/specs/2026-08-10-scroll-action-design.md` recording, in one sentence each with the evidence: whether a filter change resets scroll position, and what the `100` pie shows. If the filter change does *not* reset scroll, also strike the "Restoring scroll position" non-goal and add a `## Deferred` bullet noting that a stale scroll position can persist into a later turn of a live conversation.
 
 - [ ] **Step 7: Commit**
 
@@ -478,7 +463,7 @@ git commit -m "Add the direction-aware dead-scroll guard and stale-guard clearin
 **Interfaces:**
 - Consumes: the `scroll` action shape from Task 2.
 - Produces:
-  - `executeActionWithTimeout(page, resolved, action, timeoutMs, opts = {})` — a **new fifth parameter**. `opts.notchPx` (number) is the wheel delta for a scroll. Every existing 4-argument call site keeps working unchanged.
+  - `executeActionWithTimeout(page, resolved, action, timeoutMs, opts = {})` — a **new fifth parameter**. `opts.notchPx` (number) is the wheel delta for a scroll; `opts.beforeWheel` (optional `() => Promise<void>`) is awaited after the cursor is positioned and before the wheel fires. Every existing 4-argument call site keeps working unchanged.
   - On success for a scroll: `{ok: true, point: {nx, ny, px, py}}`.
   - `describeAction(action, resolved)` returns `Scroll down: <target>` / `Scroll down (0.830, 0.490)` for a scroll.
 
@@ -554,6 +539,12 @@ In `executeAction`, immediately after the `case "click"` block and before `defau
         // move() first is required: wheel() dispatches at the CURRENT cursor
         // position, so without it the wheel lands wherever the mouse was left.
         await page.mouse.move(px, py, { steps: 12 });
+        // Hook between the move and the wheel. Moving the cursor onto a pane
+        // leaves a highlight on the row under it, and that highlight persists
+        // even after the cursor leaves - so the caller needs a baseline taken
+        // HERE, with the artifact already present, to tell a real scroll from
+        // our own hover. Nothing else belongs in this window.
+        if (typeof opts.beforeWheel === "function") await opts.beforeWheel();
         await page.mouse.wheel(0, action.direction === "up" ? -notch : notch);
         return { ok: true, point: { nx: action.nx, ny: action.ny, px, py } };
       }
@@ -752,7 +743,15 @@ Insert this immediately **after** the closing brace of the `if (action.type === 
       }
 
       onEvent({ type: "agent_cursor", idx, nx: action.nx, ny: action.ny, phase: "scroll" });
-      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs, { notchPx: scrollNotchPx });
+      // beforeWheel fires after the cursor is in position and before the wheel,
+      // giving the guard a baseline that already contains the hover artifact -
+      // see the diff below for why that matters. All the geometry stays in the
+      // actuator; this only needs a hook at the right moment.
+      const preWheelPath = framePath.replace(/\.png$/, "_prewheel.png");
+      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs, {
+        notchPx: scrollNotchPx,
+        beforeWheel: () => screenshotViz(page, preWheelPath),
+      });
 
       if (!execResult.ok) {
         persistAndEmit({
@@ -791,14 +790,23 @@ Insert this immediately **after** the closing brace of the `if (action.type === 
 
       // Did the pane actually move? scrollTop is useless here - Tableau leaves
       // it at 0 and re-renders instead - so the pixel diff is the only witness.
+      //
+      // Diffed against the PRE-WHEEL frame (captured after the cursor was in
+      // position), NOT against this step's persisted frame. Our own mouse.move
+      // leaves a highlight on whatever row it lands on, and that highlight
+      // PERSISTS after the cursor moves away - so against the step's original
+      // frame, a wheel on a pane already at its end still shows the highlight
+      // appearing and reads as a successful scroll. Baselining after the move
+      // puts the artifact in both frames, leaving only real movement.
       const postPath = framePath.replace(/\.png$/, "_post.png");
       let scrollChanged = false;
       try {
         await screenshotViz(page, postPath);
-        const regions = await computeChangedRegions(framePath, postPath).catch(() => []);
+        const regions = await computeChangedRegions(preWheelPath, postPath).catch(() => []);
         scrollChanged = regions.length > 0 && !hostScrolled;
       } finally {
         fs.rmSync(postPath, { force: true });
+        fs.rmSync(preWheelPath, { force: true });
       }
 
       persistAndEmit({
@@ -851,20 +859,13 @@ with:
 
 This is the other half of the cross-clearing: a click that changes the view can replace a pane that had nothing scrollable with one that does, so a stale `deadScrollPoints` entry would wrongly reject a legitimate scroll.
 
-- [ ] **Step 7: Park the cursor after a scroll, only if Task 1 found it necessary**
+- [ ] **Step 7: Do NOT try to park the cursor — it does not work**
 
-If Task 1 Step 5 found that a parked cursor leaves a tooltip or hover highlight on the frame, add this immediately after the `waitForSettle` call in the scroll branch, before the host-containment check:
+Measured on the World Government Summit dashboard on 2026-08-10: moving the cursor onto an open dropdown highlights the row beneath it, and that highlight **persists after the cursor moves away** (cursor-parked vs cursor-moved-away: 0 changed regions, with the highlight visible in both). It is not a live hover state, so there is no "move the mouse somewhere harmless" fix.
 
-```js
-      // Park the cursor off the pane. It stays where the wheel left it, and a
-      // cursor resting on a mark keeps a Tableau tooltip on screen - which is
-      // pixel change with no scroll (a false "it worked" for the guard) and
-      // clutter over what the model reads next.
-      await page.mouse.move(1, 1, { steps: 4 }).catch(() => {});
-      await waitForSettle(page, config.settleGate);
-```
+The `beforeWheel` baseline in Step 5 is the mitigation, and it is sufficient: the artifact appears in both frames of the guard's comparison and cancels out. Do not add a park step on top — it would cost a screenshot and a settle cycle and remove nothing.
 
-If Task 1 found a parked cursor changes nothing, skip this step and note in the commit message that it was measured as unnecessary.
+One residual effect is accepted rather than fixed: the highlight remains in the frame the model reads on the *next* step, and on a dropdown a highlighted row can look like a selected one. Watch for it in Task 9 Step 7; the frame also still shows the real selection in the filter card's own label, so the cues are contradictory rather than uniformly wrong.
 
 - [ ] **Step 8: Verify the suite still passes**
 
@@ -1215,7 +1216,27 @@ Ask, on the same dashboard:
 
 Expected: one `ok` scroll step recorded with `changed: false`, the "either already scrolled to its end or has nothing scrollable in it" feedback in the next prompt, and **no** second scroll at a nearby point. If the agent scrolls a nearby point in the same empty region, `pixel.scrollDeadRadius` is too small — raise it and re-run.
 
-- [ ] **Step 6: Confirm api mode still refuses to scroll**
+- [ ] **Step 6: Exercise the click-then-scroll sequence on a long dropdown**
+
+The salaries case is a worksheet pane. A filter dropdown's list is a different structure and needs its own check — it is also the case the pixel prompt's rule 2 (click to open, then act) combines with scrolling.
+
+Paste this URL on the landing page (the browse form is deliberate — `normalizeTableauViewUrl` must rewrite it):
+
+```
+https://public.tableau.com/app/profile/soha.elghany/viz/worlddata_16751035927180/DASHBOARD
+```
+
+Then ask:
+
+> Open the Select Country dropdown and tell me whether Zimbabwe is one of the available countries.
+
+Measured 2026-08-10: that list holds ~172 rows in a 711px window (2903px of overflow), opens *upward* from its trigger, stays open through a wheel event, and `Zimbabwe` is its last entry. Expect a click to open it, one or more scroll steps, and an answer of yes. Confirm the dropdown does not close when scrolled.
+
+- [ ] **Step 7: Check the hover highlight has not become a fake selection**
+
+On the dropdown run, look at the frame *after* a scroll step. The row under the agent's cursor carries a grey highlight that persists, and on a dropdown that looks like a selected row. Confirm the model's answer and any recorded discovery do not claim a country is selected when only the real selection (shown in the filter card's own label) is. If the model does misread it, record it as a follow-up — do not fix it inside this plan.
+
+- [ ] **Step 8: Confirm api mode still refuses to scroll**
 
 Temporarily set `"actuationMode": "api"` in `backend/config.json`, restart the backend, and ask the Task 9 Step 2 question again. Expected: the agent operates filters by id and never emits a scroll; if it does, the response is rejected with `The "click" and "scroll" actions are not available in this mode.` Restore `"actuationMode": "pixel"` and restart before continuing. Do **not** commit the temporary change.
 
@@ -1260,6 +1281,7 @@ In the non-obvious-gotchas list, add:
 
 ```markdown
 - **A Tableau pane's `scrollTop` is always `0`, however far it has scrolled.** Tableau clips its scroll containers with `overflow-y: hidden` and re-renders the visible window rather than scrolling natively, so `scrollTop`, `PageDown` and any DOM read are useless as witnesses — judging a scroll by them produces a confident, wrong "the wheel does nothing" (it happened during the design probe). The pixel diff is the only ground truth: `computeChangedRegions` catches even a 40px scroll (2 regions, 0.52% frame diff), and gives a clean 0 both for a wheel that hits nothing and for a pane already at its end.
+- **Moving the agent's cursor onto a pane leaves a highlight that does not go away.** Tableau highlights the row under the pointer, and the highlight **persists after the cursor moves away** (measured on the World Government Summit dashboard: cursor-parked vs cursor-moved-away is 0 changed regions, highlight present in both). So there is no "park the mouse somewhere harmless" fix. Two consequences: any post-action pixel diff must be baselined *after* the cursor is positioned, or the highlight appearing reads as a successful scroll on a pane that never moved; and on an open filter dropdown the highlighted row looks like a selected one in the next frame the model reads.
 - **Never scroll a Tableau pane by writing `scrollTop` — the labels desynchronize from the marks.** A worksheet's row labels live in a *separate* scroll container (`div.tab-tvYLabel`) from its marks (`div.tvScrollContainer`); on the salaries pie pane they carry 221px and 222px of overflow respectively. Setting `scrollTop` on the marks container alone moves the pies while the labels stay put, rendering the **`50` pie next to the label `0`** — nothing errors, nothing looks broken, and the model banks a mislabeled number as a confirmed discovery. Only `page.mouse.wheel` goes through Tableau's own scroll path and keeps them in sync, which is why `scroll` is a wheel event and not a DOM write.
 ```
 
