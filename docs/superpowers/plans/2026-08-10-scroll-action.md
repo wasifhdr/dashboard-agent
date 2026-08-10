@@ -23,7 +23,9 @@
 
 ---
 
-### Task 1: Close the two open assumptions and record the eval baseline
+### Task 1: Close the open assumption and record the eval baseline — DONE 2026-08-10
+
+**Outcome:** baseline **9/9 scored correct**, 2 unscored, no crashes, saved to `backend/eval/baseline-2026-08-10.csv`. The filter-reset question turned out to be untestable on this dashboard and was resolved by reasoning instead; ground truth for the new eval question is `M`. Full detail in the spec's "Findings, round 3" (findings 10–13).
 
 One design assumption remains unverified, and it changes Task 10. This task must run **before** any frozen-core edit, because it also captures the accuracy baseline that Task 10 compares against.
 
@@ -31,16 +33,16 @@ The hover-artifact question this task originally carried is **already settled** 
 
 **Files:**
 - Create: `<scratchpad>/probe-openq.mjs` (throwaway, not committed)
-- Modify: `docs/superpowers/specs/2026-08-10-scroll-action-design.md` (append a "Findings, round 2" section)
+- Modify: `docs/superpowers/specs/2026-08-10-scroll-action-design.md` (append a "Findings, round 3" section)
 - Create: `backend/eval/baseline-2026-08-10.csv` (copy of the baseline run)
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces: one documented fact (does a pane's scroll position survive a filter change?), plus the verified expected answer string for the new eval question in Task 10.
 
-- [ ] **Step 1: Record the eval baseline before touching frozen code**
+- [x] **Step 1: Record the eval baseline before touching frozen code**
 
-The `GEMINI_API_KEY` env var must be set in the repo-root `.env`. Run from `backend/`:
+The env var named by `config.pixel.vlmApiKeyEnv` must be set in the repo-root `.env` — currently `GEMINI_API_KEY_2`, not `GEMINI_API_KEY`; check the config rather than assuming. Run from `backend/`:
 
 ```bash
 npm run eval -- eval/questions.json
@@ -48,13 +50,13 @@ npm run eval -- eval/questions.json
 
 Expected: it prints `Accuracy: n/m` and writes `eval/results.csv`. Note the exact `n/m` — that is the baseline. If it exits non-zero because a question failed, that is still a valid baseline; record it as-is.
 
-- [ ] **Step 2: Preserve the baseline so Task 10 can diff against it**
+- [x] **Step 2: Preserve the baseline so Task 10 can diff against it**
 
 ```bash
 cp eval/results.csv eval/baseline-2026-08-10.csv
 ```
 
-- [ ] **Step 3: Write the probe for the two open questions**
+- [x] **Step 3: Write the probe for the open question**
 
 Create `probe-openq.mjs` in the scratchpad directory. It answers one question — does a filter change reset a pane's scroll position? — and captures the `100` row cleanly for Task 10's ground truth. The tooltip/hover section is deliberately absent; that is already settled.
 
@@ -90,16 +92,19 @@ try {
   await waitForSettle(page, SETTLE);
   await screenshotViz(page, "./oq_scrolled.png");
 
+  // getInventory() returns the RAW bridge shape - fieldName / filterType, NOT the
+  // field / type that inventory.js's tracker.normalize() produces. Reading the
+  // normalized names here silently matches nothing and reports a false UNKNOWN.
   const inv = await page.evaluate(() => window.__agentBridge.getInventory());
-  const cat = (inv.filters ?? []).find((f) => f.type === "categorical" && (f.domain ?? []).length > 1);
+  const cat = (inv.filters ?? []).find((f) => f.filterType === "categorical" && (f.domain ?? []).length > 1);
   if (!cat) {
     console.log("FILTER RESET: no categorical filter with a usable domain; record as UNKNOWN");
   } else {
     const res = await page.evaluate(
       ({ field, values }) => window.__agentBridge.applyCategoricalFilter(field, values),
-      { field: cat.field, values: [String(cat.domain[0])] },
+      { field: cat.fieldName, values: [String(cat.domain[0])] },
     );
-    console.log(`  applied ${cat.field} = ${cat.domain[0]} -> ${JSON.stringify(res)}`);
+    console.log(`  applied ${cat.fieldName} = ${cat.domain[0]} -> ${JSON.stringify(res)}`);
     await waitForSettle(page, SETTLE, { expectBridgeEvent: true });
     await screenshotViz(page, "./oq_afterfilter.png");
     const back = await computeChangedRegions("./oq_scrolled.png", "./oq_afterfilter.png").catch(() => []);
@@ -113,7 +118,7 @@ try {
 }
 ```
 
-- [ ] **Step 4: Run the probe with the backend up**
+- [x] **Step 4: Run the probe with the backend up**
 
 The backend must be running (it serves `host.html`). Verify first:
 
@@ -127,17 +132,17 @@ Expected: `200`. Then run the probe from the scratchpad directory:
 node probe-openq.mjs
 ```
 
-- [ ] **Step 5: Read the captures by eye and settle both questions**
+- [x] **Step 5: Read the captures by eye and settle both questions**
 
 Open `oq_scrolled.png` vs `oq_afterfilter.png`: does the pane show the same rows, or has it jumped back to showing `0`? Open `oq_scrolled.png`: which Company Size colour dominates the `100` pie, per the Company Size legend (`L` blue, `M` orange, `S` red)?
 
 Do not infer from the region counts alone — a count of 0 is meaningful, but any non-zero count needs the eye check to say what changed. This is the mistake that produced a confident, wrong "the wheel does nothing" during the design probe.
 
-- [ ] **Step 6: Append the findings to the spec**
+- [x] **Step 6: Append the findings to the spec**
 
 Add a `## Findings, round 2` section to `docs/superpowers/specs/2026-08-10-scroll-action-design.md` recording, in one sentence each with the evidence: whether a filter change resets scroll position, and what the `100` pie shows. If the filter change does *not* reset scroll, also strike the "Restoring scroll position" non-goal and add a `## Deferred` bullet noting that a stale scroll position can persist into a later turn of a live conversation.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-10-scroll-action-design.md backend/eval/baseline-2026-08-10.csv

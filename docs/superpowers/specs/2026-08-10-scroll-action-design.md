@@ -43,13 +43,12 @@ Deliberately excluded:
 - **A semantic "scroll until X is visible" action** that loops internally. It
   would hide N VLM calls inside one step and make one trajectory step opaque.
 - **Programmatic scrolling via the DOM.** Rejected on evidence — see below.
-- **Restoring scroll position** after a filter change or on a new turn. **This
-  one rests on an unverified assumption** and is the weakest item here: the probe
-  that would have settled whether a filter change resets a pane's scroll silently
-  never ran. If scroll position *survives*, a later turn of a live conversation
-  can open on a mid-scrolled pane with nothing indicating it, and the model reads
-  a partial chart as a whole one. Task 1 of the plan settles it before any code
-  is written.
+- **Restoring scroll position** after a filter change or on a new turn. Settled in
+  finding 11: scroll position *does* survive into later turns, because nothing
+  resets it and `conversationRuntime` reuses one page. This stays a non-goal, but
+  as an accepted limitation rather than an assumption — a later turn can open on a
+  mid-scrolled pane with nothing indicating it, and the model may read a partial
+  chart as a whole one. Tracked in Deferred.
 
 ## Findings from the probe
 
@@ -150,6 +149,53 @@ Two consequences, one of which invalidated a fix proposed during the self-review
   fixed: the frame still shows the real selection in the filter card's own label,
   so the cues are contradictory rather than uniformly wrong. Watched for during
   integration testing.
+
+## Findings, round 3 (Task 1 of the plan, run 2026-08-10)
+
+**10. Baseline eval: 9/9 scored correct, 2 unscored.** Recorded before any
+frozen-core edit, saved as `backend/eval/baseline-2026-08-10.csv`. Eight of the
+nine scored questions answered in a single step; `vgs_ea_click` took exactly 2, as
+its known-good demo expects. No harness-level crashes, no rate limiting.
+
+Two details worth carrying forward:
+
+- **`salaries_remote` now fails in 4 steps, not `max_steps`.** The question's own
+  notes record "up to 16 steps, 8 rejected targets, max_steps"; on this run the
+  model emitted `fail` after 4 steps and 27s. It gives up rather than flailing, so
+  "fixed" will look like *an answer replacing a fast fail*, not *an answer
+  replacing a timeout*.
+- **`salaries_top_level` passed**, despite running on the dashboard with the
+  late-relayout bug tracked separately. The narrow initial layout still contains a
+  readable version of that chart. The bug is not benign, just not fatal here.
+
+**11. Whether a filter change resets a pane's scroll is UNTESTABLE on this
+dashboard.** The probe enumerated every categorical filter with a multi-value
+domain and found exactly one: `Remote Ratio` itself, with domain
+`["0","50","100"]`. Filtering it leaves the pie pane a single row, which removes
+the overflow — so the pane necessarily shows row `0` at the top afterwards, and
+that says nothing about scroll position. There is no other multi-value field to
+filter on.
+
+The underlying risk resolves by construction instead, and it is real: **nothing in
+the code resets scroll position, and `conversationRuntime` reuses one page across
+turns**, so a pane left scrolled at the end of one turn is still scrolled in the
+next turn's first frame. The "Restoring scroll position" non-goal therefore stands
+as a deliberate limitation with a known consequence rather than an untested
+assumption — see Deferred.
+
+**12. Ground truth for the rewritten eval question: `M`.** On a clean post-scroll
+capture with no click or selection confound, the `100` pie is ~55–60% orange
+against ~35% blue and a thin red sliver; the Company Size legend maps orange to
+`M`. Scored as `{"word": ["M", "Medium"]}` — a bare `"M"` would be matched as a
+case-insensitive substring and pass on almost any sentence.
+
+**13. `Remote Ratio` is API-operable, so the new eval question is not
+cross-arm comparable.** It is a real categorical filter the bridge can set
+directly, meaning api mode could answer without scrolling at all. Pixel mode
+cannot: the dashboard exposes no visible Remote Ratio filter card — the "Remote
+Ratio" text beside the pies is the pane's row-header label — so clicking has
+nothing to operate and scrolling is the only route. Fine for a pixel-mode
+regression check; do not read it as an api-vs-pixel result.
 
 ## Design
 
@@ -456,6 +502,14 @@ trusting the number.
 
 ## Deferred
 
+- **A scroll position left behind at the end of a turn persists into the next
+  turn** (finding 11), where it appears as a chart that is silently showing its
+  middle rather than its top. No code resets it and the page is reused. A fix would
+  either scroll every pane back to the top when a turn ends, or tell the model in
+  the prompt that a pane may already be scrolled. Neither belongs in this change:
+  the first needs a reliable way to enumerate panes, which means depending on
+  Tableau's internal class names, and the second costs prompt budget on every
+  question to describe a state most turns will never be in.
 - Horizontal scroll, if a dashboard is found where an answer needs it.
 - Scroll-position awareness in the prompt ("this pane is scrolled 60% down"),
   which would need a DOM read whose only honest source is Tableau's internal
