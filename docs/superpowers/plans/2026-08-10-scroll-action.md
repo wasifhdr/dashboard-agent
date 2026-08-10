@@ -1041,7 +1041,7 @@ git commit -m "Offer the scroll action in the pixel prompt only"
 
 ---
 
-### Task 7: Show the scroll in the live view
+### Task 7: Show the scroll in the live view — DONE 2026-08-10 (`c4875b9`)
 
 Without this the one action whose entire purpose is "the view moved" is the only action with no on-screen explanation.
 
@@ -1052,7 +1052,7 @@ Without this the one action whose entire purpose is "the view moved" is the only
 - Consumes: `overlay.scroll_point = {nx, ny, direction, target}` from Task 5.
 - Produces: nothing consumed downstream.
 
-- [ ] **Step 1: Render the scroll point as a ring with a direction arrow**
+- [x] **Step 1: Render the scroll point as a ring with a direction arrow**
 
 In `frontend/src/screens/Watch/Stage.jsx`, immediately after the `{overlay?.click_point && ( ... )}` block and before the closing `</svg>`:
 
@@ -1090,13 +1090,13 @@ In `frontend/src/screens/Watch/Stage.jsx`, immediately after the `{overlay?.clic
 
 The dashed ring distinguishes a scroll from a click's solid ring at a glance; the arrow shows which way.
 
-- [ ] **Step 2: Verify it renders**
+- [x] **Step 2: Verify it renders**
 
 Start the frontend with the preview tool (`preview_start({name: "frontend"})`), open a completed session from the History screen that contains a scroll step, and confirm the dashed ring and arrow appear over the frame at the scrolled pane. Check `read_console_messages` for React warnings.
 
 If no session with a scroll exists yet, defer this verification to Task 9 Step 3 and note that in the commit message.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add frontend/src/screens/Watch/Stage.jsx
@@ -1105,7 +1105,7 @@ git commit -m "Mark a scroll step in the live view with a dashed ring and direct
 
 ---
 
-### Task 8: Settle-gate regression test for the scroll path
+### Task 8: Settle-gate regression test for the scroll path — DONE 2026-08-10 (`c4875b9`)
 
 A scroll must not pay the bridge-event grace window. This is the cheapest guard against someone "consistently" adding `expectBridgeEvent: true` to the scroll branch later.
 
@@ -1116,7 +1116,7 @@ A scroll must not pay the bridge-event grace window. This is the cheapest guard 
 - Consumes: `settleDecision` from `backend/src/perception.js` (unchanged by this plan).
 - Produces: nothing.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Append to `backend/test/settleDecision.test.js`:
 
@@ -1155,7 +1155,7 @@ test("REGRESSION: the same scroll would stall if it demanded a bridge event", ()
 
 `settleDecision` is already imported at the top of that file (`import { settleDecision } from "../src/perception.js";`), so no import change is needed.
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 ```bash
 npm test
@@ -1163,7 +1163,7 @@ npm test
 
 Expected: PASS immediately — `settleDecision` is unchanged, so these document existing behaviour the scroll branch depends on.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/test/settleDecision.test.js
@@ -1172,7 +1172,7 @@ git commit -m "Pin the settle semantics the scroll path relies on"
 
 ---
 
-### Task 9: Manual integration against the real dashboard
+### Task 9: Manual integration against the real dashboard — DONE 2026-08-10 (verified live)
 
 **Files:**
 - None modified. This task produces evidence.
@@ -1181,7 +1181,7 @@ git commit -m "Pin the settle semantics the scroll path relies on"
 - Consumes: everything from Tasks 2–7.
 - Produces: a confirmed working demo path, and the observed answer needed by Task 10's eval question.
 
-- [ ] **Step 1: Start both processes**
+- [x] **Step 1: Start both processes**
 
 Backend, from `backend/`:
 
@@ -1193,7 +1193,7 @@ Expected: a listening banner naming port 8990. A port diagnostic instead means t
 
 Frontend: use the preview tool, `preview_start({name: "frontend"})`.
 
-- [ ] **Step 2: Run the scroll question end to end**
+- [x] **Step 2: Run the scroll question end to end**
 
 Open the frontend, pick **Data Science Salaries (US)**, and ask:
 
@@ -1201,11 +1201,11 @@ Open the frontend, pick **Data Science Salaries (US)**, and ask:
 
 Watch the Watch screen. Expected: a `scroll` step whose badge reads `Scroll down: ...`, followed by a frame in which the `100` row is visible with its pie, then an answer. Record the answer.
 
-- [ ] **Step 3: Confirm the trajectory and the overlay**
+- [x] **Step 3: Confirm the trajectory and the overlay**
 
 On that scroll step, confirm the dashed ring and downward arrow sit over the pie pane (Task 7). Confirm the persisted frame is the **pre-scroll** view, so the trajectory shows what the model was looking at when it decided to scroll.
 
-- [ ] **Step 4: Check the logs for the failure modes this plan guards against**
+- [x] **Step 4: Check the logs for the failure modes this plan guards against**
 
 ```bash
 curl -s http://127.0.0.1:8990/api/config > /dev/null
@@ -1213,7 +1213,7 @@ curl -s http://127.0.0.1:8990/api/config > /dev/null
 
 In the backend console for that run, confirm: no `settle_timeout` warning on the scroll step (it would mean the pixels-only gate is not settling), and no repeated `rejected_loop` scroll steps (which would mean the dead-scroll radius is wrong). Use `read_console_messages` and `read_network_requests` on the frontend for client-side errors.
 
-- [ ] **Step 5: Exercise the dead-scroll guard deliberately**
+- [x] **Step 5: Exercise the dead-scroll guard deliberately**
 
 Ask, on the same dashboard:
 
@@ -1221,7 +1221,7 @@ Ask, on the same dashboard:
 
 Expected: one `ok` scroll step recorded with `changed: false`, the "either already scrolled to its end or has nothing scrollable in it" feedback in the next prompt, and **no** second scroll at a nearby point. If the agent scrolls a nearby point in the same empty region, `pixel.scrollDeadRadius` is too small — raise it and re-run.
 
-- [ ] **Step 6: Exercise the click-then-scroll sequence on a long dropdown**
+- [x] **Step 6: Exercise the click-then-scroll sequence on a long dropdown**
 
 The salaries case is a worksheet pane. A filter dropdown's list is a different structure and needs its own check — it is also the case the pixel prompt's rule 2 (click to open, then act) combines with scrolling.
 
@@ -1237,11 +1237,11 @@ Then ask:
 
 Measured 2026-08-10: that list holds ~172 rows in a 711px window (2903px of overflow), opens *upward* from its trigger, stays open through a wheel event, and `Zimbabwe` is its last entry. Expect a click to open it, one or more scroll steps, and an answer of yes. Confirm the dropdown does not close when scrolled.
 
-- [ ] **Step 7: Check the hover highlight has not become a fake selection**
+- [x] **Step 7: Check the hover highlight has not become a fake selection**
 
 On the dropdown run, look at the frame *after* a scroll step. The row under the agent's cursor carries a grey highlight that persists, and on a dropdown that looks like a selected row. Confirm the model's answer and any recorded discovery do not claim a country is selected when only the real selection (shown in the filter card's own label) is. If the model does misread it, record it as a follow-up — do not fix it inside this plan.
 
-- [ ] **Step 8: Confirm api mode still refuses to scroll**
+- [x] **Step 8: Confirm api mode still refuses to scroll**
 
 Temporarily set `"actuationMode": "api"` in `backend/config.json`, restart the backend, and ask the Task 9 Step 2 question again. Expected: the agent operates filters by id and never emits a scroll; if it does, the response is rejected with `The "click" and "scroll" actions are not available in this mode.` Restore `"actuationMode": "pixel"` and restart before continuing. Do **not** commit the temporary change.
 
