@@ -65,6 +65,43 @@ test("both system templates document the discovery field", () => {
   }
 });
 
+// ---- scroll (pixel mode only) ----------------------------------------------
+
+test("pixel mode prompt offers the scroll action", () => {
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(/"type":"scroll"/.test(systemText));
+  assert.ok(/direction/.test(systemText));
+});
+
+test("api mode prompt never mentions scrolling", () => {
+  // The api arm is the comparison arm for the two grounding strategies; its
+  // prompt must not drift, or the comparison stops meaning anything.
+  const { systemText } = buildPrompt({ ...BASE, mode: "api", discoveries: "" });
+  assert.ok(!/"type":"scroll"/.test(systemText));
+  assert.ok(!/scroll/i.test(systemText));
+});
+
+test("the pixel prompt warns that scrolling loses what is on screen", () => {
+  // Without this the model scrolls away the value it needed: the prompt carries
+  // only the CURRENT frame, so a discovery is the only thing that survives.
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(/SAME turn that you scroll/.test(systemText));
+});
+
+test("a scroll renders in the history with its direction and outcome", () => {
+  const line = _internal.formatHistoryLine({
+    idx: 3, type: "scroll", direction: "down", nx: 0.83, ny: 0.49, status: "ok", changed: true,
+  });
+  assert.equal(line, "#3 scroll down (0.83,0.49) -> changed");
+});
+
+test("a scroll that moved nothing says so, rather than reporting ok", () => {
+  const line = _internal.formatHistoryLine({
+    idx: 4, type: "scroll", direction: "down", nx: 0.83, ny: 0.49, status: "ok", changed: false,
+  });
+  assert.equal(line, "#4 scroll down (0.83,0.49) -> no change");
+});
+
 test("REGRESSION: both templates tell the model discoveries can complete an answer", () => {
   // Without this the model holding four remembered numbers still will not
   // answer, because the old rule 3 told it to wait for ONE screenshot to show

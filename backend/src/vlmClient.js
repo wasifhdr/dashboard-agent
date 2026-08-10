@@ -60,6 +60,7 @@ function formatInventoryForPrompt(inventory) {
 }
 
 function describeActionForHistory(h) {
+  if (h.type === "scroll") return `${h.direction} (${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
   if (h.type === "click") return `(${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
   if (h.values !== undefined) return `${h.target_id}=${JSON.stringify(h.values)}`;
   if (h.value !== undefined) return `${h.target_id}=${JSON.stringify(h.value)}`;
@@ -68,9 +69,9 @@ function describeActionForHistory(h) {
   return "";
 }
 
-// For a click, the model cares whether it worked, not the internal step
-// status — so an executed ("ok") click reports "changed" / "no change".
-// Rejected/errored clicks keep their status so the model sees they didn't run.
+// For a click or a scroll, the model cares whether it worked, not the internal
+// step status — so an executed ("ok") one reports "changed" / "no change".
+// Rejected/errored ones keep their status so the model sees they didn't run.
 function clickOutcome(h) {
   if (h.status === "ok") return h.changed ? "changed" : "no change";
   return h.status;
@@ -78,7 +79,9 @@ function clickOutcome(h) {
 
 function formatHistoryLine(h) {
   const detail = describeActionForHistory(h);
-  const outcome = h.type === "click" ? clickOutcome(h) : h.status;
+  // Scroll shares the click reporting: "ok" tells the model nothing useful about
+  // a scroll, since a wheel that hit an already-bottomed pane also succeeds.
+  const outcome = h.type === "click" || h.type === "scroll" ? clickOutcome(h) : h.status;
   return `#${h.idx} ${h.type}${detail ? " " + detail : ""} -> ${outcome}`;
 }
 
@@ -144,6 +147,7 @@ Respond with STRICT JSON ONLY (no markdown, no commentary), matching exactly:
 
 The "action" object must be exactly one of:
 - {"type":"click","nx":0.42,"ny":0.13,"target":"ZRI tab"}
+- {"type":"scroll","nx":0.83,"ny":0.49,"direction":"down","target":"the Remote Ratio pie stack"}
 - {"type":"wait"}
 - {"type":"answer","answer":"<final answer text>","confidence":0.8}
 - {"type":"fail","reason":"<why this cannot be answered>"}
@@ -155,6 +159,7 @@ Rules:
 4. If a click produces no visible change, you missed the control or it is not on screen — NEVER repeat the same or a nearby click. Move to a clearly different location. If several clicks in a row change nothing, stop targeting that control: answer from what is visible, or fail.
 5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.
+7. Some charts are TALLER than the space they are drawn in, so Tableau cuts them off: a row only half drawn at the bottom edge, a list that ends abruptly, an axis that stops short. Use "scroll" to see the rest, aiming at the middle of THAT chart - not its title, and not the dashboard's margin. Scrolling the wrong chart is worse than not scrolling at all.
 
 RECORDING DISCOVERIES:
 "discovery" records hard data visible in the CURRENT screenshot that you will need later.
@@ -162,7 +167,8 @@ RECORDING DISCOVERIES:
 - ALWAYS name what the value belongs to. Write "House avg beds = 3.3", never "avg beds = 3.3".
 - Record NOTHING about the UI: not what is open or closed, not where a control is, not what you clicked.
 - If this screenshot shows no new hard data, use null.
-Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.`;
+Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.
+Scrolling moves rows OFF the screen as well as on, and you are never shown an earlier screenshot again. Record what you can currently read as a "discovery" on the SAME turn that you scroll, or the value is gone.`;
 
 function buildPrompt({ question, inventory, history, discoveries = "", correctiveFeedback, mode = "api" }) {
   const systemText = mode === "pixel" ? PIXEL_SYSTEM_TEMPLATE(question) : SYSTEM_TEMPLATE(question);
@@ -702,7 +708,10 @@ export async function getNextAction({ config, question, inventory, history, disc
     }
 
     const result = StepResponseSchema.safeParse(parsed);
-    if (result.success && !((config.actuationMode ?? "pixel") !== "pixel" && result.data.action.type === "click")) {
+    // Both click and scroll are pixel-mode only; api mode must reject either.
+    const isPixelOnlyAction =
+      result.success && (result.data.action.type === "click" || result.data.action.type === "scroll");
+    if (result.success && !((config.actuationMode ?? "pixel") !== "pixel" && isPixelOnlyAction)) {
       return {
         valid: true,
         discovery: result.data.discovery ?? null,
@@ -714,7 +723,7 @@ export async function getNextAction({ config, question, inventory, history, disc
     }
 
     feedback = result.success
-      ? `The "click" action is not available in this mode. Use one of the provided action types.`
+      ? `The "click" and "scroll" actions are not available in this mode. Use one of the provided action types.`
       : `Your previous response did not match the required schema: ` +
         `${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. ` +
         `Return STRICT JSON only, matching the schema exactly.`;
