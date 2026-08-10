@@ -889,7 +889,7 @@ git commit -m "Run scroll actions through the agent loop, with a dead-scroll gua
 
 ---
 
-### Task 6: Teach the pixel prompt to scroll
+### Task 6: Teach the pixel prompt to scroll — DONE 2026-08-10 (`28e0ac9`)
 
 **Files:**
 - Modify: `backend/src/vlmClient.js` (`PIXEL_SYSTEM_TEMPLATE`, `getNextAction`'s mode gate, `describeActionForHistory`)
@@ -899,7 +899,7 @@ git commit -m "Run scroll actions through the agent loop, with a dead-scroll gua
 - Consumes: the `scroll` action shape from Task 2.
 - Produces: the pixel system template advertises `scroll`; the api template still does not. History lines render as `#3 scroll down (0.83,0.49) -> changed`.
 
-- [ ] **Step 1: Write the failing prompt tests**
+- [x] **Step 1: Write the failing prompt tests**
 
 Append to `backend/test/prompt.test.js`:
 
@@ -933,7 +933,7 @@ test("a scroll renders in the history with its direction", () => {
 });
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 npm test
@@ -941,7 +941,7 @@ npm test
 
 Expected: FAIL on all four — the template has no `scroll`, and `formatHistoryLine` renders `#3 scroll  -> ok`.
 
-- [ ] **Step 3: Add scroll to the pixel template's action list**
+- [x] **Step 3: Add scroll to the pixel template's action list**
 
 In `PIXEL_SYSTEM_TEMPLATE`, in the "The `action` object must be exactly one of" list, after the click line:
 
@@ -949,7 +949,7 @@ In `PIXEL_SYSTEM_TEMPLATE`, in the "The `action` object must be exactly one of" 
 - {"type":"scroll","nx":0.83,"ny":0.49,"direction":"down","target":"the Remote Ratio pie stack"}
 ```
 
-- [ ] **Step 4: Add the two rules**
+- [x] **Step 4: Add the two rules**
 
 In the same template, append to the `Rules:` list (renumber nothing — add as the next number after the existing `6.`):
 
@@ -963,7 +963,7 @@ And append this line to the end of the `RECORDING DISCOVERIES:` block:
 Scrolling moves rows OFF the screen as well as on, and you are never shown an earlier screenshot again. Record what you can currently read as a "discovery" on the SAME turn that you scroll, or the value is gone.
 ```
 
-- [ ] **Step 5: Render scrolls in the history**
+- [x] **Step 5: Render scrolls in the history**
 
 In `describeActionForHistory`, change the first line. Replace:
 
@@ -992,7 +992,7 @@ with:
   const outcome = h.type === "click" || h.type === "scroll" ? clickOutcome(h) : h.status;
 ```
 
-- [ ] **Step 6: Extend the mode gate to reject scrolls outside pixel mode**
+- [x] **Step 6: Extend the mode gate to reject scrolls outside pixel mode**
 
 In `getNextAction`, replace:
 
@@ -1024,7 +1024,7 @@ with:
       ? `The "click" and "scroll" actions are not available in this mode. Use one of the provided action types.`
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 ```bash
 npm test
@@ -1032,7 +1032,7 @@ npm test
 
 Expected: PASS. If `api mode prompt never mentions scrolling` fails, the added rule text leaked into the shared `SYSTEM_TEMPLATE` instead of `PIXEL_SYSTEM_TEMPLATE` — check which template was edited.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/vlmClient.js backend/test/prompt.test.js
