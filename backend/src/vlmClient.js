@@ -286,8 +286,10 @@ function rescalePair(nx, ny, dims) {
 
 // Returns `action` unchanged unless it is a click whose coordinates needed
 // rescaling, in which case a corrected copy is returned.
+// Covers "scroll" as well as "click": both address the frame in the same
+// normalized [0,1] space, so both are subject to the same magnitude slips.
 function normalizeClickAction(action, dims) {
-  if (!action || action.type !== "click") return action;
+  if (!action || (action.type !== "click" && action.type !== "scroll")) return action;
   const nx = Number(action.nx);
   const ny = Number(action.ny);
   // Non-numeric / missing coords aren't a magnitude problem — leave them for
@@ -685,9 +687,11 @@ export async function getNextAction({ config, question, inventory, history, disc
       continue;
     }
 
-    // Rescue right-digits/wrong-magnitude click coordinates before validating,
-    // so a usable aim isn't thrown away over its units (see normalizeClickAction).
-    if (parsed?.action?.type === "click") {
+    // Rescue right-digits/wrong-magnitude coordinates before validating, so a
+    // usable aim isn't thrown away over its units (see normalizeClickAction).
+    // BOTH pixel-space action types must be listed here, not just in the
+    // function: this guard is what decides whether it is ever called.
+    if (parsed?.action?.type === "click" || parsed?.action?.type === "scroll") {
       parsed.action = normalizeClickAction(parsed.action, await frameDims());
     }
 

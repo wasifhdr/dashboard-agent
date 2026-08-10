@@ -51,12 +51,27 @@ const ClickAction = z.object({
   target: z.string().optional(),
 });
 
+// Vertical-only, and deliberately WITHOUT a magnitude field: the actuator
+// supplies a fixed notch from config. nx/ny survive this model's habit of
+// writing the right digits at the wrong scale because the [0,1] range check
+// catches it (see rescalePair in vlmClient.js); a raw pixel dy would have no
+// such check, and 3 vs 300 is the difference between nothing moving and
+// jumping clean past the target. Scrolling further is another step.
+const ScrollAction = z.object({
+  type: z.literal("scroll"),
+  nx: z.number().min(0).max(1),
+  ny: z.number().min(0).max(1),
+  direction: z.enum(["down", "up"]),
+  target: z.string().optional(),
+});
+
 export const ActionSchema = z.discriminatedUnion("type", [
   SetFilterAction,
   SetRangeFilterAction,
   SetParameterAction,
   SwitchSheetAction,
   ClickAction,
+  ScrollAction,
   WaitAction,
   AnswerAction,
   FailAction,

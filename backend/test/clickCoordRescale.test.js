@@ -99,3 +99,20 @@ test("negative coordinates are not rescued into validity", () => {
   assert.equal(normalizeClickAction(action, FRAME), action);
   assert.equal(StepResponseSchema.safeParse({ thought: "t", action }).success, false);
 });
+
+// ---- scroll shares the click coordinate space, so it shares the rescue -----
+
+test("a scroll's coordinates are rescued exactly as a click's are", () => {
+  const raw = { type: "scroll", nx: 83, ny: 49, direction: "down", target: "the pie stack" };
+  const fixed = normalizeClickAction(raw, FRAME);
+  assertClose(fixed.nx, 0.83);
+  assertClose(fixed.ny, 0.49);
+  assert.equal(fixed.direction, "down", "the rest of the action survives");
+  assert.equal(fixed.target, "the pie stack");
+  assert.ok(StepResponseSchema.safeParse({ thought: "scroll down", action: fixed }).success);
+});
+
+test("an in-range scroll is returned by identity, not copied", () => {
+  const action = { type: "scroll", nx: 0.83, ny: 0.49, direction: "down" };
+  assert.equal(normalizeClickAction(action, FRAME), action);
+});
