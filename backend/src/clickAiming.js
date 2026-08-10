@@ -1,74 +1,82 @@
 // Where a pixel-mode click actually lands: the policy that turns the model's
 // proposed click into a point on the frame, or into a rejection.
 //
-// LOCATE, then click. One verification call, and no veto.
+// REFINE first, LOCATE as the fallback, and nothing may veto.
 //
-// Why locate at all: the model reads the screenshot correctly and cannot express
-// it in coordinates. Across every trace of one dashboard it named "the Type
-// dropdown" in its thought while emitting (0.68,0.46) - for a control that sits
-// at (0.07,0.04), i.e. the far corner of the same image. locate is a narrow
-// whole-frame "where is X?" that SUPPLIES the coordinate instead of judging one,
-// which is the only thing that can fix a coordinate the model cannot produce.
+// The two passes are not interchangeable, and the difference is reach:
 //
-// Why the zoom-refine pass is no longer here. It was a second opinion with a
-// veto, and it is structurally blind to a whole class of control:
+//   refine crops 22% of the frame around a given point and upscales it ~2.4x. It
+//   is a LOCAL corrector - reach about +/-11% of the frame - and magnification is
+//   what makes it precise.
+//   locate searches the WHOLE frame and returns the element's centre. It is a
+//   GLOBAL finder, and it is the only thing that can fix a coordinate the model
+//   cannot produce at all.
 //
-//   On the "How old are recent newlyweds" dashboard the model aimed at
-//   (0.18,0.198) for a Region combobox whose true centre is (0.169,0.200) -
-//   accurate to about 2%. locate found the control on 4 out of 4 phrasings.
-//   refine denied it, four steps running, because REFINE_WINDOW is 22% of the
-//   frame: a 422px-wide crop centred on a 625px-wide combobox excludes the
-//   "Region" label and the "(All)" value text at its left edge, leaving an
-//   unidentifiable grey bar. So the pass with LESS evidence overruled the pass
-//   with more, the orchestrator cached the aim as proven-wrong, and a correct
-//   reading became permanently unusable - the run could only end by being
-//   stopped. That also explains the inconsistency this file used to record
-//   ("rejected eight times in one session and APPROVED in the next"): it depends
-//   on whether the identifying label happens to fall inside the crop.
+// Why refine leads. Measured on the "How old are recent newlyweds" dashboard,
+// asked for "the 'Advanced degree' option": locate returned ny=0.398, refine
+// returned ny=0.425. Rows there are 23px apart - 2.8% of frame height - with
+// Advanced degree at 0.429 and Bachelor's at 0.400. locate was exactly one row
+// high, which in a real run meant selecting Bachelor's degree five times and
+// exhausting the step budget. refine sees those rows 57px apart and picks right.
+// Leading with it also makes the common case ONE verification call.
 //
-// refineClickPoint is deliberately KEPT in vlmClient.js. Its real job - nudging a
-// roughly-right point onto a thin target, since an open dropdown's rows are ~2.6%
-// of frame height - is genuine, and locate alone may land a row off. If precision
-// regresses, bring it back anchored on the LOCATED element and still without the
-// power to reject.
+// Why locate stays. On the same dashboard refine returned NOT FOUND for the
+// "Region dropdown": a 422px-wide crop centred on a 625px-wide combobox excludes
+// the label at its left edge, leaving an unidentifiable grey bar. locate found it
+// on 4/4 phrasings. And for the documented (0.68,0.46)-for-a-(0.07,0.04)-control
+// case, refine physically cannot reach the target.
 //
-// Cost: a click step is now main + locate = 2 model calls, down from up to 4
-// (main + locate + refine + refine again on disagreement). That matters on a
-// tier where roughly eight steps exhausts the per-minute allowance.
+// Why nothing vetoes. refine's not-found says only "not within 11% of that
+// point", so it must ESCALATE, never reject. Treating it as a refutation - and
+// then caching the refusal - is what previously turned a single bad verdict into
+// a run that could only be stopped by the user.
 //
-// This module stays IO-free by injection: `locate` is passed in, so the policy is
-// unit-testable without a network or a model. It follows the vlmClient contract -
-// {nx,ny} | {notFound:true} | null, where null means the call itself failed and
-// is NOT a verdict about the target.
+// Cost: 1 verification call when the aim is roughly right, 2 when it is not,
+// versus up to 3 under the old policy. That matters on a tier where roughly eight
+// steps exhausts the per-minute allowance.
+//
+// This module stays IO-free by injection: `locate` and `refine` are passed in, so
+// the policy is unit-testable without a network or a model. Both follow the
+// vlmClient contract - {nx,ny} | {notFound:true} | null, where null means the call
+// itself failed and is NOT a verdict about the target.
 
 // Returns one of:
 //   {nx, ny, source}  - click here. `source` records which pass produced the
-//                       point, for logging and for tests: "located" or "aim".
-//   {rejected: true, searched: true} - do not click. locate searched the whole
-//                       frame and reported the element absent. This is the one
-//                       case where refusing to click is right: firing at a point
-//                       where the named target demonstrably is not hits whatever
-//                       else is there, which changes the dashboard and therefore
-//                       reads as a SUCCESS to the pixel-diff guard - a wrong
-//                       answer rather than a wasted step.
+//                       point, for logging and for tests: "aim+refined",
+//                       "located", or "aim".
+//   {rejected: true, searched: true} - do not click. Both passes declined, so the
+//                       element is not on this frame. This is the one case where
+//                       refusing is right: firing at a point where the named
+//                       target demonstrably is not hits whatever else is there,
+//                       which changes the dashboard and therefore reads as a
+//                       SUCCESS to the pixel-diff guard - a wrong answer rather
+//                       than a wasted step.
 //
 //                       The caller must NOT cache this. Caching a rejection is
-//                       what turned one bad verdict into a dead run; the target
-//                       may simply be off screen, and a scroll can bring it in.
-export async function resolveClickPoint({ aim, target, locate }) {
+//                       what turned one bad verdict into a dead run, and the frame
+//                       changes from one step to the next.
+export async function resolveClickPoint({ aim, target, locate, refine }) {
   // Nothing to search for, so nothing to spend a call on.
   if (!target) return { nx: aim.nx, ny: aim.ny, source: "aim" };
 
-  const located = await locate();
+  // 1. The cheap, precise pass: magnify around the aim and snap onto the target.
+  const refined = await refine(aim.nx, aim.ny);
+  if (refined && !refined.notFound) {
+    return { nx: refined.nx, ny: refined.ny, source: "aim+refined" };
+  }
 
+  // 2. refined.notFound means only "not within ~11% of the aim"; refined === null
+  //    means the call died. Neither says anything about the rest of the frame, so
+  //    both ESCALATE to the global search rather than rejecting.
+  const located = await locate();
   if (located && !located.notFound) {
     return { nx: located.nx, ny: located.ny, source: "located" };
   }
 
-  // An explicit "not anywhere on this frame" is a real verdict; act on it.
+  // 3. A whole-frame search that came back empty is a real verdict about absence.
   if (located?.notFound) return { rejected: true, searched: true };
 
-  // located === null: the call died and says nothing. Degrade to the model's own
-  // aim rather than letting a refine/locate outage stop the agent from acting.
+  // 4. located === null: the call died and says nothing. Degrade to the model's
+  //    own aim rather than letting an outage stop the agent from acting.
   return { nx: aim.nx, ny: aim.ny, source: "aim" };
 }

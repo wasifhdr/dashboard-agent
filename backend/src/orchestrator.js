@@ -9,9 +9,7 @@ import path from "node:path";
 import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
-// refineClickPoint is deliberately NOT imported: the zoom pass is retained in
-// vlmClient for a possible precision step later, but it is out of the click path.
-import { getNextAction, locateTarget, activeModelName } from "./vlmClient.js";
+import { getNextAction, refineClickPoint, locateTarget, activeModelName } from "./vlmClient.js";
 import { resolveClickPoint } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
@@ -467,26 +465,27 @@ export async function runSession({
       break;
     }
 
-    // Aiming pass (pixel mode): ONE whole-frame "where is X?" call, whose answer
-    // replaces the model's own nx/ny. See clickAiming.js for why the zoom-refine
-    // pass is no longer here and why nothing may veto a located control. Done
-    // before the loop key and the dead-click guard, so every downstream consumer
-    // (guard, persistence, history, cursor overlay, actuator) sees the one point
-    // actually clicked.
+    // Aiming pass (pixel mode): zoom-refine around the model's aim first, and fall
+    // back to a whole-frame locate only if that comes back empty. See
+    // clickAiming.js for the measurements behind that order and for why neither
+    // pass may veto. Done before the loop key and the dead-click guard, so every
+    // downstream consumer (guard, persistence, history, cursor overlay, actuator)
+    // sees the one point actually clicked.
     if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
       const aimed = await resolveClickPoint({
         aim: { nx: action.nx, ny: action.ny },
         target: action.target ?? null,
+        refine: (nx, ny) =>
+          refineClickPoint({ config, imagePath: framePath, nx, ny, target: action.target ?? null, stopSignal }),
         locate: () =>
           locateTarget({ config, imagePath: framePath, target: action.target ?? null, stopSignal }),
       });
 
       if (aimed.rejected) {
-        // locate searched the whole frame and reported the element absent. The aim
-        // is deliberately NOT cached: caching one bad verdict is what turned a
-        // correct reading into a dead run on the newlyweds dashboard, and the
-        // target may simply be off screen - a scroll can bring it in, and then the
-        // same coordinates become right. The step budget and the
+        // Both passes declined, so the element is not on this frame. The aim is
+        // deliberately NOT cached: caching one bad verdict is what turned a correct
+        // reading into a dead run on the newlyweds dashboard, and the frame changes
+        // from one step to the next. The step budget and the
         // consecutiveNonProgress escalation are what bound a genuinely stuck run.
         //
         // The verdict is still worth one thing: it PROVES the target is not on
@@ -510,15 +509,16 @@ export async function runSession({
           clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
         });
         consecutiveNonProgress++;
-        // Says what was actually established - the element is not on this frame -
-        // and points at the remedy. The old wording ("your coordinates are wrong,
-        // not slightly off") was frequently false and pushed a correct reading
-        // away from the answer.
+        // States only what was established - the element is not on this frame - and
+        // deliberately suggests NO specific remedy. The old wording ("your
+        // coordinates are wrong, not slightly off") was frequently false and pushed
+        // a correct reading away from the answer; naming a remedy here (e.g.
+        // "scroll it into view") is just as likely to send the model chasing an
+        // action that does not apply. Let it choose.
         correctiveFeedback = withEscalation(
           `"${action.target ?? "That element"}" was not found anywhere on the current screenshot, so the click was not executed. ` +
-            `Your coordinates may well be fine - the element is simply not visible yet. If it belongs to a list or chart that is ` +
-            `cut off, SCROLL that list into view first (up as well as down) and click it on a later turn. Otherwise pick a different ` +
-            `element that IS visible, or answer from what is on screen.`,
+            `Your coordinates may well be fine - the element simply is not visible right now. Work with what IS on screen: ` +
+            `target a different element, make it visible first, or answer from what you can see.`,
         );
         history.push({ idx, key: actionKey(action), type: "click", status: "rejected_target", nx: action.nx, ny: action.ny, changed: false });
         prevFramePath = framePath;
