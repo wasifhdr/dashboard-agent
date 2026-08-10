@@ -581,7 +581,7 @@ git commit -m "Execute a scroll as a wheel event at a normalized viz point"
 
 ---
 
-### Task 5: Orchestrator scroll branch
+### Task 5: Orchestrator scroll branch — DONE 2026-08-10 (`1eebddb`)
 
 The largest task. It wires aiming, settling, the guard, host containment, persistence, and the live-view event.
 
@@ -592,7 +592,7 @@ The largest task. It wires aiming, settling, the guard, host containment, persis
 - Consumes: `ScrollAction` (Task 2); `isNearDeadScroll` / `clearStaleGuards` (Task 3); `executeActionWithTimeout(..., opts)` and `describeAction` (Task 4).
 - Produces: a persisted overlay field `scroll_point: {nx, ny, direction, target}` and an SSE event `{type:"agent_cursor", idx, nx, ny, phase:"scroll"}`, both consumed by Task 7.
 
-- [ ] **Step 1: Import the new guards and add the state**
+- [x] **Step 1: Import the new guards and add the state**
 
 Change the `pixelGuard` import:
 
@@ -614,7 +614,7 @@ After the `const rejectedAimPoints = [];` declaration, add:
   const guards = { deadClickPoints, rejectedAimPoints, deadScrollPoints };
 ```
 
-- [ ] **Step 2: Make `actionKey` cover scrolls**
+- [x] **Step 2: Make `actionKey` cover scrolls**
 
 In `actionKey`, after the `case "click"` return:
 
@@ -623,7 +623,7 @@ In `actionKey`, after the `case "click"` return:
       return `scroll:${action.nx.toFixed(2)},${action.ny.toFixed(2)}:${action.direction}`;
 ```
 
-- [ ] **Step 3: Let `persistAndEmit` carry a scroll point**
+- [x] **Step 3: Let `persistAndEmit` carry a scroll point**
 
 Add `scrollPoint = null` to the destructured parameter list of `persistAndEmit` (beside `clickPoint = null`), and extend the overlay line. Replace:
 
@@ -643,7 +643,7 @@ with:
     };
 ```
 
-- [ ] **Step 4: Exclude scrolls from the exact-repeat duplicate check**
+- [x] **Step 4: Exclude scrolls from the exact-repeat duplicate check**
 
 Repeating a scroll is the normal way to travel further down a long pane, so it must not be rejected as a duplicate. Replace:
 
@@ -663,7 +663,7 @@ with:
         : null;
 ```
 
-- [ ] **Step 5: Add the scroll branch**
+- [x] **Step 5: Add the scroll branch**
 
 Insert this immediately **after** the closing brace of the `if (action.type === "click") { ... }` block and before `const resolved = tracker.resolve(action.target_id);`:
 
@@ -843,7 +843,7 @@ Insert this immediately **after** the closing brace of the `if (action.type === 
     }
 ```
 
-- [ ] **Step 6: Make a successful click clear the dead scrolls too**
+- [x] **Step 6: Make a successful click clear the dead scrolls too**
 
 In the existing click branch's success path, replace:
 
@@ -864,7 +864,7 @@ with:
 
 This is the other half of the cross-clearing: a click that changes the view can replace a pane that had nothing scrollable with one that does, so a stale `deadScrollPoints` entry would wrongly reject a legitimate scroll.
 
-- [ ] **Step 7: Do NOT try to park the cursor — it does not work**
+- [x] **Step 7: Do NOT try to park the cursor — it does not work**
 
 Measured on the World Government Summit dashboard on 2026-08-10: moving the cursor onto an open dropdown highlights the row beneath it, and that highlight **persists after the cursor moves away** (cursor-parked vs cursor-moved-away: 0 changed regions, with the highlight visible in both). It is not a live hover state, so there is no "move the mouse somewhere harmless" fix.
 
@@ -872,7 +872,7 @@ The `beforeWheel` baseline in Step 5 is the mitigation, and it is sufficient: th
 
 One residual effect is accepted rather than fixed: the highlight remains in the frame the model reads on the *next* step, and on a dropdown a highlighted row can look like a selected one. Watch for it in Task 9 Step 7; the frame also still shows the real selection in the filter card's own label, so the cues are contradictory rather than uniformly wrong.
 
-- [ ] **Step 8: Verify the suite still passes**
+- [x] **Step 8: Verify the suite still passes**
 
 ```bash
 npm test
@@ -880,7 +880,7 @@ npm test
 
 Expected: PASS. These paths are not unit-testable (they need a browser); Task 9 exercises them for real.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/orchestrator.js
