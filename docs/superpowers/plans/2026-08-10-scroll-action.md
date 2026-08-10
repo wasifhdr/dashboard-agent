@@ -1,5 +1,9 @@
 # Scroll Action Implementation Plan
 
+> **COMPLETE — 2026-08-10.** All ten tasks done. Eval went 9/9 -> 10/10 with zero
+> movement on the carried-over questions; the motivating Remote Ratio question is
+> now scored and passing. 174 unit tests pass.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the agent a ninth action — a vertical mouse-wheel scroll at a normalized point on the viz — so it can read chart content that Tableau clips below the fold.
@@ -1247,7 +1251,7 @@ Temporarily set `"actuationMode": "api"` in `backend/config.json`, restart the b
 
 ---
 
-### Task 10: Eval question, docs, and the accuracy comparison
+### Task 10: Eval question, docs, and the accuracy comparison — DONE 2026-08-10 (`178db7e`)
 
 **Files:**
 - Modify: `backend/eval/questions.json`
@@ -1258,7 +1262,7 @@ Temporarily set `"actuationMode": "api"` in `backend/config.json`, restart the b
 - Consumes: the observed answer from Task 9 Step 2 and the baseline from Task 1.
 - Produces: nothing.
 
-- [ ] **Step 1: Replace the unanswerable eval question with a scored one**
+- [x] **Step 1: Replace the unanswerable eval question with a scored one**
 
 In `backend/eval/questions.json`, replace the whole `salaries_remote` entry with:
 
@@ -1280,7 +1284,7 @@ In `backend/eval/questions.json`, replace the whole `salaries_remote` entry with
 
 **Before committing, confirm the value against reality.** `M` comes from reading a post-scroll capture on 2026-08-10; if Task 9 Step 2's answer disagrees, re-capture the pane and settle it by eye rather than trusting either the model or this plan.
 
-- [ ] **Step 2: Record the new gotchas in CLAUDE.md**
+- [x] **Step 2: Record the new gotchas in CLAUDE.md**
 
 In the non-obvious-gotchas list, add:
 
@@ -1292,7 +1296,7 @@ In the non-obvious-gotchas list, add:
 
 Also update the `actionSchema.js` row of the backend module map from `8 action types` to `9 action types`, adding `scroll` to the parenthesised list, and note in the same row that `scroll` — like `click` — is pixel-mode only.
 
-- [ ] **Step 3: Close the deferral in the discoveries spec**
+- [x] **Step 3: Close the deferral in the discoveries spec**
 
 In `docs/superpowers/specs/2026-08-09-discoveries-memory-design.md`, under `## Deferred`, prefix the `scroll` paragraph with:
 
@@ -1300,7 +1304,7 @@ In `docs/superpowers/specs/2026-08-09-discoveries-memory-design.md`, under `## D
 **Resolved** by `2026-08-10-scroll-action-design.md` (implemented 2026-08-10).
 ```
 
-- [ ] **Step 4: Re-run the eval and compare against the baseline**
+- [x] **Step 4: Re-run the eval and compare against the baseline**
 
 From `backend/`:
 
@@ -1316,14 +1320,14 @@ git diff --no-index eval/baseline-2026-08-10.csv eval/results.csv
 
 Interpret it honestly. `salaries_remote_100` is **not** part of the accuracy comparison — it is a different question from the one in the baseline, so it is a standalone pass/fail. For every other question: this change added an action and two rules to `PIXEL_SYSTEM_TEMPLATE`, which perturbs the prompt for questions with nothing to scroll, so a single moved result is not automatically a regression. Treat a change as signal only if it reproduces on a second run, and investigate it before committing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/eval/questions.json CLAUDE.md docs/superpowers/specs/2026-08-09-discoveries-memory-design.md
 git commit -m "Score the Remote Ratio question now that scrolling reaches it"
 ```
 
-- [ ] **Step 6: Report the outcome**
+- [x] **Step 6: Report the outcome**
 
 State the baseline accuracy, the new accuracy, whether `salaries_remote_100` passed, and any per-question movement with your judgement on whether it reproduced. If the eval could not run because the API quota was spent, say so plainly rather than reporting a partial run as a pass.
 
