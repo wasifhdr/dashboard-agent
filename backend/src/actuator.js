@@ -25,7 +25,7 @@ function nearMatches(domain, value) {
   }).slice(0, 5);
 }
 
-async function executeAction(page, resolved, action) {
+async function executeAction(page, resolved, action, opts = {}) {
   try {
     switch (action.type) {
       case "set_filter": {
@@ -124,6 +124,26 @@ async function executeAction(page, resolved, action) {
         return { ok: true, point: { nx: action.nx, ny: action.ny, px, py } };
       }
 
+      case "scroll": {
+        const box = await page.locator(VIZ_SELECTOR).boundingBox();
+        if (!box || !box.width || !box.height) {
+          return { ok: false, error: "Viz element not measurable right now (mid-transition); try again." };
+        }
+        const { px, py } = vizPointToPagePixels(box, action.nx, action.ny);
+        const notch = Number(opts.notchPx) > 0 ? Number(opts.notchPx) : 300;
+        // move() first is REQUIRED: wheel() dispatches at the current cursor
+        // position, so without it the wheel lands wherever the mouse was left.
+        await page.mouse.move(px, py, { steps: 12 });
+        // Hook between the move and the wheel. Moving the cursor onto a pane
+        // leaves a highlight on the row beneath it, and that highlight persists
+        // even after the cursor leaves - so a caller that needs to tell a real
+        // scroll from our own hover artifact must baseline HERE, with the
+        // artifact already present. Nothing else belongs in this window.
+        if (typeof opts.beforeWheel === "function") await opts.beforeWheel();
+        await page.mouse.wheel(0, action.direction === "up" ? -notch : notch);
+        return { ok: true, point: { nx: action.nx, ny: action.ny, px, py } };
+      }
+
       default:
         return { ok: false, error: `Unsupported action type "${action.type}" for direct execution.` };
     }
@@ -132,13 +152,17 @@ async function executeAction(page, resolved, action) {
   }
 }
 
-export async function executeActionWithTimeout(page, resolved, action, timeoutMs) {
+// `opts` carries execution parameters that are NOT part of the model's validated
+// action - opts.notchPx (the wheel delta for a scroll) and opts.beforeWheel (a
+// hook awaited between the cursor move and the wheel). Kept off the action object
+// so what the schema validated is exactly what gets executed and persisted.
+export async function executeActionWithTimeout(page, resolved, action, timeoutMs, opts = {}) {
   let timer;
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve({ ok: false, error: `Action timed out after ${timeoutMs}ms.` }), timeoutMs);
   });
   try {
-    return await Promise.race([executeAction(page, resolved, action), timeout]);
+    return await Promise.race([executeAction(page, resolved, action, opts), timeout]);
   } finally {
     clearTimeout(timer);
   }
@@ -162,6 +186,8 @@ export function describeAction(action, resolved) {
       return `Fail${action.reason ? `: ${action.reason}` : ""}`;
     case "click":
       return `Click: ${action.target ?? `(${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
+    case "scroll":
+      return `Scroll ${action.direction}${action.target ? `: ${action.target}` : ` (${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
     default:
       return action.type;
   }
