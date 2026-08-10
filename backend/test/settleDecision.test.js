@@ -78,3 +78,24 @@ test("a second event restarts the quiet window", () => {
     "wait",
   );
 });
+
+// ---- the scroll path -------------------------------------------------------
+
+test("a scroll settles on stable pixels without waiting out the event grace window", () => {
+  // A scroll is a local re-render: no FilterChanged/ParameterChanged/TabSwitched
+  // ever arrives, so it must take the !expectBridgeEvent path.
+  assert.equal(
+    settleDecision({ pixelsStable: true, expectBridgeEvent: false, sawEvent: false, msSinceLastEvent: null, elapsedMs: 900, ...CFG }),
+    "settled",
+  );
+});
+
+test("REGRESSION: the same scroll would stall if it demanded a bridge event", () => {
+  // Documents the cost of "consistently" adding expectBridgeEvent:true to the
+  // scroll branch later: every scroll would burn the full 4500ms grace window
+  // waiting for an event that can never arrive.
+  assert.equal(
+    settleDecision({ pixelsStable: true, expectBridgeEvent: true, sawEvent: false, msSinceLastEvent: null, elapsedMs: 900, ...CFG }),
+    "wait",
+  );
+});

@@ -116,6 +116,39 @@ export default function Stage({
                       />
                     </g>
                   )}
+                  {/* A scroll is the one action whose whole point is that the view
+                      moved, so it must not be the one action with nothing on
+                      screen explaining it. Dashed ring rather than the click's
+                      solid one, plus an arrow for which way. */}
+                  {overlay?.scroll_point && (
+                    <g className="text-teal">
+                      <circle
+                        cx={overlay.scroll_point.nx * naturalSize.w}
+                        cy={overlay.scroll_point.ny * naturalSize.h}
+                        r={Math.max(14, naturalSize.w * 0.016)}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={Math.max(2, naturalSize.w * 0.002)}
+                        strokeDasharray={`${Math.max(4, naturalSize.w * 0.005)} ${Math.max(3, naturalSize.w * 0.004)}`}
+                      />
+                      <path
+                        d={(() => {
+                          const x = overlay.scroll_point.nx * naturalSize.w;
+                          const y = overlay.scroll_point.ny * naturalSize.h;
+                          const len = Math.max(10, naturalSize.w * 0.011);
+                          const head = Math.max(4, naturalSize.w * 0.004);
+                          const dir = overlay.scroll_point.direction === "up" ? -1 : 1;
+                          const tip = y + dir * len;
+                          return `M ${x} ${y - dir * len} L ${x} ${tip} M ${x - head} ${tip - dir * head} L ${x} ${tip} L ${x + head} ${tip - dir * head}`;
+                        })()}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={Math.max(2, naturalSize.w * 0.0025)}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </g>
+                  )}
                 </svg>
               )}
             </>
