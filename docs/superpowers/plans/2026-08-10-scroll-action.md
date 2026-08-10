@@ -151,7 +151,7 @@ git commit -m "Record the scroll baseline eval and settle two open probe questio
 
 ---
 
-### Task 2: `ScrollAction` in the schema, with coordinate rescue
+### Task 2: `ScrollAction` in the schema, with coordinate rescue — DONE 2026-08-10 (`6ed858b`)
 
 **Files:**
 - Modify: `backend/src/actionSchema.js`
@@ -162,7 +162,7 @@ git commit -m "Record the scroll baseline eval and settle two open probe questio
 - Consumes: nothing from Task 1.
 - Produces: the `scroll` member of `ActionSchema` with fields `{type:"scroll", nx:number 0..1, ny:number 0..1, direction:"down"|"up", target?:string}`, consumed by Tasks 4–7. `_internal.normalizeClickAction(action, dims)` keeps its exact signature and now also rescales scrolls.
 
-- [ ] **Step 1: Write the failing schema tests**
+- [x] **Step 1: Write the failing schema tests**
 
 Append to `backend/test/actionSchema.test.js`:
 
@@ -195,7 +195,7 @@ test("a scroll magnitude is not part of the contract", () => {
 });
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 npm test
@@ -203,7 +203,7 @@ npm test
 
 Expected: FAIL — the scroll cases report `Invalid discriminator value. Expected 'set_filter' | ... | 'click'`.
 
-- [ ] **Step 3: Add the schema variant**
+- [x] **Step 3: Add the schema variant**
 
 In `backend/src/actionSchema.js`, after `ClickAction`:
 
@@ -236,7 +236,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
 ]);
 ```
 
-- [ ] **Step 4: Run the schema tests to verify they pass**
+- [x] **Step 4: Run the schema tests to verify they pass**
 
 ```bash
 npm test
@@ -244,7 +244,7 @@ npm test
 
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing rescue test**
+- [x] **Step 5: Write the failing rescue test**
 
 Append to `backend/test/clickCoordRescale.test.js`:
 
@@ -265,7 +265,7 @@ test("an in-range scroll is returned by identity, not copied", () => {
 });
 ```
 
-- [ ] **Step 6: Run it to verify it fails**
+- [x] **Step 6: Run it to verify it fails**
 
 ```bash
 npm test
@@ -273,7 +273,7 @@ npm test
 
 Expected: FAIL — `normalizeClickAction` returns the action untouched because of its `type !== "click"` early return, so `fixed.nx` is still `83`.
 
-- [ ] **Step 7: Extend the rescue to scrolls, in both places**
+- [x] **Step 7: Extend the rescue to scrolls, in both places**
 
 In `backend/src/vlmClient.js`, change `normalizeClickAction`'s guard. Replace:
 
@@ -310,7 +310,7 @@ with:
 
 Changing only the function leaves the call site skipping scrolls entirely, so the rescue would never fire.
 
-- [ ] **Step 8: Run the full suite**
+- [x] **Step 8: Run the full suite**
 
 ```bash
 npm test
@@ -318,7 +318,7 @@ npm test
 
 Expected: PASS, all files.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/actionSchema.js backend/src/vlmClient.js backend/test/actionSchema.test.js backend/test/clickCoordRescale.test.js
