@@ -9,7 +9,9 @@ import path from "node:path";
 import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
-import { getNextAction, refineClickPoint, locateTarget, activeModelName } from "./vlmClient.js";
+// refineClickPoint is deliberately NOT imported: the zoom pass is retained in
+// vlmClient for a possible precision step later, but it is out of the click path.
+import { getNextAction, locateTarget, activeModelName } from "./vlmClient.js";
 import { resolveClickPoint } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
@@ -164,10 +166,13 @@ export async function runSession({
   let consecutiveNonProgress = 0;
   let noDiffClicks = 0; // consecutive pixel clicks that produced no visible change
   const deadClickPoints = []; // {nx,ny} of clicks that produced no change (pixel mode); cleared when a click changes the view
-  // {nx,ny} of aims the zoom check rejected AND the whole-frame search couldn't
-  // rescue. Separate from deadClickPoints because these were never executed:
-  // nothing was clicked, so nothing about the dashboard's state changed.
-  const rejectedAimPoints = [];
+  // There is deliberately NO cache of rejected AIMS. There used to be: an aim the
+  // aiming pass refused was remembered and every nearby retry pre-rejected without
+  // a model call. It turned a single wrong verdict into an unrecoverable run - on
+  // the newlyweds dashboard a Region combobox aim accurate to ~2% was refused,
+  // cached, and then every correct retry was blocked, so the session could only be
+  // stopped. A rejection now means "not on this frame", which a scroll can change,
+  // so it must not persist. See clickAiming.js.
   const deadClickRadius = config.pixel?.deadClickRadius ?? 0.05; // normalized radius for the repeat guard
   // {nx,ny,direction} of scrolls that produced no visible change - the pane was
   // already at its end, or nothing there scrolls. Those two are indistinguishable
@@ -181,7 +186,7 @@ export async function runSession({
   const scrollNotchPx = config.pixel?.scrollNotchPx ?? 300;
   // One bundle so a view-changing action can invalidate every stale judgement at
   // once - see clearStaleGuards. Holds the SAME array instances, not copies.
-  const guards = { deadClickPoints, rejectedAimPoints, deadScrollPoints };
+  const guards = { deadClickPoints, deadScrollPoints };
   const isPixelMode = (config.actuationMode ?? "pixel") === "pixel";
 
   function withEscalation(feedback) {
@@ -205,16 +210,12 @@ export async function runSession({
           `you see on screen), and pick a different id.`;
   }
 
-  // Shared wording for "that click was not executed because the target isn't
-  // where you aimed", so the two rejection paths can't drift apart.
-  function wrongAimFeedback(action, extra) {
-    return withEscalation(
-      `Your click was NOT executed: "${action.target ?? "the target"}" is not at (${action.nx.toFixed(2)},${action.ny.toFixed(2)}). ` +
-        (extra ? `${extra} ` : "") +
-        `Your coordinates are wrong, not slightly off — look at the screenshot again and read off where that element actually sits, ` +
-        `remembering nx/ny are fractions of the WHOLE image.`,
-    );
-  }
+  // (wrongAimFeedback removed with the rejected-aim cache. It asserted "your
+  // coordinates are wrong, not slightly off", which the aiming pass cannot
+  // actually establish - locate reports whether the element is on the FRAME, not
+  // whether the aim was good - and saying it to a model that had aimed correctly
+  // pushed it away from the right answer. The rejection path now states only what
+  // was established, and suggests scrolling.)
   let prevFramePath = null;
 
   function persistAndEmit({
@@ -466,82 +467,58 @@ export async function runSession({
       break;
     }
 
-    // Aiming pass (pixel mode): locate the named target on the whole frame,
-    // then zoom-refine around THAT - see clickAiming.js for why the model's own
-    // nx/ny is only a fallback hint. Done here, before the loop key and the
-    // dead-click guard, so every downstream consumer (guard, persistence,
-    // history, cursor overlay, actuator) sees the one point actually clicked.
+    // Aiming pass (pixel mode): ONE whole-frame "where is X?" call, whose answer
+    // replaces the model's own nx/ny. See clickAiming.js for why the zoom-refine
+    // pass is no longer here and why nothing may veto a located control. Done
+    // before the loop key and the dead-click guard, so every downstream consumer
+    // (guard, persistence, history, cursor overlay, actuator) sees the one point
+    // actually clicked.
     if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
-      // Cheapest guard first: an aim already proven wrong, with the whole-frame
-      // rescue below having failed on it too, is rejected before spending a
-      // single model call on it. Without this the same coarse point could come
-      // back verbatim step after step (observed: 0.68,0.46 re-emitted on steps
-      // 3, 4 and 8 of one run), each repeat paying for a refine call to learn
-      // what the previous step already knew.
-      if (isNearDeadPoint({ nx: action.nx, ny: action.ny }, rejectedAimPoints, deadClickRadius)) {
-        persistAndEmit({
-          idx, thought, action, status: "rejected_loop",
-          errorMsg: `Repeat aim near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}), already checked and wrong`,
-          framePath, inventory: inv, changedRegions,
-          startedAt: stepStartedAt, durationMs,
-          actionBadge: { text: "Rejected: repeat wrong aim", type: "click" },
-          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
-        });
-        consecutiveNonProgress++;
-        correctiveFeedback = wrongAimFeedback(action, "You have already aimed there and it was checked and rejected.");
-        history.push({ idx, key: actionKey(action), type: "click", status: "rejected_loop", nx: action.nx, ny: action.ny, changed: false });
-        prevFramePath = framePath;
-        continue;
-      }
-
       const aimed = await resolveClickPoint({
         aim: { nx: action.nx, ny: action.ny },
         target: action.target ?? null,
         locate: () =>
           locateTarget({ config, imagePath: framePath, target: action.target ?? null, stopSignal }),
-        refine: (nx, ny) =>
-          refineClickPoint({ config, imagePath: framePath, nx, ny, target: action.target ?? null, stopSignal }),
       });
 
       if (aimed.rejected) {
-        // Neither the whole-frame search nor the zoom around the model's own
-        // aim could put this element on the screen. Remember the aim as dead so
-        // an identical retry costs nothing next step.
-        rejectedAimPoints.push({ nx: action.nx, ny: action.ny });
-
-        // The aiming pass just PROVED this target is not on screen (locate
-        // searched the whole frame and refine agreed). A "discovery" recorded on
-        // this same step that names that same element therefore cannot be a
-        // reading - it is the model writing down what it expected to find once it
-        // got there. Retract it BEFORE persisting, so the fabrication never
-        // reaches the log, the next prompt, or the database.
+        // locate searched the whole frame and reported the element absent. The aim
+        // is deliberately NOT cached: caching one bad verdict is what turned a
+        // correct reading into a dead run on the newlyweds dashboard, and the
+        // target may simply be off screen - a scroll can bring it in, and then the
+        // same coordinates become right. The step budget and the
+        // consecutiveNonProgress escalation are what bound a genuinely stuck run.
         //
-        // Observed on the World Government Summit dashboard 2026-08-10: two
-        // country readings entered the log this way and a third followed in the
-        // answer, producing a fluent, confident reply built on values the agent
-        // had never seen. Deliberately narrow - a reading about anything ELSE on
-        // a rejected step is legitimate and survives.
-        if (aimed.searched && recorded.accepted && claimsAbsentTarget(recorded.text, action.target)) {
+        // The verdict is still worth one thing: it PROVES the target is not on
+        // this frame, so a "discovery" recorded on this same step naming that same
+        // element cannot be a reading - it is the model writing down what it
+        // expected to find once it got there. Retract it before persisting, so the
+        // fabrication never reaches the log, the next prompt, or the database.
+        // Observed on the World Government Summit dashboard 2026-08-10. Narrow by
+        // design: a reading about anything ELSE on this step is legitimate.
+        if (recorded.accepted && claimsAbsentTarget(recorded.text, action.target)) {
           discoveryLog.retract(recorded.key);
           stepDiscovery = null;
           onEvent({ type: "warning", idx, kind: "discovery_retracted" });
         }
         persistAndEmit({
           idx, thought, action, status: "rejected_target",
-          errorMsg: aimed.searched
-            ? `"${action.target ?? "target"}" was not found anywhere on screen`
-            : `"${action.target ?? "target"}" is not near (${action.nx.toFixed(2)},${action.ny.toFixed(2)})`,
+          errorMsg: `"${action.target ?? "target"}" was not found anywhere on screen`,
           framePath, inventory: inv, changedRegions,
           startedAt: stepStartedAt, durationMs,
           actionBadge: { text: "Rejected: not on screen", type: "click" },
           clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
         });
         consecutiveNonProgress++;
-        correctiveFeedback = wrongAimFeedback(
-          action,
-          aimed.searched
-            ? `A search of the whole screenshot could not find "${action.target ?? "that element"}" either — it may not be on screen at all.`
-            : "",
+        // Says what was actually established - the element is not on this frame -
+        // and points at the remedy. The old wording ("your coordinates are wrong,
+        // not slightly off") was frequently false and pushed a correct reading
+        // away from the answer.
+        correctiveFeedback = withEscalation(
+          `"${action.target ?? "That element"}" was not found anywhere on the current screenshot, so the click was not executed. ` +
+            `Your coordinates may well be fine - the element is simply not visible yet. If it belongs to a list or chart that is ` +
+            `cut off, SCROLL that list into view first (up as well as down) and click it on a later turn. Otherwise pick a different ` +
+            `element that IS visible, or answer from what is on screen.`,
         );
         history.push({ idx, key: actionKey(action), type: "click", status: "rejected_target", nx: action.nx, ny: action.ny, changed: false });
         prevFramePath = framePath;
