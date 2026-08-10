@@ -64,7 +64,7 @@ function flattenSteps(runs) {
 // `confirm` is App's promise-based ConfirmDialog opener (see ui/ConfirmDialog).
 // Taken as a prop rather than mounting a second dialog here so there is exactly
 // one overlay in the tree, anchored above Watch's fixed-viewport cockpit layout.
-export default function Watch({ mode, sessionId, conversationId, resumeConversationId, resumeRunningTurn, dashboardTarget, onBack, onEnd, onActiveRunChange, onDashboardChange, confirm }) {
+export default function Watch({ mode, sessionId, conversationId, resumeConversationId, resumeRunningTurn, dashboardTarget, onBack, onEnd, onActiveRunChange, confirm }) {
   const stream = useSessionStream(mode, {
     sessionId,
     conversationId,
@@ -115,7 +115,6 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
   const primaryRun = runs[0] ?? null;
   const lastRun = runs[runs.length - 1] ?? null;
   const isRunning = !!lastRun && !TERMINAL_STATUSES.has(lastRun.status);
-  const canPlay = runs.length > 0 && runs.every((r) => TERMINAL_STATUSES.has(r.status));
   const isPureReplay = !stream.everLive;
 
   useEffect(() => {
@@ -197,13 +196,6 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
     tts.speak(text);
   }
 
-  // Surface the resolved dashboard {name, url} to the app header (clickable
-  // link). In live mode the stream fills this in once the first turn opens the
-  // dashboard; in replay it comes from the loaded session.
-  useEffect(() => {
-    if (dashboard?.name || dashboard?.url) onDashboardChange?.({ name: dashboard.name, url: dashboard.url });
-  }, [dashboard?.name, dashboard?.url, onDashboardChange]);
-
   useEffect(() => {
     if (manualSelected || followLive || !primaryRun) return;
     const firstIdx = [...primaryRun.steps.keys()].sort((a, b) => a - b)[0];
@@ -257,11 +249,9 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
     if (selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1) selectStep(flatSteps[selectedFlatIdx + 1]);
   }
 
-  function togglePlay() {
-    if (sequencer.isPlaying) sequencer.pause();
-    else sequencer.play();
-  }
-
+  // Step scrubbing is keyboard + filmstrip only — the Prev/Next/Play buttons
+  // were removed so the bottom row stays a thin floating strip over the
+  // dashboard.
   useEffect(() => {
     function handleKey(e) {
       if (e.key === "ArrowLeft") goPrev();
@@ -403,9 +393,6 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
   // for the frozen last-step Stage before the user can read it.
   const showLive = !isPureReplay && followLive && (live.connected || !!live.closedReason);
 
-  const hasFrame = !!selectedStep;
-  const canPrev = selectedFlatIdx > 0;
-  const canNext = selectedFlatIdx >= 0 && selectedFlatIdx < flatSteps.length - 1;
   const warningKinds = lastRun ? [...new Set(lastRun.warnings.map((w) => w.kind))] : [];
 
   // Every dashboard status shares one row BELOW the frame — nothing is written
@@ -508,79 +495,68 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
           )}
         </div>
 
-        {/* Dashboard status row — one pill for every dashboard state. */}
-        <div className="flex h-7 shrink-0 items-center justify-center gap-2 px-4">
-          {stageStatus && (
-            <Badge variant={stageStatus.variant} pulse={stageStatus.pulse} className={stageStatus.className}>
-              {stageStatus.spinner && <Spinner className="size-3 shrink-0" />}
-              {stageStatus.text}
-            </Badge>
-          )}
-        </div>
-
-        {/* Bar under the dashboard: conversation + step history on the left,
-            step playback centered, session controls on the right. */}
-        <div className="flex shrink-0 items-center gap-2 px-4 py-3">
-          {/* Padding (not transform) so the row actually reflows: the step
-              history slides out from behind the open panel AND pushes the
-              playback controls along, instead of sliding over them. */}
-          <div
-            className={cx(
-              "flex flex-1 items-center gap-2 transition-[padding] duration-300 ease-glass motion-reduce:transition-none",
-              dockOpen && "min-[901px]:pl-[26rem]",
+        {/* Everything below floats OVER the bottom of the dashboard rather than
+            reserving a strip beneath it, so the frame gets the full canvas
+            height. The overlay itself is click-through; each control group
+            opts back in with pointer-events-auto. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5">
+          {/* Dashboard status pill — one pill for every dashboard state. Sits
+              directly above the control row, at the bottom of the canvas. */}
+          <div className="flex h-7 items-center justify-center gap-2 px-4">
+            {stageStatus && (
+              <Badge variant={stageStatus.variant} pulse={stageStatus.pulse} className={stageStatus.className}>
+                {stageStatus.spinner && <Spinner className="size-3 shrink-0" />}
+                {stageStatus.text}
+              </Badge>
             )}
-          >
-            {!dockOpen && (
-              <QuickAsk
-                isRunning={isRunning}
-                unread={unread}
-                onOpen={openDock}
-                onVoiceAsk={handleVoiceAsk}
-              />
-            )}
-            <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
           </div>
 
-          <div className="flex items-center gap-2">
-            {hasFrame && (
-              <>
-                <Button size="sm" variant="ghost" onClick={goPrev} disabled={!canPrev}>
-                  Prev
-                </Button>
-                <Button size="sm" variant="ghost" onClick={goNext} disabled={!canNext}>
-                  Next
-                </Button>
-                {canPlay && (
-                  <Button size="sm" variant="ghost" onClick={togglePlay}>
-                    {sequencer.isPlaying ? "Pause" : "Play"}
+          {/* Floating control row: conversation + step history on the left,
+              session controls on the right. */}
+          <div className="flex items-center gap-2 px-4 pb-3">
+            {/* Padding (not transform) so the row actually reflows: the step
+                history slides out from behind the open panel instead of
+                sliding over it. */}
+            <div
+              className={cx(
+                "pointer-events-auto flex flex-1 items-center gap-2 transition-[padding] duration-300 ease-glass motion-reduce:transition-none",
+                dockOpen && "min-[901px]:pl-[26rem]",
+              )}
+            >
+              {!dockOpen && (
+                <QuickAsk
+                  isRunning={isRunning}
+                  unread={unread}
+                  onOpen={openDock}
+                  onVoiceAsk={handleVoiceAsk}
+                />
+              )}
+              <Filmstrip runs={runs} selected={effectiveSelected} onSelect={selectStep} />
+            </div>
+
+            <div className="pointer-events-auto flex items-center justify-end gap-2">
+              {isPureReplay ? (
+                <>
+                  <Badge variant="neutral">REPLAY</Badge>
+                  <Button size="sm" variant="ghost" onClick={onBack}>
+                    Back to history
                   </Button>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="flex flex-1 items-center justify-end gap-2">
-            {isPureReplay ? (
-              <>
-                <Badge variant="neutral">REPLAY</Badge>
-                <Button size="sm" variant="ghost" onClick={onBack}>
-                  Back to history
-                </Button>
-              </>
-            ) : (
-              mode === "live" && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={handleEndSession}
-                  className="gap-2"
-                  title="End session and return to the landing page (the live dashboard closes in the background)."
-                >
-                  <StopIcon />
-                  End session
-                </Button>
-              )
-            )}
+                </>
+              ) : (
+                mode === "live" && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={handleEndSession}
+                    className="gap-2"
+                    title="End session and return to the landing page (the live dashboard closes in the background)."
+                  >
+                    <StopIcon />
+                    End session
+                  </Button>
+                )
+              )}
+            </div>
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cx } from "../../components/ui/cx.js";
 import CapsLabel from "../../components/ui/CapsLabel.jsx";
-import { IDLE_COMPOSER_H } from "./ChatDock.jsx";
+import { threadBottomClearance } from "./ChatDock.jsx";
 import { speakableAnswer } from "./speech.js";
 import Spinner from "../../components/ui/Spinner.jsx";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
@@ -431,13 +431,15 @@ export default function Feed({
   // rather than a fixed class. Because that arrives as a prop, a growing
   // composer re-renders the Feed, and the scroll effect above then re-pins the
   // thread to the bottom: the messages slide up instead of being overlapped.
-  // The fallback covers the first paint, before the composer has been measured.
+  // The exact number is ChatDock's to decide (threadBottomClearance) because it
+  // also has to clear that panel's blur ramp, not just the bubble; its fallback
+  // covers the first paint, before the composer has been measured.
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       aria-live="polite"
-      style={{ paddingBottom: `${(composerHeight || IDLE_COMPOSER_H) + 28}px` }}
+      style={{ paddingBottom: `${threadBottomClearance(composerHeight)}px` }}
       className="thin-scrollbar flex h-full flex-col gap-3 overflow-y-auto px-4 pt-14 text-fg"
     >
       {/* Spacer to push content to the bottom */}

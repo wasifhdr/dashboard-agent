@@ -37,7 +37,7 @@ function ThemeToggle() {
   );
 }
 
-export default function AppShell({ view, onNavigate, headerCenter, children }) {
+export default function AppShell({ view, onNavigate, children }) {
   // Landing manages its own full-width marketing bands; watch manages its own
   // full-height stage/feed/composer layout. Only history uses the default
   // padded content wrapper (DESIGN.md §6).
@@ -58,17 +58,6 @@ export default function AppShell({ view, onNavigate, headerCenter, children }) {
           >
             Dashboard Agent
           </button>
-          {headerCenter?.name && (
-            <a
-              href={headerCenter.url}
-              target="_blank"
-              rel="noreferrer"
-              title={`Open “${headerCenter.name}” on Tableau Public`}
-              className="absolute left-1/2 max-w-[45%] -translate-x-1/2 truncate rounded-control px-2 text-sm font-bold text-white/90 hover:text-white hover:underline focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
-            >
-              {headerCenter.name}
-            </a>
-          )}
           <nav className="flex items-center gap-2">
             {view === "watch" && (
               <button type="button" onClick={() => onNavigate("landing")} className={NAV_LINK_BASE}>

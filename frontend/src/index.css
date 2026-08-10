@@ -616,7 +616,9 @@ body {
 .stage-crossfade .frame-layer {
   display: block;
   max-width: 100%;
-  max-height: calc(100dvh - 12rem);
+  /* Only the app header + the stage wrapper's padding are reserved: the status
+     pill and the bottom control row float over the frame (see Watch.jsx). */
+  max-height: calc(100dvh - 7rem);
   width: auto;
   height: auto;
 }

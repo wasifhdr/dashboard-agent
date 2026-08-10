@@ -37,21 +37,35 @@ function MinimizeIcon({ className = "size-4" }) {
   );
 }
 
-// Height of the idle one-line composer bubble: py-2 (8+8) + the size-10 action
-// buttons (40) + its hairline border (2). Used only for the first paint, before
-// the ResizeObserver in Watch has reported the real height — measuring it live is
-// what keeps the thread's clearance and the blur ramp attached to the bubble as
-// it grows. Exported so Feed uses the same number rather than a second guess.
-export const IDLE_COMPOSER_H = 58;
+// Height of the idle composer bubble, measured: pt-2.5 (10) + one line of
+// textarea (24) + gap-1 (4) + the size-10 action buttons on their own row (40)
+// + pb-2 (8) + its hairline border (2). Used only for the first paint, before
+// the ResizeObserver in Watch has reported the real height — measuring it live
+// is what keeps the thread's clearance and the blur ramp attached to the bubble
+// as it grows.
+const IDLE_COMPOSER_H = 88;
 
 // How far the composer's frosting reaches ABOVE the bubble before it has fully
 // ramped off, so messages soften on approach instead of hitting a hard edge.
-const VEIL_RAMP = 56;
+const VEIL_RAMP = 40;
+
+// Clear air between where the ramp reaches zero and where the thread's last
+// message comes to rest, so a resting bubble is never even slightly blurred.
+const VEIL_CLEARANCE = 10;
 
 // Full strength across the bubble's footprint (its height + the p-3 gutter),
 // then a linear ramp to nothing over VEIL_RAMP above it.
 const VEIL_MASK = (footerHeight) =>
   `linear-gradient(to top, #000 ${(footerHeight || IDLE_COMPOSER_H) + 12}px, transparent 100%)`;
+
+// Bottom padding the thread needs so its last message rests ABOVE the veil
+// entirely — the composer footprint, the whole ramp, and a little clear air.
+// Derived from the veil's own numbers rather than being a second hand-tuned
+// constant: when the two were independent the ramp reached ~40px past the
+// resting bubble's bottom edge and permanently blurred it, which reads as the
+// message being out of focus rather than as depth.
+export const threadBottomClearance = (footerHeight) =>
+  (footerHeight || IDLE_COMPOSER_H) + 12 + VEIL_RAMP + VEIL_CLEARANCE;
 
 const TRIGGER_BASE =
   "glass-teal relative flex items-center rounded-pill text-fg transition-transform duration-150 ease-glass " +

@@ -16,7 +16,7 @@ function viewForPath(pathname) {
   return "landing";
 }
 
-function ConversationReplay({ onActiveRunChange, onDashboardChange }) {
+function ConversationReplay({ onActiveRunChange }) {
   const { id } = useParams();
   const navigate = useNavigate();
   return (
@@ -25,12 +25,11 @@ function ConversationReplay({ onActiveRunChange, onDashboardChange }) {
       conversationId={id}
       onBack={() => navigate("/history")}
       onActiveRunChange={onActiveRunChange}
-      onDashboardChange={onDashboardChange}
     />
   );
 }
 
-function SessionReplay({ onActiveRunChange, onDashboardChange }) {
+function SessionReplay({ onActiveRunChange }) {
   const { id } = useParams();
   const navigate = useNavigate();
   return (
@@ -39,7 +38,6 @@ function SessionReplay({ onActiveRunChange, onDashboardChange }) {
       sessionId={id}
       onBack={() => navigate("/history")}
       onActiveRunChange={onActiveRunChange}
-      onDashboardChange={onDashboardChange}
     />
   );
 }
@@ -49,7 +47,7 @@ function SessionReplay({ onActiveRunChange, onDashboardChange }) {
 // the open dashboard, its filters, and the thread. Otherwise we open the
 // dashboard carried in router location state (set by Landing, and preserved
 // across reloads because it lives in history.state).
-function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
+function LiveWatch({ onActiveRunChange, onEnd, confirm }) {
   const location = useLocation();
   const requested = location.state?.dashboard ?? null;
   const [resolved, setResolved] = useState(null); // null = still checking
@@ -107,8 +105,7 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
         onActiveRunChange={onActiveRunChange}
         onEnd={onEnd}
         confirm={confirm}
-        onDashboardChange={onDashboardChange}
-      />
+        />
     );
   }
 
@@ -120,16 +117,12 @@ function LiveWatch({ onActiveRunChange, onDashboardChange, onEnd, confirm }) {
       onActiveRunChange={onActiveRunChange}
       onEnd={onEnd}
       confirm={confirm}
-      onDashboardChange={onDashboardChange}
     />
   );
 }
 
 export default function App() {
   const [watchHasActiveRun, setWatchHasActiveRun] = useState(false);
-  // The live dashboard {name, url} Watch is currently showing, surfaced in the
-  // top header as a clickable link. Null outside the watch/replay views.
-  const [watchDashboard, setWatchDashboard] = useState(null);
   const [confirm, confirmProps] = useConfirm();
   const navigate = useNavigate();
   const location = useLocation();
@@ -142,23 +135,20 @@ export default function App() {
   // because that one really does close the runtime.
   function handleNavigate(nextView) {
     setWatchHasActiveRun(false);
-    setWatchDashboard(null);
     navigate(nextView === "history" ? "/history" : "/");
   }
 
   function endLiveWatch() {
     setWatchHasActiveRun(false);
-    setWatchDashboard(null);
     navigate("/");
   }
 
   const watchProps = {
     onActiveRunChange: setWatchHasActiveRun,
-    onDashboardChange: setWatchDashboard,
   };
 
   return (
-    <AppShell view={view} onNavigate={handleNavigate} headerCenter={view === "watch" ? watchDashboard : null}>
+    <AppShell view={view} onNavigate={handleNavigate}>
       <Routes>
         <Route
           path="/"

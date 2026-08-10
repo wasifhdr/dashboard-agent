@@ -243,65 +243,71 @@ export default function Composer({
 
   return (
     <div className="glass-pane rounded-card">
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 py-2 pl-4 pr-2">
+      {/* Two rows, not one: the question gets the bubble's FULL width and the
+          controls sit under it. Beside the buttons the text was wrapping in a
+          column about a third narrower than the bubble, so a long question
+          stacked into a tall thin block with dead space to its right. */}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-1 px-3 pb-2 pt-2.5">
         <textarea
           ref={inputRef}
           rows={1}
-          className="thin-scrollbar min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-relaxed text-fg placeholder:text-fg/40 focus:outline-none"
+          className="thin-scrollbar w-full resize-none bg-transparent px-1 text-[15px] leading-relaxed text-fg placeholder:text-fg/40 focus:outline-none"
           placeholder={hasPriorRun ? "Ask a follow-up…" : "Ask anything about this dashboard…"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           aria-label="Ask a question about this dashboard"
         />
-        {canReadAloud && (
-          <button
-            type="button"
-            onClick={onToggleReadAloud}
-            aria-label={readAloud ? "Turn off reading answers aloud" : "Read answers aloud"}
-            aria-pressed={readAloud}
-            title={readAloud ? "Answers are read aloud" : "Answers are not read aloud"}
-            className={cx(
-              "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
-              "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
-              readAloud ? "bg-teal/15 text-teal-ink" : "text-fg/55 hover:bg-glass-hover hover:text-fg",
-            )}
+        <div className="flex items-center justify-end gap-1">
+          {canReadAloud && (
+            <button
+              type="button"
+              onClick={onToggleReadAloud}
+              aria-label={readAloud ? "Turn off reading answers aloud" : "Read answers aloud"}
+              aria-pressed={readAloud}
+              title={readAloud ? "Answers are read aloud" : "Answers are not read aloud"}
+              className={cx(
+                "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
+                "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
+                readAloud ? "bg-teal/15 text-teal-ink" : "text-fg/55 hover:bg-glass-hover hover:text-fg",
+              )}
+            >
+              <SpeakerIcon muted={!readAloud} />
+            </button>
+          )}
+          {dictation.supported && (
+            <button
+              type="button"
+              onClick={handleMicClick}
+              aria-label={dictation.listening ? "Stop dictating" : "Dictate your question"}
+              aria-pressed={dictation.listening}
+              title={dictation.listening ? "Stop dictating" : "Dictate your question"}
+              className={cx(
+                "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
+                "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
+                dictation.listening
+                  ? "ready-ping relative bg-coral/15 text-coral-ink"
+                  : "text-fg/55 hover:bg-glass-hover hover:text-fg",
+              )}
+            >
+              <MicIcon />
+            </button>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            aria-label="Send question"
+            className="size-10 shrink-0 !p-0"
+            disabled={submitting || !value.trim()}
           >
-            <SpeakerIcon muted={!readAloud} />
-          </button>
-        )}
-        {dictation.supported && (
-          <button
-            type="button"
-            onClick={handleMicClick}
-            aria-label={dictation.listening ? "Stop dictating" : "Dictate your question"}
-            aria-pressed={dictation.listening}
-            title={dictation.listening ? "Stop dictating" : "Dictate your question"}
-            className={cx(
-              "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
-              "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
-              dictation.listening
-                ? "ready-ping relative bg-coral/15 text-coral-ink"
-                : "text-fg/55 hover:bg-glass-hover hover:text-fg",
-            )}
-          >
-            <MicIcon />
-          </button>
-        )}
-        <Button
-          type="submit"
-          variant="primary"
-          aria-label="Send question"
-          className="size-10 shrink-0 !p-0"
-          disabled={submitting || !value.trim()}
-        >
-          <SendIcon />
-        </Button>
+            <SendIcon />
+          </Button>
+        </div>
       </form>
 
       {/* Transient only — both the mic and the read-aloud toggle live in the
-          row above, so the idle composer stays exactly one line tall. This
-          appears solely while dictating or after a mic failure. */}
+          controls row above, so the idle composer stays one line of text plus
+          that row. This appears solely while dictating or after a mic failure. */}
       {(dictation.listening || dictation.error) && (
         <div className="px-4 pb-2 text-xs text-fg/50">
           {dictation.error ? (

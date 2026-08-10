@@ -19,26 +19,35 @@ import { cx } from "../../components/ui/cx.js";
 // coordinate contract (docs/LIVE_TAKEOVER_PLAN.md's B2 input coordinate
 // contract).
 
-// Agent-cursor glyph: the "cursor-pointer" outline hand from SVG Repo
-// (svgrepo.com), inlined rather than imported so it paints with the frame
-// instead of costing a request on first click.
+// Agent-cursor glyph: the "cursor" arrow pointer by mbok sumirna, from the
+// Noun Project (noun-cursor-8212745). Inlined rather than imported so it paints
+// with the frame instead of costing a request on first click - the .svg is
+// therefore only the source of this path, not a runtime asset.
 const CURSOR_GLYPH_PATH =
-  "M38.1,16.1a4.8,4.8,0,0,0-2.7.2A4.9,4.9,0,0,0,31.2,14l-1.3.2A4.8,4.8,0,0,0,25.4,11h-1V7.2a5,5,0,0,0-5.8-5.1,5.1,5.1,0,0,0-4,5V21.9l-2.4-2.4A4.9,4.9,0,0,0,8.7,18a4.6,4.6,0,0,0-3.4,1.5,4.1,4.1,0,0,0-1.3,3,7.9,7.9,0,0,0,1.3,4C6.5,28.7,13.8,41.3,16,45a1.9,1.9,0,0,0,1.7,1H36.5a2,2,0,0,0,2-1.5l3.4-13.2a1.3,1.3,0,0,0,.1-.6V21.2A5.2,5.2,0,0,0,38.1,16.1ZM35.1,42H18.8c-2.7-4.5-9-15.5-10.1-17.5-.1-.2-1.1-1.8-.7-2.2l.7-.3a1.1,1.1,0,0,1,.7.3l5.8,6a2,2,0,0,0,3.3-1.4V7a1,1,0,0,1,2,0V21a1.9,1.9,0,0,0,1.9,2h0a2,2,0,0,0,2-2V16a1,1,0,0,1,1-1,1,1,0,0,1,.9,1v6a2,2,0,0,0,2,2h0a2,2,0,0,0,2-2V19a.9.9,0,0,1,.9-1,.9.9,0,0,1,1,1v5a2,2,0,0,0,2,2h0a1.9,1.9,0,0,0,1.9-2V21a1,1,0,0,1,2,0v9.5a1.3,1.3,0,0,1-.1.6Z";
-const CURSOR_VIEWBOX = 48; // the source icon's coordinate space
-const CURSOR_GLYPH_PX = 26; // rendered size on the frame
+  "m78.441 53.051-52.25-47.461c-1.4297-1.2969-3.7188-0.32422-3.7773 1.6055l-2.1562 70.555c-0.10156 3.2617 3.5625 5.2461 6.2383 3.375l13.215-9.2344c1.3008-0.90625 3.1055-0.39062 3.7227 1.0703l7.0117 16.516c1.7773 4.1836 6.5039 6.6055 10.777 5.0508 4.5547-1.6602 6.7383-6.7695 4.8672-11.176l-7.1953-16.953c-0.62109-1.457 0.26172-3.1172 1.8164-3.4219l15.824-3.0938c3.2031-0.625 4.3242-4.6367 1.9062-6.832z";
+// Tight box around the arrow (ink spans x 20.3-79.9, y 5.0-94.9), leaving ~2.3
+// units on every side for the outer half of the halo stroke below. NOT the
+// source file's own viewBox, which is padded out to 110x135 to make room for
+// the Noun Project attribution text (that text is dropped here; the credit
+// lives in the comment above instead).
+const CURSOR_VIEWBOX = { x: 17.5, y: 2.5, w: 65, h: 95 };
+const CURSOR_GLYPH_H = 28; // rendered height on the frame
+const CURSOR_GLYPH_W = Math.round((CURSOR_GLYPH_H * CURSOR_VIEWBOX.w) / CURSOR_VIEWBOX.h);
 
-// Where the glyph actually "points": the index fingertip, NOT the glyph's
-// top-left corner. Measured off the real path rather than eyeballed - sampling
-// it with getPointAtLength puts the topmost point at y=2.04, and the finger's
-// edges at x=14.6/24.4 (so centre 19.5). The wrapper is shifted by this much so
-// the fingertip lands exactly on the clicked point, and the click ripple is
-// centred on it. Swap the glyph and you MUST redo this, or the hand points
-// somewhere other than where the agent clicked - which reads as authoritative
-// while being wrong, and is worse than showing no cursor at all.
-const CURSOR_HOTSPOT_VB = { x: 19.5, y: 2.04 };
+// Where the glyph actually "points": the arrow's tip, NOT the glyph's top-left
+// corner. Measured off the real path rather than eyeballed - the tip is a
+// rounded corner (a cubic from 26.191,5.590 to 22.414,7.195), so this is the
+// outermost point of the drawn ink along the pointing direction, at t≈0.5 of
+// that curve, rather than the sharper virtual corner at (22.56, 2.30) which is
+// a couple of units outside the ink. The wrapper is shifted by this much so the
+// tip lands exactly on the clicked point, and the click ripple is centred on
+// it. Swap the glyph and you MUST redo this, or the pointer points somewhere
+// other than where the agent clicked - which reads as authoritative while being
+// wrong, and is worse than showing no cursor at all.
+const CURSOR_HOTSPOT_VB = { x: 23.79, y: 5.18 };
 const CURSOR_HOTSPOT = {
-  x: (CURSOR_HOTSPOT_VB.x / CURSOR_VIEWBOX) * CURSOR_GLYPH_PX,
-  y: (CURSOR_HOTSPOT_VB.y / CURSOR_VIEWBOX) * CURSOR_GLYPH_PX,
+  x: ((CURSOR_HOTSPOT_VB.x - CURSOR_VIEWBOX.x) / CURSOR_VIEWBOX.w) * CURSOR_GLYPH_W,
+  y: ((CURSOR_HOTSPOT_VB.y - CURSOR_VIEWBOX.y) / CURSOR_VIEWBOX.h) * CURSOR_GLYPH_H,
 };
 
 // Maps the browser's numeric MouseEvent/PointerEvent.button code to the
@@ -218,13 +227,18 @@ export default function LiveStage({
   const aspectH = canCrop ? vizBox.nh * viewport.height : 1;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-4">
-      <div className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col items-center justify-center">
+    <div className="flex min-h-0 flex-1 flex-col p-2">
+      <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col items-center justify-center">
         <div
           className={cx(
-            "glass shadow-teal-glow relative w-full overflow-hidden rounded-card-lg transition-shadow",
+            "glass shadow-teal-glow relative mx-auto w-full overflow-hidden rounded-card-lg transition-shadow",
             interactive && "ring-1 ring-teal/50",
           )}
+          // The height budget caps the CARD, not just the frame inside it, so
+          // the card hugs the viz instead of stretching to the (now uncapped)
+          // column width and leaving dead glass either side of it — which is
+          // also where the "Live" badge and the ring would otherwise sit.
+          style={canCrop ? { maxWidth: `calc((100dvh - 7rem) * ${aspectW} / ${aspectH})` } : undefined}
         >
           {liveFrameUrl ? (
             canCrop ? (
@@ -233,13 +247,14 @@ export default function LiveStage({
                 style={{
                   width: "100%",
                   aspectRatio: `${aspectW} / ${aspectH}`,
-                  // Without a height bound this fixed-aspect box overflows the
-                  // overflow-hidden card above it on short windows and the
-                  // bottom of the dashboard is silently clipped (the image is
-                  // sized in % of THIS box, so it doesn't scale down when the
-                  // flex item shrinks). Cap the width by the height budget
-                  // instead, so the box shrinks whole and keeps its aspect.
-                  maxWidth: `calc((100dvh - 14rem) * ${aspectW} / ${aspectH})`,
+                  // Height bound lives on the card above (see its comment):
+                  // without one this fixed-aspect box overflows the
+                  // overflow-hidden card on short windows and the bottom of the
+                  // dashboard is silently clipped (the image is sized in % of
+                  // THIS box, so it doesn't scale down when the flex item
+                  // shrinks). The budget there is only the app header plus this
+                  // wrapper's padding: the status pill and bottom control row
+                  // float OVER the frame now, so they reserve no height.
                 }}
               >
                 <img
@@ -264,22 +279,25 @@ export default function LiveStage({
                       transform: `translate(${-CURSOR_HOTSPOT.x}px, ${-CURSOR_HOTSPOT.y}px)`,
                     }}
                   >
-                    {/* pointer glyph. The icon is an OUTLINE (hollow palm), so a
-                        plain black fill vanishes on a dark dashboard - the
-                        Netflix one is near-black. paint-order:stroke lays a white
-                        stroke BEHIND the fill, giving a halo that keeps it legible
-                        on any background without altering the icon's geometry. */}
+                    {/* pointer glyph. The icon is a SOLID arrow, so a plain black
+                        fill vanishes on a dark dashboard - the Netflix one is
+                        near-black. paint-order:stroke lays a white stroke BEHIND
+                        the fill, giving a halo that keeps it legible on any
+                        background without altering the icon's geometry. */}
                     <svg
-                      width={CURSOR_GLYPH_PX}
-                      height={CURSOR_GLYPH_PX}
-                      viewBox={`0 0 ${CURSOR_VIEWBOX} ${CURSOR_VIEWBOX}`}
+                      width={CURSOR_GLYPH_W}
+                      height={CURSOR_GLYPH_H}
+                      viewBox={`${CURSOR_VIEWBOX.x} ${CURSOR_VIEWBOX.y} ${CURSOR_VIEWBOX.w} ${CURSOR_VIEWBOX.h}`}
                       aria-hidden="true"
                     >
+                      {/* strokeWidth is in viewBox units, so it scales with the
+                          glyph: 4.5/95 of a 28px render is the same ~1.3px halo
+                          the previous (differently-scaled) icon had. */}
                       <path
                         d={CURSOR_GLYPH_PATH}
                         fill="black"
                         stroke="white"
-                        strokeWidth="2.5"
+                        strokeWidth="4.5"
                         strokeLinejoin="round"
                         style={{ paintOrder: "stroke" }}
                       />
@@ -308,7 +326,7 @@ export default function LiveStage({
                   src={liveFrameUrl}
                   alt={dashboardName ? `Live view of ${dashboardName}` : "Live dashboard view"}
                   draggable={false}
-                  className="block max-h-[calc(100dvh-12rem)] w-full object-contain"
+                  className="block max-h-[calc(100dvh-7rem)] w-full object-contain"
                 />
               </div>
             )

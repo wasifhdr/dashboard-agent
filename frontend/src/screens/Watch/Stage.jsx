@@ -4,8 +4,9 @@ import CrossfadeImage from "../../components/CrossfadeImage.jsx";
 import Button from "../../components/ui/Button.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 
-// Dashboard frame viewport. Playback controls (Prev/Next/Play) now live in the
-// thread header ("Ask the Agent" row), so the frame gets the full column height here.
+// Dashboard frame viewport. There are no playback buttons any more (step
+// navigation is the filmstrip plus the arrow keys), and the status pill and
+// control row float over the frame, so it gets the full column height here.
 export default function Stage({
   step,
   showOverlay,
@@ -31,8 +32,8 @@ export default function Stage({
   const showingPreview = !loadingState && !step?.frameUrl && !!previewUrl;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-4">
-      <div className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col items-center justify-center">
+    <div className="flex min-h-0 flex-1 flex-col p-2">
+      <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col items-center justify-center">
         {showJumpToLivePill && (
           <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2">
             <Badge variant="info">Viewing step {step?.idx}</Badge>
@@ -50,7 +51,7 @@ export default function Stage({
               <img
                 src={loadingState.thumbnailUrl}
                 alt=""
-                className="max-h-[calc(100dvh-12rem)] w-full object-contain opacity-50"
+                className="max-h-[calc(100dvh-7rem)] w-full object-contain opacity-50"
               />
             ) : (
               <div className="py-24" />
@@ -62,7 +63,7 @@ export default function Stage({
               <img
                 src={previewUrl}
                 alt={dashboardName ? `Default view of ${dashboardName}` : "Dashboard default view"}
-                className="max-h-[calc(100dvh-12rem)] w-full object-contain"
+                className="max-h-[calc(100dvh-7rem)] w-full object-contain"
               />
             ) : (
               <div className="flex flex-col items-center gap-2 py-24 text-center">
