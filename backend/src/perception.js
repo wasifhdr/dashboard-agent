@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { chromium } from "playwright";
 import sharp from "sharp";
 import pixelmatch from "pixelmatch";
@@ -41,8 +43,59 @@ export async function openSession(browser, hostOrigin, vizUrl, { firstLoadTimeou
   return { context, page };
 }
 
+// Pure: the viz rectangle as an integer crop of the viewport, or null when the
+// element isn't fully inside the viewport (in which case a viewport screenshot
+// physically cannot contain all of it and the caller must fall back).
+// Split out so the arithmetic is unit-testable without a browser.
+export function vizExtractRect(box, viewport) {
+  if (!box || !viewport || !viewport.width || !viewport.height) return null;
+  if (!box.width || !box.height) return null;
+  const EPS = 0.5; // sub-pixel layout positions are not "outside the viewport"
+  const fits =
+    box.x >= -EPS &&
+    box.y >= -EPS &&
+    box.x + box.width <= viewport.width + EPS &&
+    box.y + box.height <= viewport.height + EPS;
+  if (!fits) return null;
+  const left = Math.max(0, Math.round(box.x));
+  const top = Math.max(0, Math.round(box.y));
+  return {
+    left,
+    top,
+    width: Math.min(Math.round(box.width), viewport.width - left),
+    height: Math.min(Math.round(box.height), viewport.height - top),
+  };
+}
+
+// The viz as PNG bytes.
+//
+// Deliberately NOT `locator.screenshot()`: that is a *clipped* capture, and
+// Chromium services a clipped capture by re-rendering the page at the clip's
+// device metrics, which an active CDP screencast then broadcasts as a real
+// frame - the dashboard blown up to fill the surface for a frame or two.
+// Captured in the wild during a real agent turn: a 258KB frame among 183KB
+// neighbours, on screen for ~475ms. Taking the shot UNCLIPPED and cropping it
+// here produces byte-identical output with no re-render at all (measured 0
+// distorted frames over 8 captures, vs 8/8 clipped), so the live view needs no
+// suppression and can never be left holding a stale or distorted frame.
+//
+// The fallback keeps the old behaviour when the viz is bigger than the
+// viewport, where a viewport screenshot would silently truncate what the model
+// sees. Correctness of the agent's input beats a smooth live view, so that
+// path clips and accepts the pop. No configured dashboard reaches it - all
+// five publish sizes that fit inside 1920x1200.
+async function captureVizPng(page) {
+  const box = await page.locator(VIZ_SELECTOR).boundingBox();
+  const rect = vizExtractRect(box, page.viewportSize());
+  if (rect) {
+    const full = await page.screenshot({ type: "png" });
+    return await sharp(full).extract(rect).png().toBuffer();
+  }
+  return await page.locator(VIZ_SELECTOR).screenshot({ type: "png" });
+}
+
 async function rawSmallBuffer(page) {
-  const buf = await page.locator(VIZ_SELECTOR).screenshot({ type: "png" });
+  const buf = await captureVizPng(page);
   const { data, info } = await sharp(buf)
     .resize({ width: 640 })
     .ensureAlpha()
@@ -166,7 +219,8 @@ export async function waitForSettle(page, settleConfig, { expectBridgeEvent = fa
 }
 
 export async function screenshotViz(page, outPath) {
-  await page.locator(VIZ_SELECTOR).screenshot({ path: outPath });
+  const buf = await captureVizPng(page);
+  await fs.promises.writeFile(outPath, buf);
 }
 
 // Coarse bounding-box clustering of pixel-diff regions between two frames,
