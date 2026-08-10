@@ -105,14 +105,15 @@
       "notes": "UNSCORED. The bubble chart is too dense to establish truth even by careful manual inspection; only two bubbles carry labels. Both arms of the domain A/B answered 'Ed Sheeran', which is the value selected in the Artists dropdown rather than the largest bubble - i.e. plausibly wrong, but unprovable either way. Kept as a documented weak spot: this is one of config.dashboards' exampleQuestions and is a poor demo choice."
     },
     {
-      "id": "salaries_remote",
+      "id": "salaries_remote_100",
       "dashboard_url": "https://public.tableau.com/views/DataScienceSalariesintheUSDashboard/Dashboard1",
       "kind": "actuate",
-      "question": "Using the Remote Ratio filter, set it to 100 (fully remote) and describe how the average salary trends change.",
-      "scored": false,
-      "expect": null,
-      "expected_answer": "N/A - asks for a description, not a checkable value",
-      "notes": "UNSCORED, and a suspected bad question. 'Remote Ratio' renders as a vertical stack of pie charts labelled 0, 50, ... with 100 apparently below the fold, and actionSchema has no scroll action - so it may not be answerable with the current action set at all. Both arms flailed on it (up to 16 steps, 8 rejected targets, max_steps). Also a config.dashboards exampleQuestion; worth replacing there."
+      "question": "In the 'Percent Remote Roles vs. Company Size' chart, scroll down to the Remote Ratio value of 100 and report which Company Size makes up the largest share of that pie.",
+      "scored": true,
+      "expect": [{ "word": ["M", "Medium"] }],
+      "expected_answer": "M (medium-sized companies)",
+      "verified_on": "2026-08-10",
+      "notes": "Replaces the old unscored salaries_remote, which asked for a description and was unanswerable because the Remote Ratio 100 row sits below the fold with no scroll action. Now scorable: that pane has 222px of hidden content and one scroll step reveals the 100 row with its pie. Truth read by eye from a clean post-scroll capture - orange dominates that pie at ~55-60% against ~35% blue, and orange is M in the Company Size legend. The word form is REQUIRED, not stylistic: a bare \"M\" is scored as a case-insensitive SUBSTRING and would pass on almost any sentence, making the question always-green and worthless. PIXEL-MODE ONLY as a comparison: Remote Ratio is an API-operable filter, so api mode can reach 100 without scrolling (and answered 'L' when tried on 2026-08-10) - do not read this as an api-vs-pixel result."
     }
   ]
 }

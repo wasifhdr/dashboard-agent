@@ -487,6 +487,14 @@ Extensions to existing tests:
 
 ## Deferred
 
+**Resolved** by `2026-08-10-scroll-action-design.md`, implemented 2026-08-10.
+Two of the guesses below turned out to be wrong in ways worth recording: the
+settle semantics are simpler than expected (the plain pixels-only gate is
+correct, since no bridge event ever fires), while the "right scrollable region"
+problem was not about hitting the region at all — a wheel reaches it fine — but
+about *not* using a DOM write, which desynchronizes a worksheet's labels from its
+marks and produces plausible wrong readings.
+
 **The `scroll` action** gets its own spec. It is a new variant in
 `actionSchema.js`, a new branch in `actuator.js`, and a real Playwright
 implementation (wheel events at a normalized point, which must land on the
