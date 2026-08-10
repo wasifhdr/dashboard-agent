@@ -27,7 +27,7 @@
 
 **Outcome:** baseline **9/9 scored correct**, 2 unscored, no crashes, saved to `backend/eval/baseline-2026-08-10.csv`. The filter-reset question turned out to be untestable on this dashboard and was resolved by reasoning instead; ground truth for the new eval question is `M`. Full detail in the spec's "Findings, round 3" (findings 10–13).
 
-One design assumption remains unverified, and it changes Task 10. This task must run **before** any frozen-core edit, because it also captures the accuracy baseline that Task 10 compares against.
+This task had to run **before** any frozen-core edit, because it captures the accuracy baseline that Task 10 compares against.
 
 The hover-artifact question this task originally carried is **already settled** — measured on the World Government Summit dashboard on 2026-08-10, the highlight our own `mouse.move` creates persists after the cursor leaves, which is why Task 5 baselines the guard diff with `beforeWheel` instead of parking the cursor. Do not re-probe it.
 
