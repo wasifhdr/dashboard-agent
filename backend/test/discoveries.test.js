@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createDiscoveryLog, normalizeDiscoveryText, stampFromInventory } from "../src/discoveries.js";
+import {
+  createDiscoveryLog,
+  normalizeDiscoveryText,
+  stampFromInventory,
+  claimsAbsentTarget,
+} from "../src/discoveries.js";
 
 // --- normalizeDiscoveryText ------------------------------------------------
 
@@ -88,6 +93,68 @@ test("the active sheet is stamped only when there is more than one", () => {
 test("a set parameter is stamped", () => {
   const inv = { ...EMPTY_INV, parameters: [{ id: "P1", name: "Measure", type: "list", current: "Profit" }] };
   assert.equal(stampFromInventory(inv), "Measure=Profit");
+});
+
+// Regression: the World Government Summit dashboard, 2026-08-10. Every reading
+// in that session was stamped "Rank=1, Bin Size=1, Value=[Null..Null]" - three
+// slots of pure noise - while `country=Russia`, the ONE piece of state the
+// readings actually depended on, was truncated away. The model then recorded
+// per-country figures for Brazil, China and India without ever leaving Russia,
+// and the log had no way to show that all four claims shared one state.
+const WGS_INV = {
+  activeSheet: "DASHBOARD",
+  sheets: [{ id: "S1", name: "DASHBOARD", active: true }],
+  filters: [
+    { id: "F2", field: "Value", type: "range", appliedMin: "Null", appliedMax: "Null", domainMin: "Null", domainMax: "Null" },
+    { id: "F3", field: "view", type: "categorical", applied: ["False"], domain: ["False"] },
+  ],
+  parameters: [
+    { id: "P1", name: "Rank", type: "all", current: "1", allowable: [] },
+    { id: "P2", name: "Bin Size", type: "all", current: "1", allowable: [] },
+    { id: "P3", name: "view param", type: "list", current: "True", allowable: ["True", "False"] },
+    { id: "P4", name: "country", type: "list", current: "Russia", allowable: ["Afghanistan", "Albania", "Algeria", "Angola", "Argentina"] },
+    { id: "P5", name: "Measure", type: "list", current: "GDP per Capita", allowable: ["GDP per Capita", "Population"] },
+  ],
+};
+
+test("REGRESSION: the parameter a reading actually depends on is not crowded out by noise", () => {
+  const stamp = stampFromInventory(WGS_INV);
+  assert.ok(stamp.includes("country=Russia"), `country must be stamped, got: ${stamp}`);
+});
+
+test("a range filter whose applied bounds are not real numbers constrains nothing", () => {
+  // Tableau reports these as the STRING "Null", so `appliedMin == null` misses
+  // them and a meaningless filter eats a stamp slot.
+  const inv = {
+    ...EMPTY_INV,
+    filters: [{ id: "F1", field: "Value", type: "range", appliedMin: "Null", appliedMax: "Null" }],
+  };
+  assert.equal(stampFromInventory(inv), "");
+});
+
+test("a list parameter with more alternatives outranks one with fewer", () => {
+  // More alternatives means the current value specifies more about what is on
+  // screen, so it is the better thing to spend a limited stamp slot on.
+  const inv = {
+    ...EMPTY_INV,
+    parameters: [
+      { id: "P1", name: "Toggle", type: "list", current: "True", allowable: ["True", "False"] },
+      { id: "P2", name: "country", type: "list", current: "Russia", allowable: ["A", "B", "C", "D", "E", "F"] },
+    ],
+  };
+  const stamp = stampFromInventory(inv);
+  assert.ok(stamp.startsWith("country=Russia"), `expected country first, got: ${stamp}`);
+});
+
+test("a free numeric knob does not outrank a real choice", () => {
+  const inv = {
+    ...EMPTY_INV,
+    parameters: [
+      { id: "P1", name: "Bin Size", type: "all", current: "1", allowable: [] },
+      { id: "P2", name: "country", type: "list", current: "Russia", allowable: ["A", "B", "C"] },
+    ],
+  };
+  assert.ok(stampFromInventory(inv).startsWith("country=Russia"));
 });
 
 test("the stamp is capped at three entries", () => {
@@ -201,4 +268,85 @@ test("a string discovery validates and is preserved", () => {
   const out = StepResponseSchema.safeParse({ ...VALID_STEP, discovery: "House avg beds = 3.3" });
   assert.equal(out.success, true);
   assert.equal(out.data.discovery, "House avg beds = 3.3");
+});
+
+// --- claimsAbsentTarget ----------------------------------------------------
+//
+// The aiming pass can PROVE a named element is not on screen (locate searched
+// the whole frame and refine agreed). A "discovery" recorded on that same step
+// that talks about the very thing just proven absent cannot be a reading - it is
+// the model writing down what it expected to find. That is exactly how three
+// fabricated country readings entered the log on 2026-08-10.
+
+test("a claim about the element just proven absent is caught", () => {
+  assert.equal(
+    claimsAbsentTarget("Brazil Unemployment Score = 11.2%, Brazil Extreme Poverty = 5.9%", "Brazil in the country dropdown list"),
+    true,
+  );
+  assert.equal(
+    claimsAbsentTarget("China Unemployment Score = 5.0%", "China in the country dropdown"),
+    true,
+  );
+});
+
+test("a reading about something else on the same step is kept", () => {
+  // The aim failed, but this number was legitimately read off the visible frame.
+  // Discarding it would throw away real work - rejected steps are common.
+  assert.equal(
+    claimsAbsentTarget("Russia Unemployment Score = 5.0%", "Brazil in the country dropdown list"),
+    false,
+  );
+  assert.equal(
+    claimsAbsentTarget("Total titles = 6,234", "the Type dropdown"),
+    false,
+  );
+});
+
+test("UI vocabulary alone never triggers it", () => {
+  // "dropdown"/"list"/"chart" are how targets are phrased; matching on them
+  // would discard almost every reading taken on a rejected step.
+  assert.equal(claimsAbsentTarget("Open list shows 12 rows", "the country dropdown list"), false);
+  assert.equal(claimsAbsentTarget("Top 5 chart has 5 bars", "the Publisher bar in the chart"), false);
+});
+
+test("it is case- and punctuation-insensitive", () => {
+  assert.equal(claimsAbsentTarget("brazil extreme poverty = 5.9%", "Brazil in the country dropdown list"), true);
+  assert.equal(claimsAbsentTarget("Ed Sheeran songs = 4", "the 'Ed Sheeran' row in the Artists list"), true);
+});
+
+test("missing or empty inputs are never a claim", () => {
+  assert.equal(claimsAbsentTarget(null, "Brazil row"), false);
+  assert.equal(claimsAbsentTarget("Brazil = 1", null), false);
+  assert.equal(claimsAbsentTarget("", ""), false);
+});
+
+// --- retract ---------------------------------------------------------------
+
+test("a retracted entry leaves the log and stops being formatted", () => {
+  const log = createDiscoveryLog();
+  const a = log.add({ text: "Russia Unemployment = 5.0%", stepIdx: 1 });
+  const b = log.add({ text: "Brazil Unemployment = 11.2%", stepIdx: 2 });
+  assert.equal(log.size(), 2);
+
+  assert.equal(log.retract(b.key), true);
+  assert.equal(log.size(), 1);
+  assert.ok(log.format().includes("Russia"));
+  assert.ok(!log.format().includes("Brazil"));
+
+  // Retracting something already gone is a no-op, not an error.
+  assert.equal(log.retract(b.key), false);
+  assert.equal(log.retract(null), false);
+  assert.equal(log.size(), 1);
+  assert.ok(a.key);
+});
+
+test("a retracted fact can be recorded again later, once actually seen", () => {
+  // Retraction must not poison the value forever - the agent may reach that
+  // state for real on a later step.
+  const log = createDiscoveryLog();
+  const first = log.add({ text: "Brazil Unemployment = 11.2%", stepIdx: 2 });
+  log.retract(first.key);
+  const second = log.add({ text: "Brazil Unemployment = 11.2%", stepIdx: 5 });
+  assert.equal(second.accepted, true);
+  assert.equal(log.size(), 1);
 });

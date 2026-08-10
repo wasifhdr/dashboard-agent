@@ -14,7 +14,7 @@ import { resolveClickPoint } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint, isNearDeadScroll, clearStaleGuards } from "./pixelGuard.js";
-import { createDiscoveryLog, stampFromInventory } from "./discoveries.js";
+import { createDiscoveryLog, stampFromInventory, claimsAbsentTarget } from "./discoveries.js";
 
 function actionKey(action) {
   switch (action.type) {
@@ -508,6 +508,24 @@ export async function runSession({
         // aim could put this element on the screen. Remember the aim as dead so
         // an identical retry costs nothing next step.
         rejectedAimPoints.push({ nx: action.nx, ny: action.ny });
+
+        // The aiming pass just PROVED this target is not on screen (locate
+        // searched the whole frame and refine agreed). A "discovery" recorded on
+        // this same step that names that same element therefore cannot be a
+        // reading - it is the model writing down what it expected to find once it
+        // got there. Retract it BEFORE persisting, so the fabrication never
+        // reaches the log, the next prompt, or the database.
+        //
+        // Observed on the World Government Summit dashboard 2026-08-10: two
+        // country readings entered the log this way and a third followed in the
+        // answer, producing a fluent, confident reply built on values the agent
+        // had never seen. Deliberately narrow - a reading about anything ELSE on
+        // a rejected step is legitimate and survives.
+        if (aimed.searched && recorded.accepted && claimsAbsentTarget(recorded.text, action.target)) {
+          discoveryLog.retract(recorded.key);
+          stepDiscovery = null;
+          onEvent({ type: "warning", idx, kind: "discovery_retracted" });
+        }
         persistAndEmit({
           idx, thought, action, status: "rejected_target",
           errorMsg: aimed.searched

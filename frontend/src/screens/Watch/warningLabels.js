@@ -6,6 +6,8 @@ export const WARNING_LABEL = {
   wall_clock_timeout: "The session exceeded its overall time budget.",
   max_steps: "Reached the maximum step budget before answering.",
   discovery_cap: "The agent has recorded a lot of facts this session — the oldest are being dropped from its memory.",
+  discovery_retracted:
+    "The agent noted a value for something that turned out not to be on screen, so that note was discarded rather than remembered as fact.",
 };
 
 // Verdict reasons from the read-only viability inspection (viability.js).

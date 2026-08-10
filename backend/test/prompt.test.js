@@ -88,6 +88,30 @@ test("the pixel prompt warns that scrolling loses what is on screen", () => {
   assert.ok(/SAME turn that you scroll/.test(systemText));
 });
 
+test("REGRESSION: the pixel prompt teaches scrolling UP, not just down", () => {
+  // World Government Summit dashboard, 2026-08-10: the countries dropdown opens
+  // scrolled to the current selection (Russia), so Brazil/China/India were ABOVE
+  // the visible window. The agent scrolled DOWN twice, away from all three, and
+  // every country click was then correctly rejected as not-on-screen. The prompt
+  // only ever demonstrated "down" and rule 7 described only bottom-edge clipping.
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(/"direction":"up"/.test(systemText), "an explicit up example must be shown");
+  assert.ok(
+    /above|earlier in the list|alphabetically/i.test(systemText),
+    "the prompt must say content can sit ABOVE the visible window",
+  );
+});
+
+test("REGRESSION: the pixel prompt forbids answering from remembered knowledge", () => {
+  // The same session recorded plausible real-world figures for three countries
+  // it never selected, then answered from them. Grounding has to be stated.
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(
+    /never (state|report|give|use) a (number|value|figure)[^.]*not[^.]*(seen|visible)/i.test(systemText),
+    "the prompt must forbid stating unseen values",
+  );
+});
+
 test("a scroll renders in the history with its direction and outcome", () => {
   const line = _internal.formatHistoryLine({
     idx: 3, type: "scroll", direction: "down", nx: 0.83, ny: 0.49, status: "ok", changed: true,

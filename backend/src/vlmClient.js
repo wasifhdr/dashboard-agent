@@ -148,6 +148,7 @@ Respond with STRICT JSON ONLY (no markdown, no commentary), matching exactly:
 The "action" object must be exactly one of:
 - {"type":"click","nx":0.42,"ny":0.13,"target":"ZRI tab"}
 - {"type":"scroll","nx":0.83,"ny":0.49,"direction":"down","target":"the Remote Ratio pie stack"}
+- {"type":"scroll","nx":0.14,"ny":0.35,"direction":"up","target":"the open country dropdown list"}
 - {"type":"wait"}
 - {"type":"answer","answer":"<final answer text>","confidence":0.8}
 - {"type":"fail","reason":"<why this cannot be answered>"}
@@ -159,7 +160,8 @@ Rules:
 4. If a click produces no visible change, you missed the control or it is not on screen — NEVER repeat the same or a nearby click. Move to a clearly different location. If several clicks in a row change nothing, stop targeting that control: answer from what is visible, or fail.
 5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.
-7. Some charts are TALLER than the space they are drawn in, so Tableau cuts them off: a row only half drawn at the bottom edge, a list that ends abruptly, an axis that stops short. Use "scroll" to see the rest, aiming at the middle of THAT chart - not its title, and not the dashboard's margin. Scrolling the wrong chart is worse than not scrolling at all.
+7. Some charts and lists are TALLER than the space they are drawn in, so Tableau cuts them off. Use "scroll" to see the rest, aiming at the middle of THAT chart or list - not its title, and not the dashboard's margin. Scrolling the wrong thing is worse than not scrolling at all.
+8. SCROLLING GOES BOTH WAYS, and a list you just opened is usually NOT at its top: a dropdown opens near the value currently selected, so what you want may be ABOVE the visible rows. Read the first and last visible entries and work out which way to go - for an alphabetical list, a target earlier in the alphabet than the top visible row needs "up", later than the bottom visible row needs "down". If a click was rejected because the target was not on screen, scrolling the WRONG way makes that worse, not better.
 
 RECORDING DISCOVERIES:
 "discovery" records hard data visible in the CURRENT screenshot that you will need later.
@@ -168,7 +170,11 @@ RECORDING DISCOVERIES:
 - Record NOTHING about the UI: not what is open or closed, not where a control is, not what you clicked.
 - If this screenshot shows no new hard data, use null.
 Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.
-Scrolling moves rows OFF the screen as well as on, and you are never shown an earlier screenshot again. Record what you can currently read as a "discovery" on the SAME turn that you scroll, or the value is gone.`;
+Scrolling moves rows OFF the screen as well as on, and you are never shown an earlier screenshot again. Record what you can currently read as a "discovery" on the SAME turn that you scroll, or the value is gone.
+
+GROUNDING - THIS OVERRIDES EVERYTHING ELSE:
+Never state a number or value you have not actually seen on a screenshot in this session, and never record one as a "discovery". You may know real-world figures for countries, companies and years from memory; they are NOT evidence about THIS dashboard and using them is the worst mistake you can make here. Only report what you have read, or what is listed under CONFIRMED DISCOVERIES.
+If the value you need is not visible, make it visible - click, scroll, or change a control - and read it on a later turn. If you cannot make it visible, say so with "fail". An honest "fail" is far better than a confident number you did not read.`;
 
 function buildPrompt({ question, inventory, history, discoveries = "", correctiveFeedback, mode = "api" }) {
   const systemText = mode === "pixel" ? PIXEL_SYSTEM_TEMPLATE(question) : SYSTEM_TEMPLATE(question);
