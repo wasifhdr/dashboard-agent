@@ -9,7 +9,8 @@ import path from "node:path";
 import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
-import { getNextAction, refineClickPoint, activeModelName } from "./vlmClient.js";
+import { getNextAction, refineClickPoint, locateTarget, activeModelName } from "./vlmClient.js";
+import { resolveClickPoint } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint } from "./pixelGuard.js";
@@ -161,19 +162,43 @@ export async function runSession({
   let consecutiveNonProgress = 0;
   let noDiffClicks = 0; // consecutive pixel clicks that produced no visible change
   const deadClickPoints = []; // {nx,ny} of clicks that produced no change (pixel mode); cleared when a click changes the view
+  // {nx,ny} of aims the zoom check rejected AND the whole-frame search couldn't
+  // rescue. Separate from deadClickPoints because these were never executed:
+  // nothing was clicked, so nothing about the dashboard's state changed.
+  const rejectedAimPoints = [];
   const deadClickRadius = config.pixel?.deadClickRadius ?? 0.05; // normalized radius for the repeat guard
+  const isPixelMode = (config.actuationMode ?? "pixel") === "pixel";
 
   function withEscalation(feedback) {
-    if (consecutiveNonProgress >= 2) {
-      return (
-        `${feedback} You have made no progress for ${consecutiveNonProgress} steps in a row. ` +
-        `Stop retrying variations of the same target_id - it is likely the wrong control entirely. ` +
-        `Re-read the FULL inventory below, including BOTH the FILTERS and PARAMETERS sections (a dashboard ` +
-        `can have a parameter and a filter that sound similar but only one of them is actually wired to what ` +
-        `you see on screen), and pick a different id.`
-      );
-    }
-    return feedback;
+    if (consecutiveNonProgress < 2) return feedback;
+    const stuck = `${feedback} You have made no progress for ${consecutiveNonProgress} steps in a row. `;
+    // The advice has to match what the model can actually change. In pixel mode
+    // there is no target_id to swap and the inventory is reference material,
+    // not a control surface - telling it to "pick a different id" there sent it
+    // looking for a fix that does not exist while its real problem was the
+    // coordinates.
+    return isPixelMode
+      ? stuck +
+          `Stop re-aiming at the same region - your reading of the screenshot is what is wrong. ` +
+          `Pick out the element by its neighbours (which chart or label is it beside? which corner of the image?), ` +
+          `convert THAT to fractions, and sanity-check the magnitude before answering. ` +
+          `If the element is genuinely not on screen, answer from what is visible, or fail.`
+      : stuck +
+          `Stop retrying variations of the same target_id - it is likely the wrong control entirely. ` +
+          `Re-read the FULL inventory below, including BOTH the FILTERS and PARAMETERS sections (a dashboard ` +
+          `can have a parameter and a filter that sound similar but only one of them is actually wired to what ` +
+          `you see on screen), and pick a different id.`;
+  }
+
+  // Shared wording for "that click was not executed because the target isn't
+  // where you aimed", so the two rejection paths can't drift apart.
+  function wrongAimFeedback(action, extra) {
+    return withEscalation(
+      `Your click was NOT executed: "${action.target ?? "the target"}" is not at (${action.nx.toFixed(2)},${action.ny.toFixed(2)}). ` +
+        (extra ? `${extra} ` : "") +
+        `Your coordinates are wrong, not slightly off — look at the screenshot again and read off where that element actually sits, ` +
+        `remembering nx/ny are fractions of the WHOLE image.`,
+    );
   }
   let prevFramePath = null;
 
@@ -419,50 +444,72 @@ export async function runSession({
       break;
     }
 
-    // Zoom-refine pass (pixel mode): the model's click is treated as a COARSE
-    // aim, then re-placed inside an upscaled crop around it. Small controls -
-    // an open dropdown's rows are ~2.6% of the frame's height - are below the
-    // model's single-pass accuracy, which is what made it select the row above
-    // the one it had reasoned about. Done here, before the loop key and the
+    // Aiming pass (pixel mode): locate the named target on the whole frame,
+    // then zoom-refine around THAT - see clickAiming.js for why the model's own
+    // nx/ny is only a fallback hint. Done here, before the loop key and the
     // dead-click guard, so every downstream consumer (guard, persistence,
     // history, cursor overlay, actuator) sees the one point actually clicked.
     if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
-      const refined = await refineClickPoint({
-        config,
-        imagePath: framePath,
-        nx: action.nx,
-        ny: action.ny,
-        target: action.target ?? null,
-        stopSignal,
-      });
-      if (refined?.notFound) {
-        // The zoom check looked around the aim and the named target isn't
-        // there. Firing anyway lands on whatever happens to be under the
-        // point - which is how a stray click kept dismissing the dropdown the
-        // previous step had just opened, alternating forever. Reject without
-        // executing and tell the model what actually happened.
+      // Cheapest guard first: an aim already proven wrong, with the whole-frame
+      // rescue below having failed on it too, is rejected before spending a
+      // single model call on it. Without this the same coarse point could come
+      // back verbatim step after step (observed: 0.68,0.46 re-emitted on steps
+      // 3, 4 and 8 of one run), each repeat paying for a refine call to learn
+      // what the previous step already knew.
+      if (isNearDeadPoint({ nx: action.nx, ny: action.ny }, rejectedAimPoints, deadClickRadius)) {
         persistAndEmit({
-          idx, thought, action, status: "rejected_target",
-          errorMsg: `"${action.target ?? "target"}" is not near (${action.nx.toFixed(2)},${action.ny.toFixed(2)})`,
+          idx, thought, action, status: "rejected_loop",
+          errorMsg: `Repeat aim near (${action.nx.toFixed(2)},${action.ny.toFixed(2)}), already checked and wrong`,
           framePath, inventory: inv, changedRegions,
           startedAt: stepStartedAt, durationMs,
-          actionBadge: { text: "Rejected: wrong location", type: "click" },
+          actionBadge: { text: "Rejected: repeat wrong aim", type: "click" },
           clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
         });
         consecutiveNonProgress++;
-        correctiveFeedback = withEscalation(
-          `Your click was NOT executed: zooming in around (${action.nx.toFixed(2)},${action.ny.toFixed(2)}) did not show "${action.target ?? "the target"}". ` +
-            `Your coordinates are wrong, not slightly off — look at the screenshot again and read off where that element actually sits, ` +
-            `remembering nx/ny are fractions of the WHOLE image.`,
+        correctiveFeedback = wrongAimFeedback(action, "You have already aimed there and it was checked and rejected.");
+        history.push({ idx, key: actionKey(action), type: "click", status: "rejected_loop", nx: action.nx, ny: action.ny, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      const aimed = await resolveClickPoint({
+        aim: { nx: action.nx, ny: action.ny },
+        target: action.target ?? null,
+        locate: () =>
+          locateTarget({ config, imagePath: framePath, target: action.target ?? null, stopSignal }),
+        refine: (nx, ny) =>
+          refineClickPoint({ config, imagePath: framePath, nx, ny, target: action.target ?? null, stopSignal }),
+      });
+
+      if (aimed.rejected) {
+        // Neither the whole-frame search nor the zoom around the model's own
+        // aim could put this element on the screen. Remember the aim as dead so
+        // an identical retry costs nothing next step.
+        rejectedAimPoints.push({ nx: action.nx, ny: action.ny });
+        persistAndEmit({
+          idx, thought, action, status: "rejected_target",
+          errorMsg: aimed.searched
+            ? `"${action.target ?? "target"}" was not found anywhere on screen`
+            : `"${action.target ?? "target"}" is not near (${action.nx.toFixed(2)},${action.ny.toFixed(2)})`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: not on screen", type: "click" },
+          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = wrongAimFeedback(
+          action,
+          aimed.searched
+            ? `A search of the whole screenshot could not find "${action.target ?? "that element"}" either — it may not be on screen at all.`
+            : "",
         );
         history.push({ idx, key: actionKey(action), type: "click", status: "rejected_target", nx: action.nx, ny: action.ny, changed: false });
         prevFramePath = framePath;
         continue;
       }
-      if (refined) {
-        action.nx = refined.nx;
-        action.ny = refined.ny;
-      }
+
+      action.nx = aimed.nx;
+      action.ny = aimed.ny;
     }
 
     const key = actionKey(action);
@@ -636,7 +683,10 @@ export async function runSession({
         consecutiveNonProgress++;
       } else {
         // The view moved — prior dead spots are stale and must not over-reject.
+        // Rejected aims go with them: the frame they were judged against is
+        // gone, so a point that held nothing before may hold the target now.
         deadClickPoints.length = 0;
+        rejectedAimPoints.length = 0;
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
       }

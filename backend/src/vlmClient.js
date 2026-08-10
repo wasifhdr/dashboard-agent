@@ -376,28 +376,97 @@ async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: 
     payload.response_format = { type: "json_object" };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.vlmCallTimeoutMs);
-  // Abort the in-flight request on EITHER the per-call timeout OR an external
-  // stop request (the user hitting Stop), so a stop takes effect immediately
-  // instead of waiting for this (slow, in pixel mode) call to finish.
-  const fetchSignal = stopSignal ? AbortSignal.any([controller.signal, stopSignal]) : controller.signal;
-  try {
-    const res = await fetch(target.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(target.apiKeyEnv, process.env) },
-      body: JSON.stringify(payload),
-      signal: fetchSignal,
-    });
-    const bodyText = await res.text();
-    if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    // The timeout is scoped to ONE attempt, not to the whole call. Sharing it
+    // across retries meant a long rate-limit wait ate the request's own budget
+    // and the step died as "This operation was aborted" - an opaque message for
+    // what is really "we were throttled", and a request that never got its
+    // configured time to answer.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.vlmCallTimeoutMs);
+    // Abort the in-flight request on EITHER the per-call timeout OR an external
+    // stop request (the user hitting Stop), so a stop takes effect immediately
+    // instead of waiting for this (slow, in pixel mode) call to finish.
+    const fetchSignal = stopSignal ? AbortSignal.any([controller.signal, stopSignal]) : controller.signal;
+
+    let res;
+    let bodyText;
+    try {
+      res = await fetch(target.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(target.apiKeyEnv, process.env) },
+        body: JSON.stringify(payload),
+        signal: fetchSignal,
+      });
+      bodyText = await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (res.ok) {
+      const json = JSON.parse(bodyText);
+      return json?.choices?.[0]?.message?.content ?? "";
+    }
+
+    // A rate limit is a "come back shortly", not a failure of the run, and
+    // treating it as one loses whole sessions: three of these in a row is an
+    // invalid-response streak, which aborts the session with a quota message
+    // where the trajectory should be. It is easy to hit because a pixel step
+    // costs two calls (action + zoom check, sometimes a third to locate), so
+    // eight steps clears a 15-per-minute allowance inside half a minute.
+    if (!isRetryableStatus(res.status)) {
       throw new Error(`VLM endpoint error ${res.status}: ${bodyText.slice(0, 800)}`);
     }
-    const json = JSON.parse(bodyText);
-    return json?.choices?.[0]?.message?.content ?? "";
-  } finally {
-    clearTimeout(timer);
+    if (attempt >= RATE_LIMIT_RETRIES) {
+      // Say WHY up front. Left as the bare status line, a quota wall reads like
+      // a code bug in the step list and sends you looking through the prompt
+      // for a fault that is really just a spent free tier.
+      throw new Error(
+        `VLM endpoint error ${res.status}: rate limited, still throttled after ${RATE_LIMIT_RETRIES} retries - ` +
+          `the API quota is spent, not the agent's logic. ${bodyText.slice(0, 600)}`,
+      );
+    }
+    // Only Stop interrupts a backoff wait; the per-attempt timeout above has
+    // already been cleared, so waiting out a quota window cannot consume it.
+    await sleepAbortable(retryDelayMs(bodyText, attempt), stopSignal);
   }
+}
+
+// 429 = quota/rate limit, 503 = model briefly overloaded. Both clear on their
+// own; every other non-2xx is a real error and must surface immediately.
+const RATE_LIMIT_RETRIES = 3;
+function isRetryableStatus(status) {
+  return status === 429 || status === 503;
+}
+
+// Gemini's 429 body states how long to wait ("Please retry in 8.363871091s"),
+// which beats guessing - the whole point of the free tier's window is that it
+// reopens at a known moment. Falls back to a widening backoff when the body
+// says nothing useful. The +250ms guards against waking a hair too early and
+// spending the retry on the same closed window.
+function retryDelayMs(bodyText, attempt) {
+  const m = /retry in ([\d.]+)s/i.exec(bodyText || "");
+  const hinted = m ? Number(m[1]) * 1000 + 250 : NaN;
+  if (Number.isFinite(hinted) && hinted > 0) return Math.min(hinted, 60_000);
+  return Math.min(2_000 * 2 ** attempt, 30_000);
+}
+
+// The per-call timeout and the user's Stop both abort through `signal`, so a
+// wait between retries has to end with them - otherwise Stop appears to hang
+// for the length of a rate-limit window.
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error("aborted"));
+    const id = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(id);
+      reject(signal.reason ?? new Error("aborted"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // ---- public: zoom-refine a click point -----------------------------------
@@ -494,6 +563,68 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
   } catch {
     // Never let refinement break a step - the caller falls back to the
     // original point (including when the user hits Stop mid-refine).
+    return null;
+  }
+}
+
+// ---- public: locate a named target in the WHOLE frame ---------------------
+
+const LOCATE_SYSTEM = (target) => `You are helping a UI agent that aimed a click in the wrong place.
+
+The image is a FULL screenshot of a Tableau dashboard. Find this element: "${target}".
+
+Return the normalized coordinates of its CENTER, where nx is the horizontal fraction of the WHOLE image (0 = left edge, 1 = right edge) and ny is the vertical fraction (0 = top edge, 1 = bottom edge).
+
+Check the magnitude of your answer against the image before returning it: an element tucked against the top-left corner is around (0.05, 0.04), NOT (0.5, 0.4). Do not answer near the middle of the image unless the element really is in the middle.
+
+Respond with STRICT JSON ONLY, matching exactly:
+{"found": true, "nx": 0.051, "ny": 0.043}
+
+If that element is genuinely not visible anywhere in this screenshot, respond exactly:
+{"found": false}`;
+
+// Whole-frame search for a named element, used when refineClickPoint reports
+// the target isn't anywhere near the model's aim.
+//
+// This exists because a rejection alone could not break a wrong-coordinate
+// loop: told only "your coordinates are wrong, look again", gemini-flash-lite
+// re-emitted the same center-of-image point (0.68,0.46) for a control sitting
+// at (0.07,0.04) across eight straight steps, naming the right control in its
+// thought every time. The failure is coordinate regression, not perception, so
+// the fix has to ASK for the coordinate rather than ask the model to try again.
+//
+// One narrow question about one element beats the main loop's prompt at this:
+// no inventory, no history, no action schema, nothing to decide - just "where
+// is X". Costs no extra requests in the rejection path, because it replaces the
+// step that would otherwise have been spent re-guessing.
+//
+// Returns {nx, ny} | {notFound: true} | null (same contract as refineClickPoint).
+export async function locateTarget({ config, imagePath, target, stopSignal }) {
+  if (!target) return null;
+  try {
+    const meta = await sharp(imagePath).metadata();
+    const raw = await callVlm({
+      config,
+      systemText: LOCATE_SYSTEM(target),
+      userText: "Return the JSON object now.",
+      imagePath,
+      stopSignal,
+    });
+    const parsed = extractLastJsonObject(raw);
+    if (!parsed) return null;
+    if (parsed.found === false) return { notFound: true };
+    const pnx = Number(parsed.nx);
+    const pny = Number(parsed.ny);
+    if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
+    // Same magnitude rescue as everywhere else - this model writes percentages
+    // and 0-1000 space as readily as fractions, and the answer is a real verdict
+    // about where the element is.
+    const { nx, ny } = rescalePair(pnx, pny, { width: meta.width ?? 0, height: meta.height ?? 0 });
+    if (nx > 1 || ny > 1) return null;
+    return { nx, ny };
+  } catch {
+    // Never let the locate pass break a step - the caller falls back to
+    // rejecting the click, which is the behavior it had before this existed.
     return null;
   }
 }
@@ -606,4 +737,6 @@ export const _internal = {
   authHeaders,
   rescalePair,
   normalizeClickAction,
+  isRetryableStatus,
+  retryDelayMs,
 };
