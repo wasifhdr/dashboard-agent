@@ -581,8 +581,43 @@ body {
   pointer-events: none;
 }
 
+/* Pending action line — the whole text block shimmers while the action is being
+   applied, instead of a spinner plus an "applying…" label. The sweep is a
+   background-clipped highlight travelling across the text, so the label itself
+   carries the progress signal and the row keeps its resting width. */
+@keyframes text-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+.text-shimmer {
+  /* The stops can't use currentColor: the sweep needs `color: transparent` for
+     background-clip: text to show through, and currentColor would then resolve
+     to that transparent value and erase the text entirely. */
+  background-image: linear-gradient(
+    100deg,
+    var(--color-fg) 0%,
+    var(--color-fg) 35%,
+    var(--color-gold-ink) 50%,
+    var(--color-fg) 65%,
+    var(--color-fg) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 1.6s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-glow-pulse {
+    animation: none;
+  }
+  .text-shimmer {
     animation: none;
   }
   .ring-ping::after {

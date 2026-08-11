@@ -22,6 +22,17 @@ function formatElapsed(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Square "stop" glyph, matching the one on the end-session button in the thread
+// header. The composer's stop control is icon-only — the word alongside it read
+// as a second label competing with the running question it sits next to.
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
 function MicIcon() {
   return (
     <svg
@@ -223,12 +234,17 @@ export default function Composer({
           <Button
             size="sm"
             variant="danger"
-            className="shrink-0"
+            className="size-8 shrink-0 p-0"
             disabled={stopping}
             onClick={handleStop}
-            title="Stops at the next step boundary — the current model call finishes first."
+            aria-label={stopping ? "Stopping…" : "Stop"}
+            title={
+              stopping
+                ? "Stopping…"
+                : "Stops at the next step boundary — the current model call finishes first."
+            }
           >
-            {stopping ? "Stopping…" : "Stop"}
+            <StopIcon />
           </Button>
         </div>
         <div className="mt-2 flex items-center justify-between font-mono text-sm text-fg/70">

@@ -119,9 +119,10 @@ function ActionLine({ step, pending }) {
   if (pending) {
     return (
       <div className="mt-2 flex items-center gap-2 rounded-control border border-glass-border px-3 py-2 font-mono text-[13px]">
-        <span className="text-fg">▸ {step.planned.label}</span>
-        <Spinner className="size-4 border-glass-border border-t-gold-ink" />
-        <span className="text-fg/60">applying…</span>
+        {/* No spinner and no "applying…" label: the label itself shimmers for
+            as long as the action is in flight, so the pending state reads as
+            one moving block rather than text plus two separate indicators. */}
+        <span className="text-shimmer">▸ {step.planned.label}</span>
       </div>
     );
   }
