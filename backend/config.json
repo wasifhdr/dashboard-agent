@@ -3,7 +3,7 @@
   "pixel": {
     "vlmEndpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
     "modelName": "gemini-flash-lite-latest",
-    "vlmApiKeyEnv": "GEMINI_API_KEY_2",
+    "vlmApiKeyEnv": "GEMINI_API_KEY",
     "scrollNotchPx": 300,
     "scrollDeadRadius": 0.10
   },
