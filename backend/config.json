@@ -44,6 +44,15 @@
   },
   "dashboards": [
     {
+      "name": "Airbnb: East vs West Berlin",
+      "url": "https://public.tableau.com/views/AirBnBinEastvs_WestBerlin/AirBnBBerlin",
+      "description": "Airbnb listings across East and West Berlin — price, capacity and bed counts broken down by property type (Apartments, Houses, Hotels/Hostels) and neighbourhood. Single-view dashboard.",
+      "tags": ["airbnb", "berlin", "travel", "housing", "rentals"],
+      "exampleQuestions": [
+        "Is the average number of beds for Houses higher than that of All types, Apartments, and Hotels/Hostels?"
+      ]
+    },
+    {
       "name": "Netflix Movies & TV Shows",
       "url": "https://public.tableau.com/views/NetflixMoviesandTVShowsDashboard_17065467710800/Netflix",
       "description": "Netflix's catalog of ~6,200 movies and TV shows — distribution by country, content rating, genre, and year, with a Type (Movie/TV Show) filter. Single-view dashboard.",
