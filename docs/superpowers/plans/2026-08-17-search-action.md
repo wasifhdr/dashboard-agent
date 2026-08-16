@@ -4,7 +4,7 @@
 
 **Goal:** Add a tenth action, `search`, that types into an open Tableau filter dropdown's search box and presses Enter, collapsing a 6172-value list to a handful of matching rows in one step.
 
-**Architecture:** A coordinate-free pixel-mode action. The actuator verifies a text entry is focused (the box auto-focuses when the dropdown opens), then dispatches `Control+A`, the text, and `Enter` — no mouse involved, so no aiming pass and no stray-click risk. Success is judged by two witnesses: a trailing newline in the box means Enter was not intercepted and the search did not run; otherwise the post-action pixel diff must show at least `pixel.searchMinRegions` changed regions.
+**Architecture:** A coordinate-free pixel-mode action. The actuator verifies a text entry is focused (the box auto-focuses when the dropdown opens), then dispatches `Control+a`, the text, and `Enter` — no mouse involved, so no aiming pass and no stray-click risk. Success is judged by two witnesses: a trailing newline in the box means Enter was not intercepted and the search did not run; otherwise the post-action pixel diff must show at least `pixel.searchMinRegions` changed regions.
 
 **Tech Stack:** Node ESM, zod, Playwright, `node:test`, React (Vite) for the one frontend touch.
 
@@ -108,7 +108,7 @@ for (let run = 1; run <= 6; run++) {
     if (!opened) { results.push({ run, error: "never opened" }); continue; }
 
     await screenshotViz(page, p(`cal-${run}-pre.png`));
-    await page.keyboard.press("Control+A");
+    await page.keyboard.press("Control+a");
     await page.keyboard.type("American", { delay: 40 });
     await page.keyboard.press("Enter");
     const settle = await waitForSettle(page, SETTLE);           // pixels-only
@@ -314,13 +314,13 @@ test("a search with nothing focused dispatches NO keystrokes", async () => {
 });
 
 test("a search selects all, types, and presses Enter in that order", async () => {
-  // Control+A first so a second search REPLACES the previous term rather than
+  // Control+a first so a second search REPLACES the previous term rather than
   // appending to it ("American" + "Horror" -> "AmericanHorror").
   const kb = spyKeyboard();
   const page = pageWith([{ tag: "textarea", cls: "QueryBox", value: "American" }], kb);
   const res = await executeActionWithTimeout(page, null, { type: "search", text: "American" }, 1000);
   assert.equal(res.ok, true);
-  assert.deepEqual(kb.log, ["Control+A", "type:American", "Enter"]);
+  assert.deepEqual(kb.log, ["Control+a", "type:American", "Enter"]);
 });
 
 test("a trailing newline reports the search as not submitted", async () => {
@@ -397,9 +397,9 @@ case "search": {
         "its search box is focused automatically when the list opens.",
     };
   }
-  // Control+A so a second search replaces the prior term instead of appending;
+  // Control+a so a second search replaces the prior term instead of appending;
   // a no-op on an empty box.
-  await page.keyboard.press("Control+A");
+  await page.keyboard.press("Control+a");
   await page.keyboard.type(action.text);
   // Enter is REQUIRED: typing alone provably does not filter the list (polled
   // 15s, 4241 rows unchanged). aria-label="Search (Enter)" is literal.
