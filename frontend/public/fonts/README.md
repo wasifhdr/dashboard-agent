@@ -1,6 +1,6 @@
 # Brand font
 
-The header/footer wordmark ("Dashboard Agent") is set in **Bungee Shade**,
+The header/footer wordmark ("DashLens") is set in **Bungee Shade**,
 applied via `.brand-wordmark` in `frontend/src/index.css`. It ships as
 `bungee.shade-regular.woff2` and is committed to the repo like any other
 static asset — see "Licence" below for why that's safe here.

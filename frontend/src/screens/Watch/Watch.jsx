@@ -410,12 +410,12 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
   } else if (showLive && !live.closedReason) {
     // Keyed to the RUN state, not live.mode: the backend flips the live-view
     // mode back to idle a beat after the turn's session_done, which briefly
-    // showed "Dashboard Agent is working…" next to an already-delivered answer.
+    // showed "DashLens is working…" next to an already-delivered answer.
     stageStatus = isRunning
       ? // The dashboard itself is no longer dimmed while the agent drives, so
         // this pill carries that signal: same repeating ping ring the minimized
         // chat bubble uses to announce a ready response.
-        { variant: "info", text: "Dashboard Agent is working…", pulse: true, className: "relative ready-ping" }
+        { variant: "info", text: "DashLens is working…", pulse: true, className: "relative ready-ping" }
       : { variant: "success", text: "Yours — click to interact" };
   } else if (showingStagePreview) {
     stageStatus = { variant: "neutral", text: "Default view · ask a question to begin" };

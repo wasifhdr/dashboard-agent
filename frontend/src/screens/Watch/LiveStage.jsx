@@ -342,7 +342,7 @@ export default function LiveStage({
           {/* No lock veil: the dashboard stays at full brightness while the
               agent drives it. Input is still not forwarded (see `interactive`
               above); the hands-off signal is carried entirely by the "agent"
-              cursor on the frame and the pinging "Dashboard Agent is working…" pill in
+              cursor on the frame and the pinging "DashLens is working…" pill in
               the status row below it (Watch.jsx). */}
 
           {liveFrameUrl && (

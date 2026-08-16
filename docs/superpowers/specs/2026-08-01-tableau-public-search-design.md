@@ -5,7 +5,7 @@
 
 ## Problem
 
-Dashboard Agent can only start a session on one of the 5 dashboards curated in
+DashLens can only start a session on one of the 5 dashboards curated in
 `backend/config.json`, or on a URL the user pastes by hand. The landing page
 search box scores only those 5 entries locally. We want the search box to reach
 the real Tableau Public library — match keywords against live public workbooks,

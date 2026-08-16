@@ -1,4 +1,4 @@
-# Dashboard Agent Glass v2 — Visual Design System
+# DashLens Glass v2 — Visual Design System
 
 **Status:** the active design contract for this app. Implement it as written; when a value you
 need is missing, use the nearest token in this file — never invent new hex values, font sizes, or

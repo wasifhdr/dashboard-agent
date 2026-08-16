@@ -212,10 +212,10 @@ Per-turn step events keep flowing on `GET /api/sessions/:id/events` exactly as t
 | `api.js` | Add `createConversation`, `postTurn`, `getConversation`, `listConversations`, `closeConversation`. Add a WS helper `openLiveChannel(convId, {onFrame,onVizBox,onLock,onUnlock,onClosed})` returning `{sendInput, close}`. |
 | `useSessionStream.js` | Hold a `conversationId`. `startQuestion()` becomes: ensure conversation (create on first ask), then `postTurn`, then subscribe SSE for that turn's `session_id` (existing path). Interleave `takeover` markers into the thread model between runs. Replay branch switches to `getConversation` and rebuilds `runs[]` + takeovers. |
 | **`useLiveChannel.js`** | **New hook.** Opens the WS, exposes `{liveFrameUrl, vizBox, mode /* 'agent'|'user'|'idle' */, sendInput, connected}`. Decodes `{type:'frame'}` base64 → object URL (or draws to a `<canvas>`); throttles outbound mouse-move (~30/s). |
-| **`LiveStage.jsx`** | **New.** During a *live* conversation, render the screencast (`<img>`/`<canvas>`) sized to `vizBox`. Overlay a **lock veil** ("Dashboard Agent is working…") when `mode==='agent'`. When `mode==='user'`, mount a transparent input-capture layer that maps pointer/key events to normalized coords and calls `sendInput`. |
+| **`LiveStage.jsx`** | **New.** During a *live* conversation, render the screencast (`<img>`/`<canvas>`) sized to `vizBox`. Overlay a **lock veil** ("DashLens is working…") when `mode==='agent'`. When `mode==='user'`, mount a transparent input-capture layer that maps pointer/key events to normalized coords and calls `sendInput`. |
 | `Stage.jsx` | Unchanged for replay/step frames. `Watch.jsx` chooses `LiveStage` (live conversation, latest turn) vs `Stage` (scrubbing a past step / replay). Per-step frames + overlays + Filmstrip remain the persisted trajectory view. |
 | `Feed.jsx` | Render interleaved **takeover cards** ("You changed Region → Asia, switched to ZRI") between turn threads, from `summary_json`. |
-| `Composer.jsx` | After a turn completes, show an "Explore the dashboard, then ask a follow-up" affordance; the composer stays enabled (idle/user mode). Disabled with "Dashboard Agent is working…" during a turn. |
+| `Composer.jsx` | After a turn completes, show an "Explore the dashboard, then ask a follow-up" affordance; the composer stays enabled (idle/user mode). Disabled with "DashLens is working…" during a turn. |
 | `Watch.jsx` | Wire `useLiveChannel`; pick live vs step view; call `closeConversation` on unmount/back; surface an "End session" control. |
 
 ---

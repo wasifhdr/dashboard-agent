@@ -50,22 +50,12 @@ export default function AppShell({ view, onNavigate, children }) {
     <div className={cx("flex min-h-screen flex-col", view === "watch" && "min-[901px]:h-dvh min-[901px]:overflow-hidden")}>
       <div className="bg-orbs" aria-hidden="true" />
       <header className="sticky top-0 z-40 bg-teal-deep/70 text-white shadow-sm backdrop-blur-xl backdrop-saturate-150 border-b border-white/10">
-        <div className="relative flex h-14 items-center justify-between px-6">
-          <button
-            type="button"
-            onClick={() => onNavigate("landing")}
-            className="brand-wordmark rounded-control text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
-          >
-            Dashboard Agent
-          </button>
-          <nav className="flex items-center gap-2">
-            {view === "watch" && (
-              <button type="button" onClick={() => onNavigate("landing")} className={NAV_LINK_BASE}>
-                New dashboard
-              </button>
-            )}
-            {/* Acts as a toggle: on the History screen it goes back to the
-                landing page, so the highlighted control is never a dead click. */}
+        {/* Three-column grid, not flex: the wordmark stays optically centred in
+            the viewport regardless of how wide the flanking controls are. */}
+        <div className="relative grid h-14 grid-cols-[1fr_auto_1fr] items-center px-6">
+          {/* Acts as a toggle: on the History screen it goes back to the
+              landing page, so the highlighted control is never a dead click. */}
+          <nav className="flex items-center justify-self-start">
             <button
               type="button"
               onClick={() => onNavigate(view === "history" ? "landing" : "history")}
@@ -75,8 +65,17 @@ export default function AppShell({ view, onNavigate, children }) {
             >
               History
             </button>
-            <ThemeToggle />
           </nav>
+          <button
+            type="button"
+            onClick={() => onNavigate("landing")}
+            className="brand-wordmark rounded-control justify-self-center text-white focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2"
+          >
+            DashLens
+          </button>
+          <div className="flex items-center justify-self-end">
+            <ThemeToggle />
+          </div>
         </div>
       </header>
       <main className={cx("flex min-h-0 flex-1 flex-col", !fullBleed && "mx-auto w-full max-w-6xl px-6 py-8")}>

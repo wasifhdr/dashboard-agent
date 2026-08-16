@@ -14,7 +14,7 @@ const STEPS = [
   {
     n: "01",
     title: "Perceive",
-    body: "Ask out loud or type it. Dashboard Agent screenshots the live dashboard — the same pixels you would see.",
+    body: "Ask out loud or type it. DashLens screenshots the live dashboard — the same pixels you would see.",
     accent: "teal",
   },
   {
