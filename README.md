@@ -87,10 +87,13 @@ Create a `.env` in the repo root (git-ignored):
 
 ```
 GEMINI_API_KEY=your-key-here
+GEMINI_API_KEY_2=optional-second-key-for-quota-failover
 GROQ_API_KEY=optional-for-nicer-tts
 ```
 
 The key is read by name from `config.pixel.vlmApiKeyEnv` and never stored in `config.json`.
+
+`vlmApiKeyEnv` can name **several** env vars. Gemini's free tier allows 500 requests per day *per Google Cloud project*, and one agent step costs 2–3 requests, so a heavy session can exhaust it. Given a list, the backend switches to the next key when one hits its daily quota, and skips the spent key on later calls. A name whose env var is unset is simply ignored — `GEMINI_API_KEY` alone is all you need to run.
 
 ## Running it
 

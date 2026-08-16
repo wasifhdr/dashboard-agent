@@ -16,7 +16,9 @@ function formatInventoryForPrompt(inventory) {
 
   lines.push("SHEETS:");
   for (const s of inventory.sheets) {
-    lines.push(`- ${s.id} "${s.name}" (${s.type})${s.active ? " [ACTIVE]" : ""}`);
+    lines.push(
+      `- ${s.id} "${s.name}" (${s.type})${s.active ? " [ACTIVE]" : ""}`,
+    );
   }
 
   lines.push("", "FILTERS:");
@@ -34,7 +36,9 @@ function formatInventoryForPrompt(inventory) {
           `domain=[${f.domainMin ?? "?"} .. ${f.domainMax ?? "?"}]`,
       );
     } else {
-      lines.push(`- ${f.id} field="${f.field}" type=${f.type} (not settable by an action; read its state from the screenshot)`);
+      lines.push(
+        `- ${f.id} field="${f.field}" type=${f.type} (not settable by an action; read its state from the screenshot)`,
+      );
     }
   }
 
@@ -52,7 +56,9 @@ function formatInventoryForPrompt(inventory) {
           (p.step ? ` step=${p.step}` : ""),
       );
     } else {
-      lines.push(`- ${p.id} name="${p.name}" type=${p.type ?? "unknown"} current=${JSON.stringify(p.current)}`);
+      lines.push(
+        `- ${p.id} name="${p.name}" type=${p.type ?? "unknown"} current=${JSON.stringify(p.current)}`,
+      );
     }
   }
 
@@ -60,11 +66,14 @@ function formatInventoryForPrompt(inventory) {
 }
 
 function describeActionForHistory(h) {
-  if (h.type === "scroll") return `${h.direction} (${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
+  if (h.type === "scroll")
+    return `${h.direction} (${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
   if (h.type === "click") return `(${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
-  if (h.values !== undefined) return `${h.target_id}=${JSON.stringify(h.values)}`;
+  if (h.values !== undefined)
+    return `${h.target_id}=${JSON.stringify(h.values)}`;
   if (h.value !== undefined) return `${h.target_id}=${JSON.stringify(h.value)}`;
-  if (h.min !== undefined || h.max !== undefined) return `${h.target_id}=[${h.min ?? "?"}..${h.max ?? "?"}]`;
+  if (h.min !== undefined || h.max !== undefined)
+    return `${h.target_id}=[${h.min ?? "?"}..${h.max ?? "?"}]`;
   if (h.target_id) return h.target_id;
   return "";
 }
@@ -81,11 +90,14 @@ function formatHistoryLine(h) {
   const detail = describeActionForHistory(h);
   // Scroll shares the click reporting: "ok" tells the model nothing useful about
   // a scroll, since a wheel that hit an already-bottomed pane also succeeds.
-  const outcome = h.type === "click" || h.type === "scroll" ? clickOutcome(h) : h.status;
+  const outcome =
+    h.type === "click" || h.type === "scroll" ? clickOutcome(h) : h.status;
   return `#${h.idx} ${h.type}${detail ? " " + detail : ""} -> ${outcome}`;
 }
 
-const SYSTEM_TEMPLATE = (question) => `You are an agent that answers a question about a live, interactive Tableau dashboard by operating its filters, parameters, and tabs, then answering.
+const SYSTEM_TEMPLATE = (
+  question,
+) => `You are an agent that answers a question about a live, interactive Tableau dashboard by operating its filters, parameters, and tabs, then answering.
 
 QUESTION: "${question}"
 
@@ -124,7 +136,9 @@ RECORDING DISCOVERIES:
 - If this screenshot shows no new hard data, use null.
 Discoveries persist for the WHOLE SESSION, including across follow-up questions, and are shown back to you every step under CONFIRMED DISCOVERIES. Never take an action to re-read a value that is already listed there.`;
 
-const PIXEL_SYSTEM_TEMPLATE = (question) => `You are an agent that answers a question about a live, interactive Tableau dashboard by OPERATING IT WITH MOUSE CLICKS, then answering.
+const PIXEL_SYSTEM_TEMPLATE = (
+  question,
+) => `You are an agent that answers a question about a live, interactive Tableau dashboard by OPERATING IT WITH MOUSE CLICKS, then answering.
 
 QUESTION: "${question}"
 
@@ -176,9 +190,21 @@ GROUNDING - THIS OVERRIDES EVERYTHING ELSE:
 Never state a number or value you have not actually seen on a screenshot in this session, and never record one as a "discovery". You may know real-world figures for countries, companies and years from memory; they are NOT evidence about THIS dashboard and using them is the worst mistake you can make here. Only report what you have read, or what is listed under CONFIRMED DISCOVERIES.
 If the value you need is not visible, make it visible - click, scroll, or change a control - and read it on a later turn. If you cannot make it visible, say so with "fail". An honest "fail" is far better than a confident number you did not read.`;
 
-function buildPrompt({ question, inventory, history, discoveries = "", correctiveFeedback, mode = "api" }) {
-  const systemText = mode === "pixel" ? PIXEL_SYSTEM_TEMPLATE(question) : SYSTEM_TEMPLATE(question);
-  const historyText = history.length ? history.map(formatHistoryLine).join("\n") : "(no actions taken yet)";
+function buildPrompt({
+  question,
+  inventory,
+  history,
+  discoveries = "",
+  correctiveFeedback,
+  mode = "api",
+}) {
+  const systemText =
+    mode === "pixel"
+      ? PIXEL_SYSTEM_TEMPLATE(question)
+      : SYSTEM_TEMPLATE(question);
+  const historyText = history.length
+    ? history.map(formatHistoryLine).join("\n")
+    : "(no actions taken yet)";
   const invText = formatInventoryForPrompt(inventory);
 
   let userText = `CURRENT INVENTORY:\n${invText}\n\nHISTORY:\n${historyText}\n`;
@@ -284,7 +310,10 @@ function rescalePair(nx, ny, dims) {
 
   const peak = Math.max(nx, ny);
   if (peak > 1000 && dims.width > 0 && dims.height > 0) {
-    return { nx: nx > 1 ? nx / dims.width : nx, ny: ny > 1 ? ny / dims.height : ny };
+    return {
+      nx: nx > 1 ? nx / dims.width : nx,
+      ny: ny > 1 ? ny / dims.height : ny,
+    };
   }
   if (nx > 1 && ny > 1) {
     const scale = decadeScale(peak);
@@ -301,13 +330,15 @@ function rescalePair(nx, ny, dims) {
 // Covers "scroll" as well as "click": both address the frame in the same
 // normalized [0,1] space, so both are subject to the same magnitude slips.
 function normalizeClickAction(action, dims) {
-  if (!action || (action.type !== "click" && action.type !== "scroll")) return action;
+  if (!action || (action.type !== "click" && action.type !== "scroll"))
+    return action;
   const nx = Number(action.nx);
   const ny = Number(action.ny);
   // Non-numeric / missing coords aren't a magnitude problem — leave them for
   // zod so the model gets the accurate "expected number" complaint. Negatives
   // likewise: there is no scale that makes them a valid aim.
-  if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || ny < 0) return action;
+  if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || ny < 0)
+    return action;
   if (nx <= 1 && ny <= 1) return action;
   return { ...action, ...rescalePair(nx, ny, dims) };
 }
@@ -316,7 +347,12 @@ function normalizeClickAction(action, dims) {
 
 async function resizeImageToDataUrl(imagePath, longSide) {
   const buf = await sharp(imagePath)
-    .resize({ width: longSide, height: longSide, fit: "inside", withoutEnlargement: true })
+    .resize({
+      width: longSide,
+      height: longSide,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
     .png()
     .toBuffer();
   return `data:image/png;base64,${buf.toString("base64")}`;
@@ -340,11 +376,93 @@ function resolveVlmTarget(config) {
         "pixel.vlmApiKeyEnv). The local llama-server path has been removed.",
     );
   }
+  // vlmApiKeyEnv is a NAME or a LIST of names, never a literal key. A list is
+  // how failover is configured: the free tier's daily cap is enforced per
+  // Google Cloud project, so a key from a second project carries its own
+  // allowance and callVlm rotates onto it when the first is spent.
+  const configured = config.pixel.vlmApiKeyEnv;
+  const apiKeyEnvs = (
+    Array.isArray(configured) ? configured : configured ? [configured] : []
+  ).filter(Boolean);
   return {
     url: `${endpoint}/v1/chat/completions`,
     modelName: config.pixel.modelName ?? null,
-    apiKeyEnv: config.pixel.vlmApiKeyEnv ?? null,
+    // Kept so every existing reader of the single-name field still works.
+    apiKeyEnv: apiKeyEnvs[0] ?? null,
+    apiKeyEnvs,
   };
+}
+
+// ---- API-key failover ----------------------------------------------------
+
+// Keys known to have hit their DAILY allowance, name -> when the note expires.
+//
+// Process-wide on purpose: the wall is a property of the key, not of one
+// request, so once a key is known dead every later call should skip it rather
+// than re-discover it. Cleared by a restart, or by the cooldown below.
+const exhaustedKeys = new Map();
+
+// The daily quota really resets at midnight Pacific, which would mean carrying
+// timezone logic for one number. An hour's cooldown gets the same effect: at
+// worst one wasted request per key per hour, and the moment the real reset
+// happens the key comes back on its own.
+const KEY_EXHAUSTED_COOLDOWN_MS = 60 * 60 * 1000;
+
+function markKeyExhausted(envName, now = Date.now()) {
+  if (envName) exhaustedKeys.set(envName, now + KEY_EXHAUSTED_COOLDOWN_MS);
+}
+
+function clearExhaustedKeys() {
+  exhaustedKeys.clear();
+}
+
+function isKeyExhausted(envName, now = Date.now()) {
+  const until = exhaustedKeys.get(envName);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  exhaustedKeys.delete(envName); // cooldown served
+  return false;
+}
+
+// Is this 429 the per-DAY wall, or the per-minute one?
+//
+// The distinction decides whether waiting is worth anything. Google reports both
+// as a bare 429 with a "Please retry in Ns" hint, and for the daily quota that
+// hint is actively misleading - it said 23s for a limit that had hours to run.
+// The violation's quotaId is what separates them:
+//   GenerateRequestsPerDayPerProjectPerModel-FreeTier    <- rotate, don't wait
+//   GenerateRequestsPerMinutePerProjectPerModel-FreeTier <- the backoff is right
+function isDailyQuotaExhausted(bodyText) {
+  if (!bodyText) return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return false;
+  }
+  const error = (Array.isArray(parsed) ? parsed[0] : parsed)?.error;
+  const details = Array.isArray(error?.details) ? error.details : [];
+  for (const d of details) {
+    for (const v of Array.isArray(d?.violations) ? d.violations : []) {
+      if (/PerDay/i.test(String(v?.quotaId ?? ""))) return true;
+    }
+  }
+  return false;
+}
+
+// The env-var NAME to authenticate the next request with.
+//
+// strict:false (a fresh call) falls back to the first key that has a value even
+// when every key is noted as exhausted - the cooldown may have been too short or
+// the quota may have reset, and spending one request to find out beats refusing
+// to try. strict:true (rotating mid-call, after a 429) demands a genuinely
+// unexhausted key, which is what stops two dead keys ping-ponging attempts.
+function pickKeyEnv(envNames, env, { exclude = null, strict = false } = {}) {
+  const candidates = (envNames ?? []).filter((n) => n !== exclude && env[n]);
+  return (
+    candidates.find((n) => !isKeyExhausted(n)) ??
+    (strict ? null : (candidates[0] ?? null))
+  );
 }
 
 // The model actually answering, for recording alongside a session. Kept
@@ -363,11 +481,20 @@ function authHeaders(apiKeyEnv, env) {
 
 // ---- VLM call -----------------------------------------------------------
 
-async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: preparedImage, stopSignal }) {
+async function callVlm({
+  config,
+  systemText,
+  userText,
+  imagePath,
+  imageDataUrl: preparedImage,
+  stopSignal,
+}) {
   // `preparedImage` lets a caller supply its own already-encoded image (the
   // zoom-refine pass sends an UPSCALED crop, which resizeImageToDataUrl's
   // withoutEnlargement would refuse to produce).
-  const imageDataUrl = preparedImage ?? (await resizeImageToDataUrl(imagePath, config.imageLongSide));
+  const imageDataUrl =
+    preparedImage ??
+    (await resizeImageToDataUrl(imagePath, config.imageLongSide));
   const target = resolveVlmTarget(config);
 
   const payload = {
@@ -390,6 +517,10 @@ async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: 
     payload.response_format = { type: "json_object" };
   }
 
+  // Chosen once per attempt rather than once per call: a 429 can retire the key
+  // mid-flight, and the next attempt must go out under the replacement.
+  let keyEnv = pickKeyEnv(target.apiKeyEnvs, process.env);
+
   for (let attempt = 0; ; attempt++) {
     // The timeout is scoped to ONE attempt, not to the whole call. Sharing it
     // across retries meant a long rate-limit wait ate the request's own budget
@@ -401,14 +532,19 @@ async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: 
     // Abort the in-flight request on EITHER the per-call timeout OR an external
     // stop request (the user hitting Stop), so a stop takes effect immediately
     // instead of waiting for this (slow, in pixel mode) call to finish.
-    const fetchSignal = stopSignal ? AbortSignal.any([controller.signal, stopSignal]) : controller.signal;
+    const fetchSignal = stopSignal
+      ? AbortSignal.any([controller.signal, stopSignal])
+      : controller.signal;
 
     let res;
     let bodyText;
     try {
       res = await fetch(target.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(target.apiKeyEnv, process.env) },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(keyEnv, process.env),
+        },
         body: JSON.stringify(payload),
         signal: fetchSignal,
       });
@@ -429,8 +565,37 @@ async function callVlm({ config, systemText, userText, imagePath, imageDataUrl: 
     // costs two calls (action + zoom check, sometimes a third to locate), so
     // eight steps clears a 15-per-minute allowance inside half a minute.
     if (!isRetryableStatus(res.status)) {
-      throw new Error(`VLM endpoint error ${res.status}: ${bodyText.slice(0, 800)}`);
+      throw new Error(
+        `VLM endpoint error ${res.status}: ${bodyText.slice(0, 800)}`,
+      );
     }
+
+    // Before spending time waiting, see whether another configured key can serve
+    // this request. A daily wall retires the key process-wide so later calls
+    // start on the replacement instead of re-discovering the same 429; a
+    // per-minute one rotates without retiring anything, since it clears by
+    // itself. Rotation deliberately consumes an attempt, which is what bounds
+    // this loop no matter how many keys are configured.
+    if (res.status === 429 && keyEnv) {
+      const daily = isDailyQuotaExhausted(bodyText);
+      if (daily) markKeyExhausted(keyEnv);
+      const next = pickKeyEnv(target.apiKeyEnvs, process.env, {
+        exclude: keyEnv,
+        strict: true,
+      });
+      if (next) {
+        console.log(
+          `[vlm] ${keyEnv} hit its ${daily ? "daily" : "rate"} quota - switching to ${next}` +
+            `${daily ? ` (skipped for the next ${KEY_EXHAUSTED_COOLDOWN_MS / 60000} minutes)` : ""}`,
+        );
+        keyEnv = next;
+        // Out of attempts? Don't retry - fall through to the throw below, so a
+        // rotation on the last attempt still reports rather than returning
+        // undefined.
+        if (attempt < RATE_LIMIT_RETRIES) continue;
+      }
+    }
+
     if (attempt >= RATE_LIMIT_RETRIES) {
       // Say WHY up front. Left as the bare status line, a quota wall reads like
       // a code bug in the step list and sends you looking through the prompt
@@ -514,7 +679,9 @@ const CELL_WINDOW = 0.36;
 // failure. The `match` field is the other half: a model that must quote the text
 // it matched on cannot bluff its way past a bubble chart nearly as easily as one
 // answering a bare {"found": true}.
-const REFINE_SYSTEM = (target) => `You are checking whether a UI agent's intended click target is inside this crop, and if it is, exactly where.
+const REFINE_SYSTEM = (
+  target,
+) => `You are checking whether a UI agent's intended click target is inside this crop, and if it is, exactly where.
 
 The image is a ZOOMED-IN CROP of a Tableau dashboard, cut blind around an UNVERIFIED guess at where${target ? ` "${target}"` : " the target"} might be. The crop covers only about a fifth of the dashboard's width and height, and the guess is often wrong by much more than that, so the target is FREQUENTLY NOT IN THIS CROP AT ALL.
 
@@ -557,7 +724,8 @@ export function interpretRefineResponse(parsed, cropDims) {
   // to null would silently fall back to the unrefined coarse aim.
   const pnx = Number(parsed.nx);
   const pny = Number(parsed.ny);
-  if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
+  if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0)
+    return null;
   const { nx, ny } = rescalePair(pnx, pny, cropDims);
   if (nx > 1 || ny > 1) return null;
   return { nx, ny, match };
@@ -583,7 +751,15 @@ export function interpretRefineResponse(parsed, cropDims) {
 //                       stop). Degrades to the previous single-pass behavior:
 //                       the caller keeps the coarse point. A refine outage must
 //                       never block clicking.
-export async function refineClickPoint({ config, imagePath, nx, ny, target, stopSignal, window = REFINE_WINDOW }) {
+export async function refineClickPoint({
+  config,
+  imagePath,
+  nx,
+  ny,
+  target,
+  stopSignal,
+  window = REFINE_WINDOW,
+}) {
   try {
     const meta = await sharp(imagePath).metadata();
     const W = meta.width;
@@ -607,7 +783,11 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
     // rescuing its answer needs the size of the image it was looking at.
     const { data: buf, info } = await sharp(imagePath)
       .extract({ left, top, width: cw, height: ch })
-      .resize({ width: REFINE_LONG_SIDE, height: REFINE_LONG_SIDE, fit: "inside" })
+      .resize({
+        width: REFINE_LONG_SIDE,
+        height: REFINE_LONG_SIDE,
+        fit: "inside",
+      })
       .png()
       .toBuffer({ resolveWithObject: true });
 
@@ -652,7 +832,9 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
 // disagreement, because the CLASSIFICATION is the trustworthy output and the
 // decimals are not. A mid-frame control scored 6/6 either way, so the anchoring
 // costs nothing on the easy case.
-const LOCATE_SYSTEM = (target) => `You are helping a UI agent that aimed a click in the wrong place.
+const LOCATE_SYSTEM = (
+  target,
+) => `You are helping a UI agent that aimed a click in the wrong place.
 
 The image is a FULL screenshot of a Tableau dashboard. Find this element: "${target}".
 
@@ -709,13 +891,16 @@ export function cellCenter(col, row) {
 // no cell (an older/degraded reply), which the caller treats as "nothing to
 // check" rather than as a contradiction.
 export function cellConsistency(parsed, nx, ny) {
-  const col = typeof parsed?.col === "string" ? parsed.col.trim().toLowerCase() : null;
-  const row = typeof parsed?.row === "string" ? parsed.row.trim().toLowerCase() : null;
+  const col =
+    typeof parsed?.col === "string" ? parsed.col.trim().toLowerCase() : null;
+  const row =
+    typeof parsed?.row === "string" ? parsed.row.trim().toLowerCase() : null;
   if (!COLS.includes(col) || !ROWS.includes(row)) return null;
   return {
     col,
     row,
-    agrees: bandsFor(nx, COLS).includes(col) && bandsFor(ny, ROWS).includes(row),
+    agrees:
+      bandsFor(nx, COLS).includes(col) && bandsFor(ny, ROWS).includes(row),
   };
 }
 
@@ -751,11 +936,15 @@ export async function locateTarget({ config, imagePath, target, stopSignal }) {
     if (parsed.found === false) return { notFound: true };
     const pnx = Number(parsed.nx);
     const pny = Number(parsed.ny);
-    if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
+    if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0)
+      return null;
     // Same magnitude rescue as everywhere else - this model writes percentages
     // and 0-1000 space as readily as fractions, and the answer is a real verdict
     // about where the element is.
-    const { nx, ny } = rescalePair(pnx, pny, { width: meta.width ?? 0, height: meta.height ?? 0 });
+    const { nx, ny } = rescalePair(pnx, pny, {
+      width: meta.width ?? 0,
+      height: meta.height ?? 0,
+    });
     if (nx > 1 || ny > 1) return null;
 
     // Stage 1 vs stage 2. When the model names a cell and then writes decimals
@@ -776,7 +965,8 @@ export async function locateTarget({ config, imagePath, target, stopSignal }) {
         stopSignal,
         window: CELL_WINDOW,
       });
-      if (repaired && !repaired.notFound) return { nx: repaired.nx, ny: repaired.ny, repaired: true };
+      if (repaired && !repaired.notFound)
+        return { nx: repaired.nx, ny: repaired.ny, repaired: true };
       // The re-ask found nothing it could name. The cell centre is still a better
       // point than a decimal the model itself just contradicted - and it lands
       // the click inside the right third rather than halfway across the frame.
@@ -795,7 +985,17 @@ export async function locateTarget({ config, imagePath, target, stopSignal }) {
 // Up to 3 total attempts (1 initial + 2 re-prompts) before giving up
 // (AGENT_PLAN.md 6.2: "up to 2 re-prompts... a 3rd failure records the step
 // as invalid_json").
-export async function getNextAction({ config, question, inventory, history, discoveries = "", imagePath, correctiveFeedback, onAttempt = () => {}, stopSignal }) {
+export async function getNextAction({
+  config,
+  question,
+  inventory,
+  history,
+  discoveries = "",
+  imagePath,
+  correctiveFeedback,
+  onAttempt = () => {},
+  stopSignal,
+}) {
   let feedback = correctiveFeedback;
   let lastRaw = null;
   let lastNetworkError = null;
@@ -823,11 +1023,24 @@ export async function getNextAction({ config, question, inventory, history, disc
     // the orchestrator's post-call shouldStop() check ends the run promptly.
     if (stopSignal?.aborted) break;
     if (attempt >= 2) onAttempt(attempt);
-    const { systemText, userText } = buildPrompt({ question, inventory, history, discoveries, correctiveFeedback: feedback, mode: config.actuationMode ?? "pixel" });
+    const { systemText, userText } = buildPrompt({
+      question,
+      inventory,
+      history,
+      discoveries,
+      correctiveFeedback: feedback,
+      mode: config.actuationMode ?? "pixel",
+    });
 
     let raw;
     try {
-      raw = await callVlm({ config, systemText, userText, imagePath, stopSignal });
+      raw = await callVlm({
+        config,
+        systemText,
+        userText,
+        imagePath,
+        stopSignal,
+      });
     } catch (e) {
       // Network failure / timeout / VLM endpoint down. Distinct from a
       // malformed-but-present response - don't inject a "not valid JSON"
@@ -842,7 +1055,8 @@ export async function getNextAction({ config, question, inventory, history, disc
 
     const parsed = parseModelJson(raw);
     if (!parsed) {
-      feedback = "Your previous response was not valid JSON. Return STRICT JSON only, no markdown, no extra text.";
+      feedback =
+        "Your previous response was not valid JSON. Return STRICT JSON only, no markdown, no extra text.";
       continue;
     }
 
@@ -863,8 +1077,13 @@ export async function getNextAction({ config, question, inventory, history, disc
     const result = StepResponseSchema.safeParse(parsed);
     // Both click and scroll are pixel-mode only; api mode must reject either.
     const isPixelOnlyAction =
-      result.success && (result.data.action.type === "click" || result.data.action.type === "scroll");
-    if (result.success && !((config.actuationMode ?? "pixel") !== "pixel" && isPixelOnlyAction)) {
+      result.success &&
+      (result.data.action.type === "click" ||
+        result.data.action.type === "scroll");
+    if (
+      result.success &&
+      !((config.actuationMode ?? "pixel") !== "pixel" && isPixelOnlyAction)
+    ) {
       return {
         valid: true,
         discovery: result.data.discovery ?? null,
@@ -906,6 +1125,10 @@ export const _internal = {
   buildPrompt,
   resolveVlmTarget,
   authHeaders,
+  isDailyQuotaExhausted,
+  pickKeyEnv,
+  markKeyExhausted,
+  clearExhaustedKeys,
   rescalePair,
   normalizeClickAction,
   isRetryableStatus,
