@@ -8,9 +8,15 @@ const BASE =
 
 const PRESS_PHYSICS = "active:scale-[0.97] active:duration-150 active:ease-bounce";
 
+// `cx` is a plain join, so a caller's `p-0` does NOT beat a preset's `px-4`:
+// same specificity, and Tailwind emits px-0 before px-4, so the preset wins and
+// the padding eats the whole width of a square button (measured: a 32px button
+// left its glyph 0px wide — an accent-colored blank disc). Icon-only buttons
+// therefore pick a padding-free size instead of trying to override one.
 const SIZES = {
   md: "px-5 py-2.5 text-[15px]",
   sm: "px-4 py-1.5 text-sm",
+  icon: "p-0 text-sm",
 };
 
 // Solid accent fills use the constant night/snow pair (never theme `fg`):

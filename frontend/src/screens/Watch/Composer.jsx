@@ -22,9 +22,9 @@ function formatElapsed(totalSeconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// Square "stop" glyph, matching the one on the end-session button in the thread
-// header. The composer's stop control is icon-only — the word alongside it read
-// as a second label competing with the running question it sits next to.
+// Square "stop" glyph. The composer's stop control is icon-only — the word
+// alongside it read as a second label competing with the running question it
+// sits next to. (The end-session button is text-only for the same reason.)
 function StopIcon() {
   return (
     <svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden="true">
@@ -232,9 +232,9 @@ export default function Composer({
           <Spinner className="shrink-0" />
           <span className="min-w-0 flex-1 truncate text-sm text-fg/60">{runningQuestion}</span>
           <Button
-            size="sm"
+            size="icon"
             variant="danger"
-            className="size-8 shrink-0 p-0"
+            className="size-8 shrink-0"
             disabled={stopping}
             onClick={handleStop}
             aria-label={stopping ? "Stopping…" : "Stop"}

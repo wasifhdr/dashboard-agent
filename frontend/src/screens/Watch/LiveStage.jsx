@@ -237,7 +237,7 @@ export default function LiveStage({
           // The height budget caps the CARD, not just the frame inside it, so
           // the card hugs the viz instead of stretching to the (now uncapped)
           // column width and leaving dead glass either side of it — which is
-          // also where the "Live" badge and the ring would otherwise sit.
+          // also where the interactive ring would otherwise sit.
           style={canCrop ? { maxWidth: `calc((100dvh - 7rem) * ${aspectW} / ${aspectH})` } : undefined}
         >
           {liveFrameUrl ? (
@@ -345,11 +345,10 @@ export default function LiveStage({
               cursor on the frame and the pinging "DashLens is working…" pill in
               the status row below it (Watch.jsx). */}
 
-          {liveFrameUrl && (
-            <div className="pointer-events-none absolute left-3 top-3">
-              <Badge variant="neutral">● Live</Badge>
-            </div>
-          )}
+          {/* No "Live" badge over the frame: a moving dashboard is its own
+              liveness cue, and the corner overlay only covered part of it. The
+              "Live view ended" overlay below still tells the other half of the
+              story, which is the half that isn't self-evident. */}
 
           {/* Terminal-close overlay: the server ended the live channel for
               good (idle timeout, crash, screencast failure, explicit close) -

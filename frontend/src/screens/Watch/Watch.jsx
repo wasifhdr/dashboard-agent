@@ -38,15 +38,6 @@ function useMeasuredHeight() {
   return [setNode, height];
 }
 
-// Small square "stop" glyph for the red end-session button in the thread header.
-function StopIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden="true">
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
 function flattenSteps(runs) {
   const flat = [];
   runs.forEach((run, runIdx) => {
@@ -548,10 +539,8 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
                     size="sm"
                     variant="danger"
                     onClick={handleEndSession}
-                    className="gap-2"
                     title="End session and return to the landing page (the live dashboard closes in the background)."
                   >
-                    <StopIcon />
                     End session
                   </Button>
                 )
