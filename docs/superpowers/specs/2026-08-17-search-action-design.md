@@ -118,9 +118,48 @@ Pixel mode has no such route — the value must be reached through the UI — so
 this action is a pixel-mode gap-closer, and any eval question built on it is
 **not** cross-arm comparable.
 
+**12. Per-character PACING is what makes the search work — not the input
+mechanism.** Findings 4–6 above were all measured at 40–60ms/char with Enter
+pressed immediately, which succeeds **2 times in 8**. Re-measured at n=8 per
+variant:
+
+| variant | clean full match |
+|---|---|
+| type at 40ms/char, Enter immediately (the original) | **2/8** |
+| **type at 250ms/char, wait 1500ms, then Enter** | **7/8** |
+| CDP `Input.insertText` (paste-style), then Enter | 2/8 |
+| CDP raw per-char `dispatchKeyEvent`, 150ms apart, then Enter | 2/8 |
+| click the box to focus it first, then type at 40ms/char | **0/8** |
+
+Three different delivery mechanisms all sit on the same 25%, so the bottleneck
+is not *how* the keystrokes are synthesised — it is that Tableau's search
+pipeline needs real wall-clock time between characters to keep up.
+
+This also **corrects finding 4**. Under slow typing the list usually filters
+*before Enter is pressed at all*, so the box IS a live filter; finding 4's "typed,
+polled 15s, nothing happened" was fast typing outrunning the pipeline every time,
+not the absence of one. Enter is a cheap safety net, not the trigger.
+
+Variant H is a second, sharper argument against coordinates: it scored 0/8, and
+its two "changed" runs were not searches — the click cleared the unrelated
+**Type** filter and re-laid out the whole dashboard, then reported "No matches".
+Finding 8 showed a near-miss corrupting the filter being operated; H shows it
+corrupting a *different* one.
+
+**13. The newline witness does not survive n=8.** Finding 6 said a swallowed
+Enter leaves a `\n` in the textarea, and six runs separated on it perfectly. At
+n=8 a control run succeeded **with** a newline present and another succeeded
+without one, while six failures all had one — the two are independent. A retry
+loop gated on that check therefore never exited early (24/24 attempts read
+"newline"), burned all three attempts every time, and in 2 of 8 runs left the box
+matching the substring **"am"** instead of "American", returning a clean-looking
+25-row list of entirely wrong titles that scored 3 changed regions. Do not build
+the newline check, and do not build a retry.
+
 **Scope caveat.** Every measurement above is one dashboard and one filter. The
 auto-focus behaviour (finding 2) in particular is the load-bearing assumption,
-and it is unverified elsewhere.
+and it is unverified elsewhere. Findings 6 and 7 are also a standing warning
+about sample size: both looked solid at n=6 and one of them was an artifact.
 
 ## Design
 
@@ -133,10 +172,13 @@ and it is unverified elsewhere.
 ```js
 const SearchAction = z.object({
   type: z.literal("search"),
-  text: z.string().min(1).max(100),
+  text: z.string().min(1).max(60),
   target: z.string().optional(),
 });
 ```
+
+`max(60)` is a timeout budget, not a style choice: typing runs at 250ms/char
+(finding 12), so 60 characters is 15s against `actionTimeoutMs`'s 30000.
 
 No `nx`/`ny`. Three things the scroll action needed therefore drop out entirely:
 the aiming pass (`locate`/`refine`), the `rescalePair` extension plus its
@@ -154,13 +196,28 @@ A new `actuator.js` branch that touches no mouse at all:
    the focused element is a text entry. If not, return
    `{ok: false, error: "No text box is focused — open the filter dropdown first;
    its search box is focused automatically."}` and dispatch nothing.
-2. `Control+A`, then `page.keyboard.type(text)`. The select-all makes a second
-   search in an already-open dropdown replace the prior term rather than append
-   (`"American"` + `"Horror"` → `"AmericanHorror"`); it is a no-op on an empty box.
-3. `page.keyboard.press("Enter")`.
+2. `Control+a`, then `page.keyboard.type(text, { delay: pixel.searchTypeDelayMs })`
+   at **250ms per character**. The select-all makes a second search in an
+   already-open dropdown replace the prior term rather than append (`"American"`
+   + `"Horror"` → `"AmericanHorror"`); it is a no-op on an empty box.
+3. Wait `pixel.searchSyncMs` (**1500ms**) for Tableau's own filter pipeline to
+   catch up with the typed value.
+4. `page.keyboard.press("Enter")`.
+
+**The per-character pacing is the whole ballgame — see finding 12.** Typing at
+40ms/char and pressing Enter immediately succeeds 2 times in 8; typing at
+250ms/char and pausing 1.5s before Enter succeeds 7 times in 8. Nothing else
+tested moves the number.
 
 The focus check is what replaces the click, and it is why finding 8's failure
-cannot occur: there is no coordinate to miss with.
+cannot occur: there is no coordinate to miss with. Finding 12's variant H makes
+that concrete — clicking to focus the box first scored **0/8**, and twice
+cleared an unrelated filter instead of searching.
+
+**Timeout budget.** At 250ms/char, `config.actionTimeoutMs` (30000) bounds the
+text length: 60 characters is 15s of typing plus 1.5s of sync, comfortably
+inside it, which is why the schema caps `text` at 60 rather than 100. A longer
+cap would let a verbose model write a search term that times out mid-typing.
 
 Because no `mouse.move` happens, there is **no hover-highlight artifact** — so
 unlike `scroll` this needs no `beforeWheel` pre-capture hook, and its guard can
@@ -185,25 +242,35 @@ search in either outcome, confirming `expectBridgeEvent` must stay unset here.
 
 ### Did the search run?
 
-Two witnesses, because finding 7 rules out the simple one:
+**One witness: the pixel diff** against the step's own pre-action frame,
+requiring **≥2 changed regions**.
 
-- **Primary, exact.** After Enter, read the focused element's value. A trailing
-  newline means Enter was not intercepted and the search did not run — finding 6's
-  exact signature.
-- **Secondary, general.** The pixel diff against the step's own pre-action frame,
-  requiring **≥2 changed regions**. Catches failures that are not the newline case.
+**The newline check was cut, and the reason matters.** An earlier draft made it
+the primary, "exact" witness: a trailing `\n` in the textarea meant Enter had not
+been intercepted. Six runs supported that perfectly — 4 failures all had a
+newline, 2 successes had none. **At n=8 it collapses** (finding 13): a control
+run succeeded *with* a newline present, another succeeded without one, and six
+failures all had one. Newline presence and search success are independent. Six
+samples were simply not enough to tell a real discriminator from a coincidence,
+which is the same trap finding 10 sprang on the DOM reads.
 
-**The ≥2 threshold is calibrated on six runs, all six against the same Title
-filter (2026-08-17).** Enter was intercepted (search ran, `newline: false`) on
-2 of 6; the widget swallowed it (search did not run, `newline: true`) on the
-other 4 — finding 6's flakiness reproduces more often than not run-to-run. The
-two groups separate cleanly: the 2 runs where the search ran scored **3
-regions** each (areas `[72928, 36464, 68370]`, identical both times); the 4
-runs where it did not scored **0 regions** each. `searchMinRegions: 2` sits in
-the middle of that 0-vs-3 gap with no overlap observed. The failure side was
-exercised (unlike a run that never separates), so this is a real two-sided
-calibration, not a one-sided guess — though still one filter on one dashboard;
-see the Scope caveat above.
+The ≥2 threshold survives: across 32 runs every clean full match scored 3
+regions and every no-op scored 0. But it is a "something changed" witness, not a
+"the right thing changed" one, and finding 13 produced a live counterexample —
+a corrupted partial match scored 3 regions and would pass this test.
+
+**That residual risk is handled structurally rather than by a third witness.**
+The next step has the model read the narrowed list and name the row it clicks,
+and `refineClickPoint` requires it to quote text it can actually see in the
+zoom window. A list filtered on the wrong term therefore yields a *rejected
+click*, not a confident wrong selection. Building a "does every visible row
+contain the query" check would mean either a DOM read (finding 10 says no) or
+an extra VLM call per search, to protect against a case the click path already
+catches.
+
+A failed search persists as **`ok_nochange`** — the gold `!` in the feed, not a
+green tick — with corrective feedback saying the search did not run and to click
+the value directly instead.
 
 A failed search persists as **`ok_nochange`** — the gold `!` in the feed, not a
 green tick — with corrective feedback saying the search did not run and to click

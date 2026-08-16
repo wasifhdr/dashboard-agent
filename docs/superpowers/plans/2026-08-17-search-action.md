@@ -4,7 +4,9 @@
 
 **Goal:** Add a tenth action, `search`, that types into an open Tableau filter dropdown's search box and presses Enter, collapsing a 6172-value list to a handful of matching rows in one step.
 
-**Architecture:** A coordinate-free pixel-mode action. The actuator verifies a text entry is focused (the box auto-focuses when the dropdown opens), then dispatches `Control+a`, the text, and `Enter` — no mouse involved, so no aiming pass and no stray-click risk. Success is judged by two witnesses: a trailing newline in the box means Enter was not intercepted and the search did not run; otherwise the post-action pixel diff must show at least `pixel.searchMinRegions` changed regions.
+**Architecture:** A coordinate-free pixel-mode action. The actuator verifies a text entry is focused (the box auto-focuses when the dropdown opens), then dispatches `Control+a`, the text **at 250ms per character**, a **1500ms** pause, and `Enter` — no mouse involved, so no aiming pass and no stray-click risk. Success is judged by one witness: the post-action pixel diff must show at least `pixel.searchMinRegions` changed regions.
+
+**Measured, and load-bearing:** the per-character pacing is what makes this work at all — 7/8 clean matches against 2/8 for fast typing, with CDP `insertText` and raw per-char key events both also at 2/8. Details in the spec's finding 12.
 
 **Tech Stack:** Node ESM, zod, Playwright, `node:test`, React (Vite) for the one frontend touch.
 
@@ -184,7 +186,10 @@ test("empty search text is rejected", () => {
 });
 
 test("over-long search text is rejected", () => {
-  assert.equal(ActionSchema.safeParse({ type: "search", text: "a".repeat(101) }).success, false);
+  // The cap is a timeout budget: typing runs at 250ms/char, so 60 chars is 15s
+  // against actionTimeoutMs's 30000.
+  assert.ok(ActionSchema.safeParse({ type: "search", text: "a".repeat(60) }).success);
+  assert.equal(ActionSchema.safeParse({ type: "search", text: "a".repeat(61) }).success, false);
 });
 
 test("a search carries no coordinates", () => {
@@ -217,7 +222,7 @@ In `backend/src/actionSchema.js`, after `ScrollAction`:
 // where a pixel click costs two or three.
 const SearchAction = z.object({
   type: z.literal("search"),
-  text: z.string().min(1).max(100),
+  text: z.string().min(1).max(60),
   target: z.string().optional(),
 });
 ```
@@ -266,7 +271,7 @@ git commit -m "Add the search action to the action schema"
 - Consumes: `ActionSchema`'s `{ type: "search", text, target? }` from Task 2.
 - Produces:
   - `export async function findFocusedTextEntry(page)` → `{ frame, tag, cls, value } | null`
-  - `executeAction` case `"search"` → `{ ok: true, text, submitted: boolean | null }` or `{ ok: false, error }`. `submitted === false` means Enter was not intercepted; `null` means the value could not be re-read. Task 5 consumes `submitted`.
+  - `executeAction` case `"search"` → `{ ok: true, text }` or `{ ok: false, error }`. Reads `opts.typeDelayMs` (default 250) and `opts.syncMs` (default 1500), passed as the 5th argument to `executeActionWithTimeout` exactly as `scroll` passes `notchPx`. There is deliberately no `submitted` field — see the actuator code comment.
   - `describeAction` returns `Search: "<text>"`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -285,10 +290,15 @@ const pageWith = (frameResults, keyboard) => ({
     evaluate: async () => { if (r instanceof Error) throw r; return r; },
   })),
   keyboard,
+  waitForTimeout: async (ms) => keyboard.log.push(`wait:${ms}`),
 });
 const spyKeyboard = () => {
   const log = [];
-  return { log, press: async (k) => log.push(k), type: async (t) => log.push(`type:${t}`) };
+  return {
+    log,
+    press: async (k) => log.push(k),
+    type: async (t, o) => log.push(`type:${t}:delay=${o?.delay}`),
+  };
 };
 
 test("no focused text entry anywhere reports null", async () => {
@@ -313,23 +323,28 @@ test("a search with nothing focused dispatches NO keystrokes", async () => {
   assert.deepEqual(kb.log, []);
 });
 
-test("a search selects all, types, and presses Enter in that order", async () => {
-  // Control+a first so a second search REPLACES the previous term rather than
-  // appending to it ("American" + "Horror" -> "AmericanHorror").
+test("a search selects all, types SLOWLY, waits, then presses Enter", async () => {
+  // Order and pacing are both load-bearing. Control+a so a second search
+  // REPLACES the previous term rather than appending ("American" + "Horror" ->
+  // "AmericanHorror"). The 250ms/char delay and the 1500ms wait ARE the feature:
+  // at 40ms/char with Enter pressed immediately this succeeds 2 times in 8;
+  // paced like this, 7 times in 8. Three different key-delivery mechanisms all
+  // sat at 25%, so it is wall-clock pacing that matters, not the event type.
   const kb = spyKeyboard();
   const page = pageWith([{ tag: "textarea", cls: "QueryBox", value: "American" }], kb);
-  const res = await executeActionWithTimeout(page, null, { type: "search", text: "American" }, 1000);
+  const res = await executeActionWithTimeout(
+    page, null, { type: "search", text: "American" }, 30000, { typeDelayMs: 250, syncMs: 1500 },
+  );
   assert.equal(res.ok, true);
-  assert.deepEqual(kb.log, ["Control+a", "type:American", "Enter"]);
+  assert.deepEqual(kb.log, ["Control+a", "type:American:delay=250", "wait:1500", "Enter"]);
 });
 
-test("a trailing newline reports the search as not submitted", async () => {
-  // Measured failure: Enter is not reliably intercepted by the widget, and when
-  // it is not, it inserts a newline into the textarea and nothing filters.
-  const page = pageWith([{ tag: "textarea", cls: "QueryBox", value: "American\n" }], spyKeyboard());
-  const res = await executeActionWithTimeout(page, null, { type: "search", text: "American" }, 1000);
-  assert.equal(res.ok, true);
-  assert.equal(res.submitted, false);
+test("search pacing falls back to the measured defaults when opts are absent", async () => {
+  // A caller that forgets to pass pacing must not silently get the 25% path.
+  const kb = spyKeyboard();
+  const page = pageWith([{ tag: "textarea", cls: "QueryBox", value: "x" }], kb);
+  await executeActionWithTimeout(page, null, { type: "search", text: "x" }, 30000);
+  assert.deepEqual(kb.log, ["Control+a", "type:x:delay=250", "wait:1500", "Enter"]);
 });
 
 test("describeAction labels a search with its text", () => {
@@ -397,21 +412,30 @@ case "search": {
         "its search box is focused automatically when the list opens.",
     };
   }
+  // PACING IS THE FEATURE. Tableau's search pipeline needs real wall-clock time
+  // between characters to keep up with the box: at 40ms/char with Enter pressed
+  // immediately this lands a clean match 2 times in 8; at 250ms/char with a
+  // 1500ms pause before Enter, 7 times in 8. CDP insertText and raw per-char
+  // dispatchKeyEvent both sat at 2/8 too, so it is not the event type - do not
+  // "optimize" these delays away.
+  const typeDelayMs = Number(opts.typeDelayMs) > 0 ? Number(opts.typeDelayMs) : 250;
+  const syncMs = Number(opts.syncMs) >= 0 ? Number(opts.syncMs) : 1500;
+
   // Control+a so a second search replaces the prior term instead of appending;
   // a no-op on an empty box.
   await page.keyboard.press("Control+a");
-  await page.keyboard.type(action.text);
-  // Enter is REQUIRED: typing alone provably does not filter the list (polled
-  // 15s, 4241 rows unchanged). aria-label="Search (Enter)" is literal.
+  await page.keyboard.type(action.text, { delay: typeDelayMs });
+  // Let Tableau's own filter state catch up with what was typed before
+  // committing. Under this pacing the list has usually filtered ALREADY by now.
+  await page.waitForTimeout(syncMs);
+  // Enter as a cheap safety net rather than the trigger - it finishes the job on
+  // the runs where the live filter has not landed on its own.
   await page.keyboard.press("Enter");
 
-  // Did Enter actually submit? When the widget does not intercept it, Enter
-  // inserts a newline into the textarea and nothing filters. Re-reading the
-  // value is the exact witness for that; null means we could not tell, and the
-  // caller falls back to the pixel diff.
-  const after = await findFocusedTextEntry(page);
-  const submitted = after ? !String(after.value ?? "").includes("\n") : null;
-  return { ok: true, text: action.text, submitted };
+  // No newline check. It looked like an exact witness at n=6 and collapsed at
+  // n=8: a success with a newline present, a success without one, and six
+  // failures all with one. The caller judges by the pixel diff alone.
+  return { ok: true, text: action.text };
 }
 ```
 
@@ -577,7 +601,7 @@ git commit -m "Offer the search action in the pixel prompt only"
 - Modify: `backend/config.json`
 
 **Interfaces:**
-- Consumes: `executeActionWithTimeout(...)` → `{ ok, text, submitted }` from Task 3; `describeAction` from Task 3.
+- Consumes: `executeActionWithTimeout(page, null, action, timeoutMs, { typeDelayMs, syncMs })` → `{ ok, text }` or `{ ok: false, error }` from Task 3; `describeAction` from Task 3.
 - Produces: history entries `{ idx, key, type: "search", status, text, changed }` consumed by Task 4's `formatHistoryLine`.
 
 - [ ] **Step 1: Add the config key**
@@ -585,8 +609,13 @@ git commit -m "Offer the search action in the pixel prompt only"
 In `backend/config.json`, inside `"pixel"`, after `scrollDeadRadius` (use the value Task 1 calibrated; `2` if it confirmed the spec):
 
 ```json
-    "searchMinRegions": 2
+    "searchMinRegions": 2,
+    "searchTypeDelayMs": 250,
+    "searchSyncMs": 1500
 ```
+
+`searchTypeDelayMs` and `searchSyncMs` are the measured pacing (finding 12): at
+40ms/char with no pause a search lands 2 times in 8, at these values 7 times in 8.
 
 - [ ] **Step 2: Add the action key**
 
@@ -609,6 +638,10 @@ Beside `const scrollNotchPx = ...`:
   // grid cell, the differ's minimum unit), so zero-vs-nonzero cannot be the
   // test here the way it is for click and scroll.
   const searchMinRegions = config.pixel?.searchMinRegions ?? 2;
+  // Measured pacing - see the actuator's comment. These are not tuning knobs to
+  // shave for speed; dropping them is what takes the action from 7/8 to 2/8.
+  const searchTypeDelayMs = config.pixel?.searchTypeDelayMs ?? 250;
+  const searchSyncMs = config.pixel?.searchSyncMs ?? 1500;
 ```
 
 - [ ] **Step 4: Add the branch**
@@ -636,7 +669,10 @@ In `backend/src/orchestrator.js`, immediately after the closing brace of the `if
       // No aiming pass and no cursor movement, so unlike scroll there is no
       // hover artifact to baseline around: the step's own frame is a clean
       // "before". No agent_cursor event either - there is no point to draw.
-      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs);
+      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs, {
+        typeDelayMs: searchTypeDelayMs,
+        syncMs: searchSyncMs,
+      });
 
       if (!execResult.ok) {
         persistAndEmit({
@@ -666,10 +702,14 @@ In `backend/src/orchestrator.js`, immediately after the closing brace of the `if
       try {
         await screenshotViz(page, postPath);
         const regions = await computeChangedRegions(framePath, postPath).catch(() => []);
-        // Two witnesses. submitted === false is the exact signature of the
-        // measured failure (Enter not intercepted -> newline in the box), and it
-        // is decisive on its own. Otherwise fall back to the region count.
-        searchRan = execResult.submitted === false ? false : regions.length >= searchMinRegions;
+        // The region count is the ONLY witness. Across 32 measured runs every
+        // clean full match scored 3 regions and every no-op scored 0. It answers
+        // "something changed", not "the right thing changed" - a search that
+        // landed on a corrupted partial term also scores 3. That residual case is
+        // caught downstream instead: the next step must name the row it clicks,
+        // and refineClickPoint makes it quote text it can actually see, so a
+        // wrongly-filtered list yields a rejected click, not a wrong selection.
+        searchRan = regions.length >= searchMinRegions;
       } finally {
         fs.rmSync(postPath, { force: true });
       }
@@ -828,7 +868,8 @@ Three edits:
 3. Add to the gotchas list:
 
 ```markdown
-- **A Tableau filter search box needs ENTER, and Enter is not reliably intercepted.** The box is a `<textarea class="QueryBox">` (`aria-label="Search (Enter)"`) that appears only once the dropdown is open, and it is **focused the instant the list opens** — so `search` needs no click, and must not take one: a click 2% of frame height below its centre selected the title `American Anarchist` and filtered the dashboard to a value the model never read. Typing alone provably does nothing (polled 15s: 4241 rows unchanged, `scrollTop` 0, `scrollHeight` 101784 unchanged); Enter collapses the list from 6172 values to 25. But the same Enter sometimes inserts a **newline** into the textarea instead of submitting, and nothing filters — which is why `executeAction` re-reads the value and reports `submitted: false` on a trailing `\n`. The pixel diff alone cannot catch it: a *failed* search still echoes its text and scores 1 changed region (one 86×53 grid cell, the differ's minimum), against 3 for a successful one.
+- **A Tableau filter search box only keeps up if you type SLOWLY — pacing, not the key-delivery mechanism, is what makes it work.** The box is a `<textarea class="QueryBox">` (`aria-label="Search (Enter)"`) that appears only once the dropdown is open, and it is **focused the instant the list opens** — so `search` needs no click, and must not take one (see the next gotcha). Measured at n=8 per variant on Netflix → Title: typing at 40ms/char and pressing Enter immediately lands a clean match **2/8**; typing at **250ms/char with a 1500ms pause before Enter, 7/8**. CDP `Input.insertText` and raw per-char `Input.dispatchKeyEvent` also scored 2/8, so the bottleneck is wall-clock time between characters, not the event type — `pixel.searchTypeDelayMs` and `pixel.searchSyncMs` are measurements, not tuning knobs. Under that pacing the list usually filters *before* Enter is pressed, so the box is a live filter and Enter is only a safety net; an earlier "typed, polled 15s, nothing filtered" reading was fast typing outrunning the pipeline. **Do not add a newline check or a retry:** the `\n`-in-the-textarea signal looked exact at n=6 and collapsed at n=8 (successes both with and without it), and a retry gated on it burned every attempt and twice left the box matching `"am"` instead of `"American"` — a clean-looking 25-row list of entirely wrong titles that scores 3 changed regions and reads as success.
+- **Clicking a Tableau filter's search box to focus it corrupts a DIFFERENT filter.** The box is 1.6% of frame height, thinner than the dropdown row `refineClickPoint`'s window was sized for. A click 2% of frame height below its centre selected the title `American Anarchist`; a click-to-focus-first variant scored **0/8** and twice cleared the unrelated **Type** filter and re-laid out the whole dashboard before reporting "No matches". This is why `search` carries no coordinates at all.
 - **Tableau's DOM is not a witness for a filter list, in the same way `scrollTop` is not one for a pane.** After a successful search `[role='listbox']` goes `null` and a naive item count reads **0** while 25 rows are plainly on screen. An early draft of the search spec concluded "Enter does nothing" from exactly that reading, and only a screenshot corrected it. Measure the pixels; confirm against a capture.
 ```
 
@@ -843,8 +884,8 @@ git commit -m "Document the search action and the two gotchas behind it"
 
 ## Self-Review
 
-**Spec coverage.** Action shape → Task 2. Actuator (focus check, Ctrl+A, type, Enter) → Task 3. Settle → Task 5 step 4, with the open measurement resolved in Task 1. Both success witnesses → Task 3 (`submitted`) and Task 5 (`searchMinRegions`). Loop guard and `clearStaleGuards` → Task 5. Mode gate → Task 4. Prompt → Task 4. Live view → Task 6. Eval question → Task 7. Files-touched list, testing and verification → Tasks 2–8. `CLAUDE.md` → Task 8. The spec's two Deferred items stay deferred and no task implements them.
+**Spec coverage.** Action shape → Task 2. Actuator (focus check, `Control+a`, paced typing, sync pause, Enter) → Task 3. Settle → Task 5 step 4, measurement resolved in Task 1 (`sawBridgeEvent` false 6/6). The single success witness → Task 5 (`searchMinRegions`), calibrated in Task 1 and re-confirmed across the 32 runs of finding 12. Loop guard and `clearStaleGuards` → Task 5. Mode gate → Task 4. Prompt → Task 4. Live view → Task 6. Eval question → Task 7. Files-touched list, testing and verification → Tasks 2–8. `CLAUDE.md` → Task 8. The spec's two Deferred items stay deferred and no task implements them.
 
-**Type consistency.** `findFocusedTextEntry` is the name in Task 3's implementation, its export, and its tests. `execResult.submitted` is produced in Task 3 and consumed in Task 5 with the same tri-state (`true` / `false` / `null`). `searchMinRegions` is the config key in Task 5 step 1 and the variable in step 3. History entries carry `text` in Task 5 and are read as `h.text` in Task 4's `describeActionForHistory`.
+**Type consistency.** `findFocusedTextEntry` is the name in Task 3's implementation, its export, and its tests. `opts.typeDelayMs` / `opts.syncMs` are read in Task 3 and passed in Task 5 from `searchTypeDelayMs` / `searchSyncMs`, which are the config keys added in Task 5 step 1. `searchMinRegions` is likewise the config key in step 1 and the variable in step 3. History entries carry `text` in Task 5 and are read as `h.text` in Task 4's `describeActionForHistory`. There is no `submitted` field anywhere — the newline witness was cut after it failed at n=8.
 
 **One deliberate ordering note.** Task 4 renders `search` history lines before Task 5 ever produces one; the tests in Task 4 construct the entry literally, so they pass independently of Task 5.
