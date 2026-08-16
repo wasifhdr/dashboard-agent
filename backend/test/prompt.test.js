@@ -138,3 +138,39 @@ test("REGRESSION: both templates tell the model discoveries can complete an answ
     );
   }
 });
+
+// ---- search (pixel mode only) ----------------------------------------------
+
+test("pixel mode prompt offers the search action", () => {
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(/"type":"search"/.test(systemText));
+});
+
+test("api mode prompt never mentions searching", () => {
+  // The api arm is the comparison arm for the two grounding strategies; its
+  // prompt must not drift, or the comparison stops meaning anything.
+  const { systemText } = buildPrompt({ ...BASE, mode: "api", discoveries: "" });
+  assert.ok(!/"type":"search"/.test(systemText));
+  assert.ok(!/search/i.test(systemText));
+});
+
+test("the pixel prompt tells the model NOT to click the search box first", () => {
+  // Measured: the box auto-focuses on open, and a near-miss click selects a
+  // value outright. A model that clicks it first is one miss from a wrong answer.
+  const { systemText } = buildPrompt({ ...BASE, mode: "pixel", discoveries: "" });
+  assert.ok(/focused automatically/i.test(systemText));
+});
+
+test("a search renders in the history with its text and outcome", () => {
+  const line = _internal.formatHistoryLine({
+    idx: 3, type: "search", text: "American", status: "ok", changed: true,
+  });
+  assert.equal(line, '#3 search "American" -> changed');
+});
+
+test("a search that did not filter says so, rather than reporting ok", () => {
+  const line = _internal.formatHistoryLine({
+    idx: 4, type: "search", text: "American", status: "ok", changed: false,
+  });
+  assert.equal(line, '#4 search "American" -> no change');
+});

@@ -66,6 +66,7 @@ function formatInventoryForPrompt(inventory) {
 }
 
 function describeActionForHistory(h) {
+  if (h.type === "search") return JSON.stringify(h.text ?? "");
   if (h.type === "scroll")
     return `${h.direction} (${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
   if (h.type === "click") return `(${h.nx?.toFixed(2)},${h.ny?.toFixed(2)})`;
@@ -78,8 +79,8 @@ function describeActionForHistory(h) {
   return "";
 }
 
-// For a click or a scroll, the model cares whether it worked, not the internal
-// step status — so an executed ("ok") one reports "changed" / "no change".
+// For a click, a scroll or a search, the model cares whether it worked, not the
+// internal step status — so an executed ("ok") one reports "changed" / "no change".
 // Rejected/errored ones keep their status so the model sees they didn't run.
 function clickOutcome(h) {
   if (h.status === "ok") return h.changed ? "changed" : "no change";
@@ -88,10 +89,13 @@ function clickOutcome(h) {
 
 function formatHistoryLine(h) {
   const detail = describeActionForHistory(h);
-  // Scroll shares the click reporting: "ok" tells the model nothing useful about
-  // a scroll, since a wheel that hit an already-bottomed pane also succeeds.
+  // Scroll and search share the click reporting: "ok" tells the model nothing
+  // useful, since a wheel that hit an already-bottomed pane (or a search that
+  // matched nothing) also succeeds.
   const outcome =
-    h.type === "click" || h.type === "scroll" ? clickOutcome(h) : h.status;
+    h.type === "click" || h.type === "scroll" || h.type === "search"
+      ? clickOutcome(h)
+      : h.status;
   return `#${h.idx} ${h.type}${detail ? " " + detail : ""} -> ${outcome}`;
 }
 
@@ -163,6 +167,7 @@ The "action" object must be exactly one of:
 - {"type":"click","nx":0.42,"ny":0.13,"target":"ZRI tab"}
 - {"type":"scroll","nx":0.83,"ny":0.49,"direction":"down","target":"the Remote Ratio pie stack"}
 - {"type":"scroll","nx":0.14,"ny":0.35,"direction":"up","target":"the open country dropdown list"}
+- {"type":"search","text":"American Horror Story","target":"the Title filter search box"}
 - {"type":"wait"}
 - {"type":"answer","answer":"<final answer text>","confidence":0.8}
 - {"type":"fail","reason":"<why this cannot be answered>"}
@@ -176,6 +181,7 @@ Rules:
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.
 7. Some charts and lists are TALLER than the space they are drawn in, so Tableau cuts them off. Use "scroll" to see the rest, aiming at the middle of THAT chart or list - not its title, and not the dashboard's margin. Scrolling the wrong thing is worse than not scrolling at all.
 8. SCROLLING GOES BOTH WAYS, and a list you just opened is usually NOT at its top: a dropdown opens near the value currently selected, so what you want may be ABOVE the visible rows. Read the first and last visible entries and work out which way to go - for an alphabetical list, a target earlier in the alphabet than the top visible row needs "up", later than the bottom visible row needs "down". If a click was rejected because the target was not on screen, scrolling the WRONG way makes that worse, not better.
+9. Some dropdown lists hold THOUSANDS of values and cannot be reached by scrolling at all. If you have opened a list and the value you want is not visible, use "search" instead of scrolling - it filters the list down to matching entries in one step. The list must already be OPEN; its search box is focused automatically when the list opens, so do NOT click the box first. After searching, read the narrowed list on the next screenshot and click the row you want.
 
 RECORDING DISCOVERIES:
 "discovery" records hard data visible in the CURRENT screenshot that you will need later.
@@ -1075,11 +1081,12 @@ export async function getNextAction({
     }
 
     const result = StepResponseSchema.safeParse(parsed);
-    // Both click and scroll are pixel-mode only; api mode must reject either.
+    // click, scroll and search are all pixel-mode only; api mode must reject any.
     const isPixelOnlyAction =
       result.success &&
       (result.data.action.type === "click" ||
-        result.data.action.type === "scroll");
+        result.data.action.type === "scroll" ||
+        result.data.action.type === "search");
     if (
       result.success &&
       !((config.actuationMode ?? "pixel") !== "pixel" && isPixelOnlyAction)
@@ -1095,7 +1102,7 @@ export async function getNextAction({
     }
 
     feedback = result.success
-      ? `The "click" and "scroll" actions are not available in this mode. Use one of the provided action types.`
+      ? `The "click", "scroll" and "search" actions are not available in this mode. Use one of the provided action types.`
       : `Your previous response did not match the required schema: ` +
         `${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. ` +
         `Return STRICT JSON only, matching the schema exactly.`;
