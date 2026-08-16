@@ -35,6 +35,26 @@
 // versus up to 3 under the old policy. That matters on a tier where roughly eight
 // steps exhausts the per-minute allowance.
 //
+// DO NOT "fix" corner controls by swapping the order to locate-then-refine. It was
+// built, measured and reverted on 2026-08-17. The premise - that locate is a
+// reliable global finder and only its row precision is weak - is false: on a
+// Netflix run where the model named "the Type dropdown" (a control at
+// (0.069,0.044)), locate resolved 9 of 11 aims to ~(0.69,0.43), the same
+// centre-biased number the main loop produces, because it is the same model. Twice
+// it OVERWROTE an aim the model had got half right - (0.810,0.050), correct row,
+// and (0.081,0.440), correct column - by dragging both to mid-frame. The reorder
+// scored 9/10 on the eval, identical to this order, while costing a third call on
+// every click; the Netflix task took 12 steps against 8. Ordering only decides
+// which unreliable pass is consulted first.
+//
+// The underlying regression is the model, not this policy. Under the local Qwen
+// 4B (retired 2026-08-01, before locate and refine existed) the model emitted
+// (0.080,0.040) for that same dropdown directly and repeatably: 44.6% of its
+// Netflix clicks landed in the corner region against 18.0% for gemini-flash-lite,
+// and 24.0% vs 4.8% across all dashboards. Every pass in this file is scaffolding
+// around that gap. Fix the coordinate generation - grid-anchoring, or a stronger
+// model on the aiming calls only - rather than re-permuting the passes.
+//
 // This module stays IO-free by injection: `locate` and `refine` are passed in, so
 // the policy is unit-testable without a network or a model. Both follow the
 // vlmClient contract - {nx,ny} | {notFound:true} | null, where null means the call

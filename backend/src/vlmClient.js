@@ -493,27 +493,85 @@ const REFINE_WINDOW = 0.22;
 // Long side the crop is upscaled to before sending. Independent of
 // config.imageLongSide: this is a small region, and upscaling is the point.
 const REFINE_LONG_SIDE = 1024;
+// Crop window for locate's cell-repair pass: one cell of the 3x3 grid (0.333)
+// plus a small margin, so a target sitting hard against a cell boundary is still
+// inside the crop. Anything much larger reintroduces the whole-frame coordinate
+// range this pass exists to escape.
+const CELL_WINDOW = 0.36;
 
-const REFINE_SYSTEM = (target) => `You are helping a UI agent click precisely.
+// Deliberately NOT phrased as "the crop is centered on the target, find it".
+// That wording presupposed the answer, and this model obliges a presupposition:
+// handed a crop around a middle-of-frame aim while the real control sat in the
+// top-left corner, it returned a confident {"found": true} pointing at whatever
+// happened to be in the crop. Because refine leads the click path, that false
+// positive short-circuits locate - the ONLY pass that can reach a target more
+// than ~11% of the frame away - and the agent clicks a chart mark instead of the
+// control it named. Observed on the Netflix dashboard 2026-08-16, where it hit
+// the "Movie" bubble (tooltip + Keep Only/Exclude menu) three steps running.
+//
+// So the crop is described for what it is - a blind cut around an unverified
+// guess - and "not here" is presented as the expected answer rather than a
+// failure. The `match` field is the other half: a model that must quote the text
+// it matched on cannot bluff its way past a bubble chart nearly as easily as one
+// answering a bare {"found": true}.
+const REFINE_SYSTEM = (target) => `You are checking whether a UI agent's intended click target is inside this crop, and if it is, exactly where.
 
-The image is a ZOOMED-IN CROP of a Tableau dashboard, centered on where the agent intends to click${target ? `: "${target}"` : ""}.
+The image is a ZOOMED-IN CROP of a Tableau dashboard, cut blind around an UNVERIFIED guess at where${target ? ` "${target}"` : " the target"} might be. The crop covers only about a fifth of the dashboard's width and height, and the guess is often wrong by much more than that, so the target is FREQUENTLY NOT IN THIS CROP AT ALL.
 
-Find that target in THIS CROP and return the normalized coordinates of its CENTER, where nx is the horizontal fraction (0 = left edge of the crop, 1 = right edge) and ny is the vertical fraction (0 = top edge, 1 = bottom edge).
+Saying it is not here is a correct and useful answer, not a failure: a search of the whole dashboard runs next and will find it. Do not assume the target is present just because it is named. Look first, then answer.
 
-Respond with STRICT JSON ONLY, matching exactly:
-{"found": true, "nx": 0.51, "ny": 0.34}
+If you can actually SEE it in this crop, respond with STRICT JSON ONLY:
+{"found": true, "match": "<the exact visible text, or the unmistakable feature, you matched on>", "nx": 0.51, "ny": 0.34}
 
-If the target is NOT visible in this crop, respond exactly:
+nx is the horizontal fraction of the CROP (0 = its left edge, 1 = its right edge) and ny is the vertical fraction (0 = top edge, 1 = bottom edge), giving the CENTER of the target. "match" must quote text you can genuinely read in this image or name an unmistakable visual feature of the element; if you cannot fill it in honestly, the target is not here.
+
+If it is not in this crop - including when only something vaguely similar is here - respond exactly:
 {"found": false}
 
 Be precise: rows in an open dropdown list are thin, so aim at the vertical middle of the intended row, not the boundary between rows.`;
+
+// Pure reading of a refine reply, split out so the evidence gate is testable
+// without sharp, the network, or a model. Coordinates come back CROP-relative;
+// the caller maps them into the full frame.
+//
+// Returns {nx, ny, match} | {notFound: true} | null, matching refineClickPoint's
+// contract - notFound is a verdict about this crop, null means "no usable
+// answer", and both escalate to locate.
+export function interpretRefineResponse(parsed, cropDims) {
+  if (!parsed) return null;
+  if (parsed.found === false) return { notFound: true };
+
+  // No evidence, no find. A reply that claims the target without being able to
+  // name what it saw is exactly the bluff this pass exists to stop, and it is
+  // reported as notFound rather than null so it ESCALATES to the whole-frame
+  // search instead of silently keeping the unrefined aim.
+  //
+  // Cost note: a compliant model fills this in, so the common path is still one
+  // verification call. When it doesn't, the extra locate call is the right thing
+  // to spend - an unverified refine is how the wrong element gets clicked.
+  const match = typeof parsed.match === "string" ? parsed.match.trim() : "";
+  if (!match) return { notFound: true };
+
+  // Same magnitude rescue as the main loop — a refine answer in pixels or
+  // 0-1000 space is a real verdict about where the target is, and dropping it
+  // to null would silently fall back to the unrefined coarse aim.
+  const pnx = Number(parsed.nx);
+  const pny = Number(parsed.ny);
+  if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
+  const { nx, ny } = rescalePair(pnx, pny, cropDims);
+  if (nx > 1 || ny > 1) return null;
+  return { nx, ny, match };
+}
 
 // Second pass over a click point: crop a window around the model's coarse aim,
 // upscale it, and ask the model to place the point again within that crop. The
 // refined point is mapped back into full-frame coordinates.
 //
 // Returns one of:
-//   {nx, ny}          - refined point, in full-frame coordinates
+//   {nx, ny, match}   - refined point, in full-frame coordinates. `match` is the
+//                       text or feature the model says it matched on: the
+//                       evidence that makes the find checkable rather than a
+//                       bare assertion. A reply without it is not a find.
 //   {notFound: true}  - the model looked and the named target is NOT in the
 //                       window, i.e. the aim is wrong by more than the window.
 //                       The caller rejects the click instead of firing it at a
@@ -525,7 +583,7 @@ Be precise: rows in an open dropdown list are thin, so aim at the vertical middl
 //                       stop). Degrades to the previous single-pass behavior:
 //                       the caller keeps the coarse point. A refine outage must
 //                       never block clicking.
-export async function refineClickPoint({ config, imagePath, nx, ny, target, stopSignal }) {
+export async function refineClickPoint({ config, imagePath, nx, ny, target, stopSignal, window = REFINE_WINDOW }) {
   try {
     const meta = await sharp(imagePath).metadata();
     const W = meta.width;
@@ -534,8 +592,13 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
 
     // Crop window, clamped to stay inside the frame (the clamp shifts the
     // window rather than shrinking it, so the mapping back stays uniform).
-    const cw = Math.max(1, Math.round(W * REFINE_WINDOW));
-    const ch = Math.max(1, Math.round(H * REFINE_WINDOW));
+    // `window` is overridable for one caller only: the locate repair pass crops a
+    // whole 3x3 CELL (a third of the frame) rather than a control-sized patch,
+    // because the point it is given is a cell centre and the target can be
+    // anywhere in that cell - including its far corner, which a 22% window
+    // centred on the cell would miss.
+    const cw = Math.max(1, Math.round(W * window));
+    const ch = Math.max(1, Math.round(H * window));
     const left = Math.min(Math.max(0, Math.round(nx * W - cw / 2)), W - cw);
     const top = Math.min(Math.max(0, Math.round(ny * H - ch / 2)), H - ch);
 
@@ -556,23 +619,18 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
       stopSignal,
     });
 
-    const parsed = extractLastJsonObject(raw);
-    if (!parsed) return null;
-    // An explicit "not here" is a real verdict, not a failure - pass it up so
-    // the caller can reject the aim. Anything else unparseable stays null.
-    if (parsed.found === false) return { notFound: true };
-    // Same magnitude rescue as the main loop — a refine answer in pixels or
-    // 0-1000 space is a real verdict about where the target is, and dropping it
-    // to null would silently fall back to the unrefined coarse aim.
-    const pnx = Number(parsed.nx);
-    const pny = Number(parsed.ny);
-    if (!Number.isFinite(pnx) || !Number.isFinite(pny) || pnx < 0 || pny < 0) return null;
-    const { nx: rnx, ny: rny } = rescalePair(pnx, pny, { width: info.width, height: info.height });
-    if (rnx > 1 || rny > 1) return null;
+    // An explicit "not here" - and an unevidenced "found" - are verdicts about
+    // this crop, not failures; both escalate to the whole-frame search.
+    const read = interpretRefineResponse(extractLastJsonObject(raw), {
+      width: info.width,
+      height: info.height,
+    });
+    if (!read || read.notFound) return read;
 
     return {
-      nx: (left + rnx * cw) / W,
-      ny: (top + rny * ch) / H,
+      nx: (left + read.nx * cw) / W,
+      ny: (top + read.ny * ch) / H,
+      match: read.match,
     };
   } catch {
     // Never let refinement break a step - the caller falls back to the
@@ -583,19 +641,83 @@ export async function refineClickPoint({ config, imagePath, nx, ny, target, stop
 
 // ---- public: locate a named target in the WHOLE frame ---------------------
 
+// Two-stage, and the first stage is the one worth having. Measured on committed
+// Netflix frames, 6 samples per cell (scratchpad A/B, 2026-08-17): asked for a
+// corner control, the flat "just give me nx,ny" prompt below-left scored 0/12
+// across two corner targets, every answer landing mid-frame. Asked to name the
+// 3x3 cell FIRST, the model named "left/top" 12/12 - it knows perfectly well
+// where the control is - and then contradicted its own classification with a
+// mid-frame decimal in 7 of those 12. Anchoring alone lifted coordinate accuracy
+// to 5/12; the rest of the win comes from `cellConsistency` below acting on the
+// disagreement, because the CLASSIFICATION is the trustworthy output and the
+// decimals are not. A mid-frame control scored 6/6 either way, so the anchoring
+// costs nothing on the easy case.
 const LOCATE_SYSTEM = (target) => `You are helping a UI agent that aimed a click in the wrong place.
 
 The image is a FULL screenshot of a Tableau dashboard. Find this element: "${target}".
 
-Return the normalized coordinates of its CENTER, where nx is the horizontal fraction of the WHOLE image (0 = left edge, 1 = right edge) and ny is the vertical fraction (0 = top edge, 1 = bottom edge).
+Answer in TWO STAGES. Do not skip stage 1, and do not revise it once written.
 
-Check the magnitude of your answer against the image before returning it: an element tucked against the top-left corner is around (0.05, 0.04), NOT (0.5, 0.4). Do not answer near the middle of the image unless the element really is in the middle.
+STAGE 1 - which CELL. Mentally divide the image into a 3x3 grid and name the cell the element sits in:
+  "col": "left" | "center" | "right"
+  "row": "top" | "middle" | "bottom"
+
+STAGE 2 - where in that cell. Now give nx (horizontal fraction of the WHOLE image, 0 = left edge, 1 = right edge) and ny (vertical fraction, 0 = top edge, 1 = bottom edge) for the element's CENTER. These MUST fall inside the cell you just named:
+  col left -> nx below 0.33   center -> nx 0.33 to 0.67   right -> nx above 0.67
+  row top -> ny below 0.33    middle -> ny 0.33 to 0.67   bottom -> ny above 0.67
+
+Write the fields in that order. An element tucked into the top-left cell is around (0.05, 0.04) - three decimals, never a percentage, never pixels.
 
 Respond with STRICT JSON ONLY, matching exactly:
-{"found": true, "nx": 0.051, "ny": 0.043}
+{"found": true, "col": "left", "row": "top", "nx": 0.051, "ny": 0.043}
 
 If that element is genuinely not visible anywhere in this screenshot, respond exactly:
 {"found": false}`;
+
+const COLS = ["left", "center", "right"];
+const ROWS = ["top", "middle", "bottom"];
+
+// Which third a fraction falls in. The BAND_SLOP margin exists because the
+// measurement found a real boundary artifact: for a bubble whose true centre is
+// ny=0.405 - a whisker past the 0.333 line - the model answered "top" with an
+// excellent 0.395, and a strict comparison would have called that a
+// contradiction and spent a repair call fixing nothing. Anything within the
+// margin of a boundary counts as agreeing with either neighbour. 0.08 rather
+// than a rounder 0.05 because the measured case needs it: the bubble's true
+// centre is 0.405 and the model answered 0.395, which is 0.062 past the 0.333
+// line. Still well under half a cell (0.167), so the mid-frame answers this
+// check exists to catch - 0.44 and up under a "top" classification - are caught.
+const BAND_SLOP = 0.08;
+function bandsFor(v, names) {
+  const out = [];
+  if (v < 1 / 3 + BAND_SLOP) out.push(names[0]);
+  if (v > 1 / 3 - BAND_SLOP && v < 2 / 3 + BAND_SLOP) out.push(names[1]);
+  if (v > 2 / 3 - BAND_SLOP) out.push(names[2]);
+  return out;
+}
+
+// Centre of a named cell, in frame fractions. Used as the point to re-crop
+// around when the model's decimals contradict its own classification.
+export function cellCenter(col, row) {
+  const ci = COLS.indexOf(col);
+  const ri = ROWS.indexOf(row);
+  if (ci < 0 || ri < 0) return null;
+  return { nx: ci / 3 + 1 / 6, ny: ri / 3 + 1 / 6 };
+}
+
+// Do the decimals land in the cell the model named? Returns null when it named
+// no cell (an older/degraded reply), which the caller treats as "nothing to
+// check" rather than as a contradiction.
+export function cellConsistency(parsed, nx, ny) {
+  const col = typeof parsed?.col === "string" ? parsed.col.trim().toLowerCase() : null;
+  const row = typeof parsed?.row === "string" ? parsed.row.trim().toLowerCase() : null;
+  if (!COLS.includes(col) || !ROWS.includes(row)) return null;
+  return {
+    col,
+    row,
+    agrees: bandsFor(nx, COLS).includes(col) && bandsFor(ny, ROWS).includes(row),
+  };
+}
 
 // Whole-frame search for a named element, used when refineClickPoint reports
 // the target isn't anywhere near the model's aim.
@@ -635,6 +757,31 @@ export async function locateTarget({ config, imagePath, target, stopSignal }) {
     // about where the element is.
     const { nx, ny } = rescalePair(pnx, pny, { width: meta.width ?? 0, height: meta.height ?? 0 });
     if (nx > 1 || ny > 1) return null;
+
+    // Stage 1 vs stage 2. When the model names a cell and then writes decimals
+    // that sit somewhere else, believe the CELL: measured 12/12 correct on the
+    // corner targets where the decimals were right only 5/12. Re-ask inside that
+    // cell alone, where the coordinate range is a third as wide and the crop is
+    // magnified - the same trick refine already wins with, aimed by the one
+    // output of this call that can be trusted.
+    const cell = cellConsistency(parsed, nx, ny);
+    if (cell && !cell.agrees) {
+      const centre = cellCenter(cell.col, cell.row);
+      const repaired = await refineClickPoint({
+        config,
+        imagePath,
+        nx: centre.nx,
+        ny: centre.ny,
+        target,
+        stopSignal,
+        window: CELL_WINDOW,
+      });
+      if (repaired && !repaired.notFound) return { nx: repaired.nx, ny: repaired.ny, repaired: true };
+      // The re-ask found nothing it could name. The cell centre is still a better
+      // point than a decimal the model itself just contradicted - and it lands
+      // the click inside the right third rather than halfway across the frame.
+      return { nx: centre.nx, ny: centre.ny, repaired: true, coarse: true };
+    }
     return { nx, ny };
   } catch {
     // Never let the locate pass break a step - the caller falls back to
@@ -748,6 +895,11 @@ export async function getNextAction({ config, question, inventory, history, disc
 }
 
 export const _internal = {
+  // Exposed so a prompt A/B can drive an arbitrary system prompt against a real
+  // frame without going through an agent run - the only cheap way to measure a
+  // grounding change, since a full run costs ~15 requests and confounds the
+  // prompt with the loop guards.
+  callVlm,
   formatInventoryForPrompt,
   formatHistoryLine,
   extractLastJsonObject,

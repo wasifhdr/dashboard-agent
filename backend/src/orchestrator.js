@@ -465,13 +465,22 @@ export async function runSession({
       break;
     }
 
-    // Aiming pass (pixel mode): zoom-refine around the model's aim first, and fall
-    // back to a whole-frame locate only if that comes back empty. See
-    // clickAiming.js for the measurements behind that order and for why neither
-    // pass may veto. Done before the loop key and the dead-click guard, so every
+    // Provenance of the point this step actually clicks, persisted alongside it.
+    // The aiming pass OVERWRITES action.nx/ny, so without these two the step
+    // record cannot answer the first question you ask of a bad run: did the model
+    // aim there, or did a pass move it? That question went unanswerable through
+    // two rounds of diagnosis on the Netflix dashboard.
+    let aimSource = null;
+    let rawAim = null;
+
+    // Aiming pass (pixel mode): whole-frame locate first, then zoom-refine centred
+    // on locate's answer. See clickAiming.js for the measurements behind that
+    // order, for why the model's own aim is only a fallback, and for why refine
+    // may not veto. Done before the loop key and the dead-click guard, so every
     // downstream consumer (guard, persistence, history, cursor overlay, actuator)
     // sees the one point actually clicked.
     if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
+      rawAim = { nx: action.nx, ny: action.ny };
       const aimed = await resolveClickPoint({
         aim: { nx: action.nx, ny: action.ny },
         target: action.target ?? null,
@@ -482,7 +491,8 @@ export async function runSession({
       });
 
       if (aimed.rejected) {
-        // Both passes declined, so the element is not on this frame. The aim is
+        // locate searched the whole frame and declined, so the element is not on
+        // this frame. The aim is
         // deliberately NOT cached: caching one bad verdict is what turned a correct
         // reading into a dead run on the newlyweds dashboard, and the frame changes
         // from one step to the next. The step budget and the
@@ -506,7 +516,9 @@ export async function runSession({
           framePath, inventory: inv, changedRegions,
           startedAt: stepStartedAt, durationMs,
           actionBadge: { text: "Rejected: not on screen", type: "click" },
-          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+          // Not moved by any pass, so the point IS the raw aim - recorded with an
+          // explicit source so a reader never has to infer that.
+          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null, source: "rejected", aim: rawAim },
         });
         consecutiveNonProgress++;
         // States only what was established - the element is not on this frame - and
@@ -527,6 +539,7 @@ export async function runSession({
 
       action.nx = aimed.nx;
       action.ny = aimed.ny;
+      aimSource = aimed.source;
     }
 
     const key = actionKey(action);
@@ -630,7 +643,7 @@ export async function runSession({
           framePath, inventory: inv, changedRegions,
           startedAt: stepStartedAt, durationMs,
           actionBadge: { text: "Rejected: repeat dead click", type: "click" },
-          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+          clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null, source: aimSource, aim: rawAim },
         });
         consecutiveNonProgress++;
         correctiveFeedback =
@@ -681,13 +694,21 @@ export async function runSession({
         fs.rmSync(postPath, { force: true });
       }
 
+      // "ok" means the click hit something, NOT merely that the mouse event
+      // dispatched. A click that changed nothing missed its target, and
+      // persisting that as a plain "ok" made the viewer draw a green tick on a
+      // step whose own corrective feedback says "you missed the control" - the
+      // dead-click guard then rejects the NEXT attempt, so the first visible
+      // sign of trouble is a rejection one step after the actual failure.
+      // clickChanged was already computed for the guard and the feedback; this
+      // just stops it from being the only consumer.
       persistAndEmit({
-        idx, thought, action, status: "ok",
+        idx, thought, action, status: clickChanged ? "ok" : "ok_nochange",
         framePath, inventory: inv, changedRegions,
         settleTimeout: settleResult.timedOut,
         startedAt: stepStartedAt, durationMs,
         actionBadge: { text: describeAction(action, null), type: "click" },
-        clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null },
+        clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null, source: aimSource, aim: rawAim },
       });
       history.push({ idx, key, type: "click", status: "ok", nx: action.nx, ny: action.ny, changed: clickChanged });
 
@@ -867,8 +888,13 @@ export async function runSession({
         fs.rmSync(preWheelPath, { force: true });
       }
 
+      // Same rule as the click branch: a wheel that moved no pixels did not
+      // scroll, whatever the mouse dispatch reported. (Here the two cases the
+      // guard cannot tell apart - pane already at its end, and nothing
+      // scrollable under the cursor - are both genuinely "no effect", so one
+      // status covers them.)
       persistAndEmit({
-        idx, thought, action, status: "ok",
+        idx, thought, action, status: scrollChanged ? "ok" : "ok_nochange",
         framePath, inventory: inv, changedRegions,
         settleTimeout: settleResult.timedOut,
         startedAt: stepStartedAt, durationMs,

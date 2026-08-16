@@ -132,7 +132,20 @@ function ActionLine({ step, pending }) {
   let colorClass = "text-green-ink";
   let explain = null;
 
-  if (status === "rejected_loop") {
+  if (status === "ok_nochange") {
+    // The action executed and changed nothing on screen, which for a click
+    // means it missed. Drawn as a warning rather than a success because the
+    // green tick here was actively misleading: the agent went on to reject the
+    // NEXT attempt as a repeat dead click, so the feed's first ✗ appeared one
+    // step after the step that actually failed.
+    icon = "!";
+    colorClass = "text-gold-ink";
+    const point = formatPoint(step.action);
+    explain =
+      step.action?.type === "scroll"
+        ? `no effect${point ? ` ${point}` : ""} — nothing there scrolled, or it is already at its end`
+        : `no effect${point ? ` ${point}` : ""} — the click missed, or the control is not on screen`;
+  } else if (status === "rejected_loop") {
     icon = "✗";
     colorClass = "text-gold-ink";
     explain = "rejected: already tried — rethinking…";

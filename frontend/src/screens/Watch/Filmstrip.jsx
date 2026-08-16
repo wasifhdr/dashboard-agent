@@ -3,7 +3,10 @@ import { cx } from "../../components/ui/cx.js";
 
 function statusDotColor(actionStatus) {
   if (!actionStatus || actionStatus === "ok") return null;
-  if (actionStatus === "rejected_loop" || actionStatus === "rejected_target") return "bg-gold";
+  // ok_nochange sits with the rejections, not with ok: the action ran but hit
+  // nothing, so the step is a non-advance and should be scannable as one.
+  if (actionStatus === "rejected_loop" || actionStatus === "rejected_target" || actionStatus === "ok_nochange")
+    return "bg-gold";
   return "bg-coral"; // error, invalid_json, vlm_error
 }
 
