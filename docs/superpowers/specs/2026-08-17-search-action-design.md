@@ -176,9 +176,12 @@ search re-renders the list locally and applies no filter, so no
 would burn the full `eventGraceMs` (4500ms) on every search. Same branch `scroll`
 takes.
 
-**This is reasoning, not a measurement** — the probe observed searches completing
-but did not record `sawBridgeEvent`. Task 1 of the plan confirms it before the
-branch is written.
+**Measured, not just reasoned.** Task 1's calibration script ran the open →
+type → Enter sequence six times against the same Title filter and read
+`waitForSettle`'s `sawBridgeEvent` after each: **`false` on all 6 runs**,
+including the runs where the search actually ran (Enter intercepted, list
+narrowed). No `filterchanged` / `parameterchanged` / `tabswitched` fires for a
+search in either outcome, confirming `expectBridgeEvent` must stay unset here.
 
 ### Did the search run?
 
@@ -190,11 +193,17 @@ Two witnesses, because finding 7 rules out the simple one:
 - **Secondary, general.** The pixel diff against the step's own pre-action frame,
   requiring **≥2 changed regions**. Catches failures that are not the newline case.
 
-**The ≥2 threshold is calibrated on two samples (3 vs 0–1) and nothing more.**
-Task 1 collects more before it is trusted; an uncalibrated threshold here would
-be precisely the kind of silently-wrong guard that `settleDecision` and the
-dead-scroll baseline were both written to fix. If the samples do not separate
-cleanly, fall back to the newline check alone and drop the region test.
+**The ≥2 threshold is calibrated on six runs, all six against the same Title
+filter (2026-08-17).** Enter was intercepted (search ran, `newline: false`) on
+2 of 6; the widget swallowed it (search did not run, `newline: true`) on the
+other 4 — finding 6's flakiness reproduces more often than not run-to-run. The
+two groups separate cleanly: the 2 runs where the search ran scored **3
+regions** each (areas `[72928, 36464, 68370]`, identical both times); the 4
+runs where it did not scored **0 regions** each. `searchMinRegions: 2` sits in
+the middle of that 0-vs-3 gap with no overlap observed. The failure side was
+exercised (unlike a run that never separates), so this is a real two-sided
+calibration, not a one-sided guess — though still one filter on one dashboard;
+see the Scope caveat above.
 
 A failed search persists as **`ok_nochange`** — the gold `!` in the feed, not a
 green tick — with corrective feedback saying the search did not run and to click
