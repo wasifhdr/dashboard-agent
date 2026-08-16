@@ -51,3 +51,35 @@ test("a scroll magnitude is not part of the contract", () => {
   assert.ok(r.success, "an extra key is stripped, not fatal");
   assert.equal(r.data.dy, undefined, "dy must not survive into the validated action");
 });
+
+// ---- search ---------------------------------------------------------------
+
+test("valid search parses", () => {
+  const r = ActionSchema.safeParse({
+    type: "search", text: "American Horror Story", target: "the Title filter search box",
+  });
+  assert.ok(r.success);
+});
+
+test("search without optional target parses", () => {
+  assert.ok(ActionSchema.safeParse({ type: "search", text: "Ed Sheeran" }).success);
+});
+
+test("empty search text is rejected", () => {
+  assert.equal(ActionSchema.safeParse({ type: "search", text: "" }).success, false);
+});
+
+test("over-long search text is rejected", () => {
+  // The cap is a timeout budget: typing runs at 250ms/char, so 60 chars is 15s
+  // against actionTimeoutMs's 30000.
+  assert.ok(ActionSchema.safeParse({ type: "search", text: "a".repeat(60) }).success);
+  assert.equal(ActionSchema.safeParse({ type: "search", text: "a".repeat(61) }).success, false);
+});
+
+test("a search carries no coordinates", () => {
+  // Deliberate: the box auto-focuses, and a click 2% below its centre was
+  // measured selecting a title and filtering the dashboard silently.
+  const r = ActionSchema.safeParse({ type: "search", text: "x", nx: 0.5, ny: 0.5 });
+  assert.ok(r.success, "an extra key is stripped, not fatal");
+  assert.equal(r.data.nx, undefined, "nx must not survive into the validated action");
+});

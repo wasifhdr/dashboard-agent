@@ -65,6 +65,18 @@ const ScrollAction = z.object({
   target: z.string().optional(),
 });
 
+// Coordinate-free on purpose. The filter dropdown's search box is focused the
+// instant the list opens (measured 2026-08-17), so there is nothing to aim at -
+// and aiming at it is actively dangerous: a click 2% of frame height below its
+// centre selected a title and filtered the dashboard to a value the model had
+// never read. No nx/ny means no aiming pass, so a search costs ONE VLM request
+// where a pixel click costs two or three.
+const SearchAction = z.object({
+  type: z.literal("search"),
+  text: z.string().min(1).max(60),
+  target: z.string().optional(),
+});
+
 export const ActionSchema = z.discriminatedUnion("type", [
   SetFilterAction,
   SetRangeFilterAction,
@@ -72,6 +84,7 @@ export const ActionSchema = z.discriminatedUnion("type", [
   SwitchSheetAction,
   ClickAction,
   ScrollAction,
+  SearchAction,
   WaitAction,
   AnswerAction,
   FailAction,
