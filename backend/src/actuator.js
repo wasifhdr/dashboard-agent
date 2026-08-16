@@ -25,6 +25,35 @@ function nearMatches(domain, value) {
   }).slice(0, 5);
 }
 
+// The focused text entry, searched across every frame because the search box
+// lives inside the cross-origin Tableau iframe. Returns null when nothing
+// editable has focus, which is the signal to reject a search WITHOUT typing.
+//
+// A frame can detach mid-iteration during load, so a throwing frame is skipped
+// rather than fatal - observed repeatedly while probing.
+export async function findFocusedTextEntry(page) {
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate(() => {
+        const el = document.activeElement;
+        if (!el) return null;
+        const tag = el.tagName.toLowerCase();
+        const editable =
+          tag === "input" ||
+          tag === "textarea" ||
+          el.getAttribute("role") === "textbox" ||
+          el.isContentEditable;
+        if (!editable) return null;
+        return { tag, cls: (el.className?.toString?.() ?? "").slice(0, 80), value: el.value ?? "" };
+      });
+      if (found) return { frame, ...found };
+    } catch {
+      // detached frame; try the next
+    }
+  }
+  return null;
+}
+
 async function executeAction(page, resolved, action, opts = {}) {
   try {
     switch (action.type) {
@@ -144,6 +173,45 @@ async function executeAction(page, resolved, action, opts = {}) {
         return { ok: true, point: { nx: action.nx, ny: action.ny, px, py } };
       }
 
+      case "search": {
+        // No mouse at all. The box is focused the instant the dropdown opens, so
+        // aiming at it buys nothing and risks everything: a click 2% of frame height
+        // below its centre was measured selecting a title and closing the list.
+        const focused = await findFocusedTextEntry(page);
+        if (!focused) {
+          return {
+            ok: false,
+            error:
+              "No text box is focused, so nothing was typed. Open the filter dropdown first - " +
+              "its search box is focused automatically when the list opens.",
+          };
+        }
+        // PACING IS THE FEATURE. Tableau's search pipeline needs real wall-clock time
+        // between characters to keep up with the box: at 40ms/char with Enter pressed
+        // immediately this lands a clean match 2 times in 8; at 250ms/char with a
+        // 1500ms pause before Enter, 7 times in 8. CDP insertText and raw per-char
+        // dispatchKeyEvent both sat at 2/8 too, so it is not the event type - do not
+        // "optimize" these delays away.
+        const typeDelayMs = Number(opts.typeDelayMs) > 0 ? Number(opts.typeDelayMs) : 250;
+        const syncMs = Number(opts.syncMs) >= 0 ? Number(opts.syncMs) : 1500;
+
+        // Control+a so a second search replaces the prior term instead of appending;
+        // a no-op on an empty box.
+        await page.keyboard.press("Control+a");
+        await page.keyboard.type(action.text, { delay: typeDelayMs });
+        // Let Tableau's own filter state catch up with what was typed before
+        // committing. Under this pacing the list has usually filtered ALREADY by now.
+        await page.waitForTimeout(syncMs);
+        // Enter as a cheap safety net rather than the trigger - it finishes the job on
+        // the runs where the live filter has not landed on its own.
+        await page.keyboard.press("Enter");
+
+        // No newline check. It looked like an exact witness at n=6 and collapsed at
+        // n=8: a success with a newline present, a success without one, and six
+        // failures all with one. The caller judges by the pixel diff alone.
+        return { ok: true, text: action.text };
+      }
+
       default:
         return { ok: false, error: `Unsupported action type "${action.type}" for direct execution.` };
     }
@@ -188,6 +256,8 @@ export function describeAction(action, resolved) {
       return `Click: ${action.target ?? `(${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
     case "scroll":
       return `Scroll ${action.direction}${action.target ? `: ${action.target}` : ` (${action.nx.toFixed(3)}, ${action.ny.toFixed(3)})`}`;
+    case "search":
+      return `Search: ${JSON.stringify(action.text)}`;
     default:
       return action.type;
   }
