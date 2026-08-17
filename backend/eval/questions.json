@@ -114,6 +114,16 @@
       "expected_answer": "M (medium-sized companies)",
       "verified_on": "2026-08-10",
       "notes": "Replaces the old unscored salaries_remote, which asked for a description and was unanswerable because the Remote Ratio 100 row sits below the fold with no scroll action. Now scorable: that pane has 222px of hidden content and one scroll step reveals the 100 row with its pie. Truth read by eye from a clean post-scroll capture - orange dominates that pie at ~55-60% against ~35% blue, and orange is M in the Company Size legend. The word form is REQUIRED, not stylistic: a bare \"M\" is scored as a case-insensitive SUBSTRING and would pass on almost any sentence, making the question always-green and worthless. PIXEL-MODE ONLY as a comparison: Remote Ratio is an API-operable filter, so api mode can reach 100 without scrolling (and answered 'L' when tried on 2026-08-10) - do not read this as an api-vs-pixel result."
+    },
+    {
+      "id": "netflix_search_title",
+      "dashboard_url": "https://public.tableau.com/views/NetflixMoviesandTVShowsDashboard_17065467710800/Netflix",
+      "kind": "act",
+      "question": "Use the Title filter to select 'American Horror Story', then report the Duration shown for it.",
+      "scored": true,
+      "expect": ["8 season"],
+      "expected_answer": "8 Seasons",
+      "notes": "Only answerable via the search action: the Title list holds 6172 values over 101784px, about 339 scroll notches against a 15-step budget. Ground truth re-read by eye 2026-08-17 from a live capture, at 3x zoom on the Duration field: renders as white text 'Duration' (label) / '8 Seasons' (value) directly beneath the Title quick filter - confirmed, not a guess. The real-world figure is 9 seasons and the dashboard says 8, so an answer of 9 means the model used remembered knowledge rather than reading the screen. IMPORTANT CAVEAT found during verification: the Type quick filter defaults to [\"Movie\"] on a fresh page load (confirmed via raw getFiltersAsync() before touching anything) and that filter is silently merged into the Rating/Genre/Description/Date Added/Duration worksheets specifically - NOT into the map, Ratings bar, distribution pie, Top 10 Genre bar or year timeline below them, which stay correct off Title alone. Setting ONLY the Title filter to American Horror Story (a TV Show) therefore leaves Duration (and Rating/Genre/Description/Date Added) BLANK, because Type=Movie AND Title=American Horror Story matches zero rows; '8 Seasons' only renders once Type is also moved off Movie. The question text does not mention Type at all, so a correct run may require the agent to notice the blank KPI and separately locate/fix the Type filter - watch for this if netflix_search_title fails with an empty or evasive answer rather than a wrong number; that is a different, arguably more honest failure mode than fabricating '9 Seasons'. Pixel-mode only - api mode can set this filter directly, so this is NOT cross-arm comparable."
     }
   ]
 }
