@@ -272,10 +272,6 @@ A failed search persists as **`ok_nochange`** — the gold `!` in the feed, not 
 green tick — with corrective feedback saying the search did not run and to click
 the value directly instead.
 
-A failed search persists as **`ok_nochange`** — the gold `!` in the feed, not a
-green tick — with corrective feedback saying the search did not run and to click
-the value directly instead.
-
 ### Loop guard
 
 `actionKey` gains `search:${text.toLowerCase()}`.
