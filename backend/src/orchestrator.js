@@ -571,11 +571,13 @@ export async function runSession({
     // against a completely different underlying candidate list - rejected as a
     // duplicate of the first. A filter change between two identical searches
     // makes the second one legitimate, so a permanent duplicate rule strands
-    // the agent. A runaway search loop is still bounded without this check:
-    // the ok_nochange path already records a search that changed nothing and
-    // issues corrective feedback, consecutiveNonProgress escalation still
-    // applies, and the 15-step budget is the backstop - the same protections
-    // click and scroll already rely on.
+    // the agent. A runaway search loop is bounded separately, further down:
+    // the priorSameSearch / lastStateChangeIdx check (~410 lines below)
+    // rejects an identical successful search as a loop unless something has
+    // changed state since its last occurrence, and the ok_nochange path below
+    // permits only one retry of a failed search before diverting. Escalating
+    // consecutiveNonProgress feedback and the 15-step budget remain the
+    // backstop behind those, same as for click and scroll.
     const dup =
       action.type !== "wait" && action.type !== "click" && action.type !== "scroll" && action.type !== "search"
         ? history.find((h) => h.key === key && h.status === "ok")
