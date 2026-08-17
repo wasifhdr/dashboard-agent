@@ -165,6 +165,13 @@ export async function runSession({
   // of retrying variations on the same wrong target_id.
   let consecutiveNonProgress = 0;
   let noDiffClicks = 0; // consecutive pixel clicks that produced no visible change
+  // Index of the most recent step whose action actually changed dashboard state
+  // (a successful set_filter/set_range_filter/set_parameter/switch_sheet, or a
+  // click/scroll/search that moved the view). The ONLY consumer is the search
+  // branch's dup guard below: search has no positional dead-point guard like
+  // click/scroll, so an identical repeat search is rejected unless something
+  // real has happened since its last occurrence - see that guard's comment.
+  let lastStateChangeIdx = 0;
   const deadClickPoints = []; // {nx,ny} of clicks that produced no change (pixel mode); cleared when a click changes the view
   // There is deliberately NO cache of rejected AIMS. There used to be: an aim the
   // aiming pass refused was remembered and every nearby retry pre-rejected without
@@ -754,6 +761,7 @@ export async function runSession({
         clearStaleGuards(guards);
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
+        lastStateChangeIdx = idx;
       }
       prevFramePath = framePath;
       continue;
@@ -940,6 +948,7 @@ export async function runSession({
         clearStaleGuards(guards);
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
+        lastStateChangeIdx = idx;
       }
       prevFramePath = framePath;
       continue;
@@ -958,6 +967,40 @@ export async function runSession({
         consecutiveNonProgress++;
         correctiveFeedback = withEscalation("This mode does not support search actions. Use the provided action types.");
         history.push({ idx, key, type: "search", status: "rejected_target", text: action.text, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // search has no positional dead-point guard like click/scroll (there are no
+      // coordinates to be "near"), so without this it has NO repeat guard at all -
+      // worse, a SUCCEEDING repeat resets consecutiveNonProgress/noDiffClicks and
+      // calls clearStaleGuards, so an alternation of dead-click -> search ->
+      // dead-click -> search never accumulates non-progress and wipes every dead
+      // point each cycle. Reject an identical repeat ONLY when its last successful
+      // occurrence is still the most recent state change - i.e. nothing has
+      // happened since (a filter, a different search, a click/scroll that moved
+      // the view) that could make the repeat meaningful. This preserves the case
+      // the dup exemption exists for: search "X" -> discover Type also needs to be
+      // TV Show -> set it -> the identical search "X" again is now against a
+      // different candidate list and must be allowed.
+      //
+      // Matched on CHANGED occurrences only (not failed ones): a search that
+      // failed to filter is not "state", so retrying it is not a duplicate - that
+      // retry is exactly what the corrective feedback below now permits once.
+      const priorSameSearch = [...history].reverse().find((h) => h.type === "search" && h.key === key && h.changed === true);
+      if (priorSameSearch && lastStateChangeIdx <= priorSameSearch.idx) {
+        persistAndEmit({
+          idx, thought, action, status: "rejected_loop",
+          errorMsg: `Duplicate of step #${priorSameSearch.idx}; nothing has changed since`,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: repeat search", type: "search" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(
+          `You already searched for ${JSON.stringify(action.text)} at step #${priorSameSearch.idx} and nothing has changed since; its result is already visible. Choose a different action or answer now.`,
+        );
+        history.push({ idx, key, type: "search", status: "rejected_loop", text: action.text, changed: false });
         prevFramePath = framePath;
         continue;
       }
@@ -1030,6 +1073,7 @@ export async function runSession({
         clearStaleGuards(guards);
         noDiffClicks = 0;
         consecutiveNonProgress = 0;
+        lastStateChangeIdx = idx;
       }
       prevFramePath = framePath;
       continue;
@@ -1106,6 +1150,7 @@ export async function runSession({
     });
     history.push({ idx, key, type: action.type, status: "ok" });
     consecutiveNonProgress = 0;
+    lastStateChangeIdx = idx;
     prevFramePath = framePath;
   }
 
