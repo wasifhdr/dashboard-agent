@@ -141,10 +141,14 @@ function ActionLine({ step, pending }) {
     icon = "!";
     colorClass = "text-gold-ink";
     const point = formatPoint(step.action);
-    explain =
-      step.action?.type === "scroll"
-        ? `no effect${point ? ` ${point}` : ""} — nothing there scrolled, or it is already at its end`
-        : `no effect${point ? ` ${point}` : ""} — the click missed, or the control is not on screen`;
+    if (step.action?.type === "search") {
+      // No coordinates to show - a search has no point on screen.
+      explain = "no effect — the search did not filter the list";
+    } else if (step.action?.type === "scroll") {
+      explain = `no effect${point ? ` ${point}` : ""} — nothing there scrolled, or it is already at its end`;
+    } else {
+      explain = `no effect${point ? ` ${point}` : ""} — the click missed, or the control is not on screen`;
+    }
   } else if (status === "rejected_loop") {
     icon = "✗";
     colorClass = "text-gold-ink";
