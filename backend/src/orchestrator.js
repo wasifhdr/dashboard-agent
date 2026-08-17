@@ -10,7 +10,7 @@ import { FRAMES_DIR } from "./paths.js";
 import { openSession, waitForSettle, screenshotViz, computeChangedRegions } from "./perception.js";
 import { createInventoryTracker } from "./inventory.js";
 import { getNextAction, refineClickPoint, locateTarget, activeModelName } from "./vlmClient.js";
-import { resolveClickPoint } from "./clickAiming.js";
+import { resolveClickPoint, isPostSearchClick } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint, isNearDeadScroll, clearStaleGuards } from "./pixelGuard.js";
@@ -497,7 +497,23 @@ export async function runSession({
     // may not veto. Done before the loop key and the dead-click guard, so every
     // downstream consumer (guard, persistence, history, cursor overlay, actuator)
     // sees the one point actually clicked.
-    if (action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
+    // ...except straight after a search, where the aiming passes are the problem
+    // rather than the fix: the search box displays the query text, so refine
+    // snaps the click off the row and onto the box ~0.024 of frame height above
+    // it. See isPostSearchClick for the measurements. The model's own aim was
+    // correct in every observed post-search step, so use it untouched - which is
+    // the same path a click with no `target` already takes.
+    const skipAiming =
+      action.type === "click" &&
+      (config.actuationMode ?? "pixel") === "pixel" &&
+      isPostSearchClick(history, action.target ?? null);
+    if (skipAiming) {
+      rawAim = { nx: action.nx, ny: action.ny };
+      aimSource = "aim_post_search";
+      onEvent({ type: "warning", idx, kind: "post_search_aim" });
+    }
+
+    if (!skipAiming && action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
       rawAim = { nx: action.nx, ny: action.ny };
       const aimed = await resolveClickPoint({
         aim: { nx: action.nx, ny: action.ny },

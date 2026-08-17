@@ -60,6 +60,66 @@
 // vlmClient contract - {nx,ny} | {notFound:true} | null, where null means the call
 // itself failed and is NOT a verdict about the target.
 
+// The click right after a search must NOT be re-aimed, and this is the one
+// exemption in the file.
+//
+// After a search the box DISPLAYS the query text, so when the model is then
+// asked to click "the '13 Reasons Why' row", the box matches that text exactly
+// as well as the row does - and sits ~0.024 of frame height above it (box centre
+// ny~0.133, first row ny~0.158 on Netflix). refine's evidence gate asks for the
+// matched text quoted back, which the box satisfies perfectly, so the gate that
+// exists to stop a bluff is what picks the wrong element. Measured on three real
+// failing frames (sessions a59ab91d, f0916ea0, 668f494d, 2026-08-17): the
+// model's own aim was CORRECT every time (ny~0.158) and refine dragged it onto
+// the box on 12 of 15 calls.
+//
+// The one production run that answered correctly is the one where the model
+// happened to omit `target`, so resolveClickPoint returned the raw aim
+// untouched. This takes that same path deliberately instead of by luck.
+//
+// A prompt fix was tried first and REVERTED (d5eee42): telling refine that a box
+// showing the text is not the target scored 15/15 on post-search frames, but the
+// wording pushed it off ordinary comboboxes onto their labels, because a
+// combobox is also "a box showing text". Do not reintroduce a global prompt rule
+// for a problem that only exists in one transient state.
+//
+// Keyed on OUR OWN history, never on the model's say-so or a DOM read: a step we
+// recorded as an executed search is a fact, not a judgement.
+//
+// NARROW ON PURPOSE - it also requires that the click NAMES the text just
+// searched for. The first build of this exempted every click after a search, and
+// session 977a3e8d showed why that is wrong: with the list showing "No matches",
+// the model targeted "the Type dropdown" and aimed at (0.54,0.148) for a control
+// at (0.069,0.043). Unaimed, that wild coordinate went straight through, and
+// locate - which would have rescued it - never ran. What the measurements
+// actually support is narrower than "the aim is good after a search": the aim is
+// good when the model is clicking a ROW IN THE LIST IT JUST FILTERED. Every
+// observed good aim named the searched title ("the '13 Reasons Why' row in the
+// open Title list"); the bad one named something else entirely.
+//
+// A model that names the row without quoting the text ("the first row") loses the
+// exemption and gets refine's decoy back - one wasted step, versus an unaimed
+// click anywhere on the dashboard. That is the right way round to fail.
+export function isPostSearchClick(history, target) {
+  const named = typeof target === "string" ? target.toLowerCase() : "";
+  if (!named) return false;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    // Steps that never executed cannot have changed what is on screen, so they
+    // do not end the post-search state - skip past them. Same for a wait.
+    if (h.type === "wait") continue;
+    if (h.status !== "ok") continue;
+    // Includes a search that did NOT filter (changed:false). Enter may have been
+    // swallowed, but the text is sitting in the box either way, so the decoy is
+    // on screen regardless. An ERRORED search is excluded by the status check
+    // above: the focus guard rejected it before a single keystroke was sent.
+    if (h.type !== "search") return false;
+    const searched = typeof h.text === "string" ? h.text.trim().toLowerCase() : "";
+    return searched.length > 0 && named.includes(searched);
+  }
+  return false;
+}
+
 // Returns one of:
 //   {nx, ny, source}  - click here. `source` records which pass produced the
 //                       point, for logging and for tests: "aim+refined",

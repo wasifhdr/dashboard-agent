@@ -24,7 +24,7 @@
 //    that could only be stopped.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveClickPoint } from "../src/clickAiming.js";
+import { resolveClickPoint, isPostSearchClick } from "../src/clickAiming.js";
 
 const AIM = { nx: 0.68, ny: 0.46 }; // the model's habitual wrong guess
 const TRUTH = { nx: 0.07, ny: 0.04 }; // where the Type dropdown actually is
@@ -136,4 +136,100 @@ test("REGRESSION: a wide control refine cannot identify is still clicked, via lo
 
   assert.equal(out.rejected, undefined);
   assert.deepEqual(out, { nx: 0.178, ny: 0.192, source: "located" });
+});
+
+// ---- the post-search aiming exemption --------------------------------------
+//
+// After a search the box displays the query text, so refine's evidence gate
+// snaps the click onto the box instead of the row ~0.024 below it (measured 12
+// of 15 calls on three real failing frames). The click straight after a search
+// therefore uses the model's own aim, which was correct in every observed case.
+//
+// This predicate reads OUR OWN history, so it is exact - no model judgement and
+// no DOM read is involved in deciding whether a search just happened.
+
+test("a click straight after an executed search skips aiming", () => {
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "click", status: "ok", changed: true },
+    { idx: 2, type: "search", status: "ok", text: "13 Reasons Why", changed: true },
+  ], "the '13 Reasons Why' row in the open Title list"), true);
+});
+
+test("a search that did not filter STILL exempts the next click", () => {
+  // Enter was swallowed, so the list never narrowed - but the text is sitting in
+  // the box either way, so the decoy is on screen and refine will still take it.
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "ok", text: "American", changed: false },
+  ], "the 'American' row in the open Title list"), true);
+});
+
+test("a search that ERRORED does not exempt anything", () => {
+  // The focus guard rejected it before a single keystroke, so nothing was typed
+  // and there is no decoy. Session f7c3f519 step 3 is exactly this case.
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "error", text: "13 Reasons Why", changed: false },
+  ], "the '13 Reasons Why' row"), false);
+});
+
+test("a wait between the search and the click does not lose the exemption", () => {
+  // A wait executes nothing and changes nothing on screen, so the dropdown is
+  // still open and still filtered.
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "ok", text: "American", changed: true },
+    { idx: 2, type: "wait", status: "ok" },
+  ], "the 'American' row in the open Title list"), true);
+});
+
+test("a rejected or errored step between them does not lose the exemption either", () => {
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "ok", text: "American", changed: true },
+    { idx: 2, type: "click", status: "rejected_loop", changed: false },
+    { idx: 3, type: "click", status: "error", changed: false },
+  ], "the 'American' row in the open Title list"), true);
+});
+
+test("an executed click after the search ENDS the exemption", () => {
+  // The row was clicked, the dropdown closed, the box is gone. A later click is
+  // an ordinary one and must get the full aiming pass back.
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "ok", text: "American", changed: true },
+    { idx: 2, type: "click", status: "ok", changed: true },
+  ], "the 'American' row in the open Title list"), false);
+});
+
+test("an executed scroll after the search also ends it", () => {
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "search", status: "ok", text: "American", changed: true },
+    { idx: 2, type: "scroll", status: "ok", direction: "down", changed: true },
+  ], "the 'American' row in the open Title list"), false);
+});
+
+test("no history, and history with no search at all, are both false", () => {
+  assert.equal(isPostSearchClick([], "a row"), false);
+  assert.equal(isPostSearchClick([
+    { idx: 1, type: "click", status: "ok", changed: true },
+    { idx: 2, type: "set_filter", status: "ok" },
+  ], "a row"), false);
+});
+
+test("REGRESSION: a post-search click at something ELSE keeps full aiming", () => {
+  // Session 977a3e8d, 2026-08-17. The search found nothing, so the model went
+  // for "the Type dropdown" instead - and aimed at (0.54,0.148) for a control at
+  // (0.069,0.043). The first build of this exemption skipped aiming for ANY
+  // click after a search, so that wild coordinate executed unchecked and locate,
+  // which would have rescued it, never ran. The exemption exists for a row in
+  // the list that was just filtered, nothing else.
+  assert.equal(isPostSearchClick([
+    { idx: 2, type: "search", status: "ok", text: "Stranger Things", changed: true },
+  ], "the Type dropdown"), false);
+});
+
+test("the exemption needs a target naming the searched text", () => {
+  const h = [{ idx: 1, type: "search", status: "ok", text: "Stranger Things", changed: true }];
+  assert.equal(isPostSearchClick(h, "the 'Stranger Things' row in the open Title list"), true);
+  assert.equal(isPostSearchClick(h, "STRANGER THINGS row"), true, "case-insensitive");
+  assert.equal(isPostSearchClick(h, "the first row in the filtered list"), false,
+    "not naming the text is the safe failure - one wasted step, not an unaimed click");
+  assert.equal(isPostSearchClick(h, null), false);
+  assert.equal(isPostSearchClick(h, ""), false);
 });
