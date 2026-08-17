@@ -1063,9 +1063,20 @@ export async function runSession({
       history.push({ idx, key, type: "search", status: "ok", text: action.text, changed: searchRan });
 
       if (!searchRan) {
+        // The action fails transiently roughly 1 time in 8 (finding 12's
+        // 7/8-clean-match measurement means ~1/8 genuinely don't land), so a flat
+        // "do not repeat it" steers the agent onto the exact scroll-the-whole-list
+        // route search was built to replace after a single bad roll. Permit
+        // exactly one retry of the SAME term before diverting - this stays
+        // compatible with the dup guard above, which only blocks a repeat of a
+        // successful (changed:true) search, never a failed one.
+        const priorFailures = history.filter((h) => h.type === "search" && h.key === key && h.changed === false).length;
         correctiveFeedback =
-          `Your search for ${JSON.stringify(action.text)} did not filter the list - it is still showing the same entries. ` +
-          `Do not repeat it. Click the value directly in the list if you can see it, or answer from what is visible.`;
+          priorFailures === 0
+            ? `Your search for ${JSON.stringify(action.text)} did not filter the list - it is still showing the same entries. ` +
+              `This can happen transiently. Try the exact same search once more.`
+            : `Your search for ${JSON.stringify(action.text)} has now failed twice - the search box is not responding. ` +
+              `Do not repeat it again. Click the value directly in the list if you can see it, or answer from what is visible.`;
         consecutiveNonProgress++;
       } else {
         // The list is now a handful of rows instead of thousands, so every guard
