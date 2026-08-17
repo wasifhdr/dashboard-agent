@@ -276,10 +276,42 @@ the value directly instead.
 
 `actionKey` gains `search:${text.toLowerCase()}`.
 
-Unlike `click` and `scroll`, `search` is **not** exempt from the exact-repeat
-`dup` check. Repeating a scroll is how you travel further down a pane; repeating
-an identical search is a genuine no-op, so it is rejected like a repeated
-`set_filter`.
+**As designed here, `search` was NOT exempt from the exact-repeat `dup` check** —
+the paragraph this replaces argued that repeating a scroll is how you travel
+further down a pane, while repeating an identical search is a genuine no-op, so
+it should be rejected like a repeated `set_filter`. **That reasoning did not
+survive integration.** Task 8's live run (`task-8-verify-report.md`) had an
+agent search a filter list, discover from the narrowed results that a
+*different* filter (`Type`) also needed to be changed to see the data it
+wanted, change it, and then have its legitimate second search — identical
+text, but now against a completely different underlying candidate list —
+rejected as a duplicate of the first. Same term against different data is not
+the same search, and the rejection stranded the run. Commit `15911a6` made
+`search` exempt from the `dup` check, like `click` and `scroll`.
+
+That exemption, on its own, was incomplete. Unlike `click` and `scroll`,
+`search` has no positional dead-point guard — there are no coordinates to be
+"near" — so exempting it from `dup` left it with **no repeat guard at all**.
+Worse, a *succeeding* repeat resets `consecutiveNonProgress`, `noDiffClicks`,
+and calls `clearStaleGuards`, so an alternation of dead-click → search →
+dead-click → search never accumulated non-progress and wiped every dead point
+each cycle — only the 15-step budget stopped it.
+
+**What ships now** (a follow-up fix on top of `15911a6`): the orchestrator
+tracks `lastStateChangeIdx`, the step index of the most recent action that
+actually changed dashboard state — a successful `set_filter`/
+`set_range_filter`/`set_parameter`/`switch_sheet`, or a `click`/`scroll`/
+`search` that moved the view. An identical repeat search is rejected only when
+its last *successful* occurrence is still the most recent state change, i.e.
+nothing has happened since that could make the repeat meaningful. The match is
+against successful (`changed: true`) prior occurrences only — a search that
+failed to filter recorded no real state, so retrying it is never treated as a
+duplicate; that retry is what the corrective-feedback fix above now
+explicitly permits once. This keeps the motivating scenario working (search →
+discover a different filter is also needed → change it → the identical search
+again is now against a different candidate list and stays allowed, because the
+filter change is newer than the first search) while still rejecting a genuine
+no-progress loop of the exact same search with nothing else having changed.
 
 A successful search calls `clearStaleGuards`: dead click and scroll points judged
 against a 4241-row list are stale once the list is 25 rows.

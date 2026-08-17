@@ -626,7 +626,9 @@ In `backend/src/orchestrator.js`, in `actionKey`, after the `scroll` case:
       return `search:${action.text.toLowerCase()}`;
 ```
 
-Note there is deliberately **no** change to the `dup` exemption list. `click` and `scroll` are exempt because repeating them is how the agent travels; repeating an identical search is a genuine no-op and should be rejected like a repeated `set_filter`.
+This plan originally called for **no** change to the `dup` exemption list, on the theory that `click` and `scroll` are exempt because repeating them is how the agent travels, while repeating an identical search is a genuine no-op that should be rejected like a repeated `set_filter`. **That theory did not survive integration** (Task 8's live run, `task-8-verify-report.md`): an agent searched, discovered from the narrowed results that a *different* filter (`Type`) also needed changing, changed it, and then had its legitimate second identical-text search rejected as a duplicate of the first — stranding the run, because the same text against different underlying data is not the same search. Commit `15911a6` made `search` exempt from `dup`, like `click` and `scroll`.
+
+That exemption alone was incomplete: unlike `click`/`scroll`, a `search` has no positional dead-point guard, so it ended up with no repeat guard at all — and a *succeeding* repeat reset every non-progress counter and cleared every stale guard, so a dead-click/search alternation never accumulated non-progress. The shipped follow-up fix tracks `lastStateChangeIdx` — the step index of the most recent action that actually changed dashboard state — and rejects an identical repeat search only when its last *successful* occurrence is still the most recent state change. A failed prior occurrence never blocks a repeat (that retry is deliberate — see the `ok_nochange` corrective-feedback change), and any state change since the prior identical search (a different filter, a different search, a click/scroll that moved the view) unblocks it. See the design spec's Loop guard section for the full reasoning.
 
 - [ ] **Step 3: Read the threshold alongside the other pixel settings**
 
