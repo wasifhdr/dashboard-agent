@@ -556,8 +556,21 @@ export async function runSession({
     const key = actionKey(action);
     // scroll is exempt like click: repeating a scroll is the normal way to travel
     // further down a long pane, so it must not be rejected as a duplicate.
+    // search is exempt for the same reason, not because a repeated search is
+    // always a genuine no-op: integration testing (task-8-report.md) reproduced
+    // an agent that searched a filter list, discovered it also needed to change
+    // a DIFFERENT filter (Type -> TV Show) to see the data it wanted, changed
+    // it, and then had its legitimate second search - identical text, but now
+    // against a completely different underlying candidate list - rejected as a
+    // duplicate of the first. A filter change between two identical searches
+    // makes the second one legitimate, so a permanent duplicate rule strands
+    // the agent. A runaway search loop is still bounded without this check:
+    // the ok_nochange path already records a search that changed nothing and
+    // issues corrective feedback, consecutiveNonProgress escalation still
+    // applies, and the 15-step budget is the backstop - the same protections
+    // click and scroll already rely on.
     const dup =
-      action.type !== "wait" && action.type !== "click" && action.type !== "scroll"
+      action.type !== "wait" && action.type !== "click" && action.type !== "scroll" && action.type !== "search"
         ? history.find((h) => h.key === key && h.status === "ok")
         : null;
 
