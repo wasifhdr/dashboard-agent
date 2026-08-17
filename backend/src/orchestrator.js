@@ -1072,7 +1072,14 @@ export async function runSession({
         // exactly one retry of the SAME term before diverting - this stays
         // compatible with the dup guard above, which only blocks a repeat of a
         // successful (changed:true) search, never a failed one.
-        const priorFailures = history.filter((h) => h.type === "search" && h.key === key && h.changed === false).length;
+        // Exclude the current step (already pushed into history above, so a naive
+        // count is always >=1 on the very first failure and the priorFailures===0
+        // branch below can never fire) and exclude rejected_loop entries (pushed
+        // with changed:false but never actually dispatched - counting one would
+        // silently spend the one permitted retry on a search that never ran).
+        const priorFailures = history.filter(
+          (h) => h.idx !== idx && h.type === "search" && h.key === key && h.status === "ok" && h.changed === false,
+        ).length;
         correctiveFeedback =
           priorFailures === 0
             ? `Your search for ${JSON.stringify(action.text)} did not filter the list - it is still showing the same entries. ` +
