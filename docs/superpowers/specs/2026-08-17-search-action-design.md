@@ -1,7 +1,7 @@
 # The `search` Action
 
 **Date:** 2026-08-17
-**Status:** Approved, not yet implemented
+**Status:** Implemented 2026-08-17 — see `docs/superpowers/plans/2026-08-17-search-action.md`
 **Precedent:** `2026-08-10-scroll-action-design.md` (same pixel-mode action surface)
 
 Named `search`, not `type`. The union discriminates on `"type"`, so a type action
