@@ -30,6 +30,8 @@ function actionKey(action) {
       return `click:${action.nx.toFixed(2)},${action.ny.toFixed(2)}`;
     case "scroll":
       return `scroll:${action.nx.toFixed(2)},${action.ny.toFixed(2)}:${action.direction}`;
+    case "search":
+      return `search:${action.text.toLowerCase()}`;
     default:
       return `${action.type}:${action.target_id ?? ""}`;
   }
@@ -182,6 +184,15 @@ export async function runSession({
   // pane and evade the guard.
   const scrollDeadRadius = config.pixel?.scrollDeadRadius ?? 0.10;
   const scrollNotchPx = config.pixel?.scrollNotchPx ?? 300;
+  // How many changed regions prove a search actually filtered the list. A
+  // FAILED search still echoes its own text and scores 1 region (one 86x53
+  // grid cell, the differ's minimum unit), so zero-vs-nonzero cannot be the
+  // test here the way it is for click and scroll.
+  const searchMinRegions = config.pixel?.searchMinRegions ?? 2;
+  // Measured pacing - see the actuator's comment. These are not tuning knobs to
+  // shave for speed; dropping them is what takes the action from 7/8 to 2/8.
+  const searchTypeDelayMs = config.pixel?.searchTypeDelayMs ?? 250;
+  const searchSyncMs = config.pixel?.searchSyncMs ?? 1500;
   // One bundle so a view-changing action can invalidate every stale judgement at
   // once - see clearStaleGuards. Holds the SAME array instances, not copies.
   const guards = { deadClickPoints, deadScrollPoints };
@@ -913,6 +924,96 @@ export async function runSession({
       } else {
         // The view moved, so every guard judgement made against the old frame is
         // stale — including the CLICK ones.
+        clearStaleGuards(guards);
+        noDiffClicks = 0;
+        consecutiveNonProgress = 0;
+      }
+      prevFramePath = framePath;
+      continue;
+    }
+
+    if (action.type === "search") {
+      if (!isPixelMode) {
+        // Belt-and-suspenders: a search can only be produced in pixel mode.
+        persistAndEmit({
+          idx, thought, action, status: "rejected_target",
+          errorMsg: "search is only valid in pixel actuation mode",
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Rejected: search not allowed", type: "search" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation("This mode does not support search actions. Use the provided action types.");
+        history.push({ idx, key, type: "search", status: "rejected_target", text: action.text, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // No aiming pass and no cursor movement, so unlike scroll there is no
+      // hover artifact to baseline around: the step's own frame is a clean
+      // "before". No agent_cursor event either - there is no point to draw.
+      const execResult = await executeActionWithTimeout(page, null, action, config.actionTimeoutMs, {
+        typeDelayMs: searchTypeDelayMs,
+        syncMs: searchSyncMs,
+      });
+
+      if (!execResult.ok) {
+        persistAndEmit({
+          idx, thought, action, status: "error", errorMsg: execResult.error,
+          framePath, inventory: inv, changedRegions,
+          startedAt: stepStartedAt, durationMs,
+          actionBadge: { text: "Error: search", type: "search" },
+        });
+        consecutiveNonProgress++;
+        correctiveFeedback = withEscalation(execResult.error);
+        history.push({ idx, key, type: "search", status: "error", text: action.text, changed: false });
+        prevFramePath = framePath;
+        continue;
+      }
+
+      // NO expectBridgeEvent. The search re-renders the list locally and applies
+      // no filter, so no filterchanged/parameterchanged/tabswitched can ever
+      // arrive and demanding one burns the full eventGraceMs every time. Same
+      // branch scroll takes.
+      const settleResult = await waitForSettle(page, config.settleGate);
+      if (settleResult.timedOut) onEvent({ type: "warning", idx, kind: "settle_timeout" });
+
+      const postPath = framePath.replace(/\.png$/, "_post.png");
+      // Fail OPEN on a capture error, matching the click and scroll branches: a
+      // false negative here tells the model its search failed when it worked.
+      let searchRan = true;
+      try {
+        await screenshotViz(page, postPath);
+        const regions = await computeChangedRegions(framePath, postPath).catch(() => []);
+        // The region count is the ONLY witness. Across 32 measured runs every
+        // clean full match scored 3 regions and every no-op scored 0. It answers
+        // "something changed", not "the right thing changed" - a search that
+        // landed on a corrupted partial term also scores 3. That residual case is
+        // caught downstream instead: the next step must name the row it clicks,
+        // and refineClickPoint makes it quote text it can actually see, so a
+        // wrongly-filtered list yields a rejected click, not a wrong selection.
+        searchRan = regions.length >= searchMinRegions;
+      } finally {
+        fs.rmSync(postPath, { force: true });
+      }
+
+      persistAndEmit({
+        idx, thought, action, status: searchRan ? "ok" : "ok_nochange",
+        framePath, inventory: inv, changedRegions,
+        settleTimeout: settleResult.timedOut,
+        startedAt: stepStartedAt, durationMs,
+        actionBadge: { text: describeAction(action, null), type: "search" },
+      });
+      history.push({ idx, key, type: "search", status: "ok", text: action.text, changed: searchRan });
+
+      if (!searchRan) {
+        correctiveFeedback =
+          `Your search for ${JSON.stringify(action.text)} did not filter the list - it is still showing the same entries. ` +
+          `Do not repeat it. Click the value directly in the list if you can see it, or answer from what is visible.`;
+        consecutiveNonProgress++;
+      } else {
+        // The list is now a handful of rows instead of thousands, so every guard
+        // judgement made against the old view is stale.
         clearStaleGuards(guards);
         noDiffClicks = 0;
         consecutiveNonProgress = 0;

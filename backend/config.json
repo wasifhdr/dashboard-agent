@@ -5,7 +5,10 @@
     "modelName": "gemini-flash-lite-latest",
     "vlmApiKeyEnv": ["GEMINI_API_KEY", "GEMINI_API_KEY_2"],
     "scrollNotchPx": 300,
-    "scrollDeadRadius": 0.10
+    "scrollDeadRadius": 0.10,
+    "searchMinRegions": 2,
+    "searchTypeDelayMs": 250,
+    "searchSyncMs": 1500
   },
   "tts": {
     "enabled": true,
