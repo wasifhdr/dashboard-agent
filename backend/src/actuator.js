@@ -35,6 +35,14 @@ export async function findFocusedTextEntry(page) {
   for (const frame of page.frames()) {
     try {
       const found = await frame.evaluate(() => {
+        // document.activeElement persists after its OWN document loses real
+        // keyboard focus - a stray click can move focus to the host page while
+        // the dropdown's frame still reports its QueryBox as activeElement. That
+        // would pass this guard, send Control+a/keystrokes at the host page
+        // instead, and the step would misdiagnose as "the search did not filter"
+        // rather than "nothing was actually focused". hasFocus() is per-document
+        // real focus, not the stale activeElement pointer.
+        if (!document.hasFocus()) return null;
         const el = document.activeElement;
         if (!el) return null;
         const tag = el.tagName.toLowerCase();
