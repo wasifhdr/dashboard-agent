@@ -121,8 +121,9 @@
       "kind": "actuate",
       "question": "Set the Type filter to 'TV Show', then use the Title filter to search for and select 'American Horror Story', and report the Duration shown for it.",
       "scored": true,
-      "expect": ["8 season"],
+      "expect": [{ "word": "8 seasons" }],
       "expected_answer": "8 Seasons",
+      "verified_on": "2026-08-17",
       "notes": "The Type quick filter defaults to [\"Movie\"] on a fresh page load (confirmed via raw getFiltersAsync() before touching anything) and is silently merged into the Rating/Genre/Description/Date Added/Duration worksheets specifically - NOT into the map, Ratings bar, distribution pie, Top 10 Genre bar or year timeline, which stay correct off Title alone. American Horror Story is a TV Show, so leaving Type=Movie while Title=American Horror Story matches zero rows there and Duration renders BLANK; the earlier phrasing (Title only, no mention of Type) could therefore never pass, which is why the question now explicitly instructs setting Type to TV Show first. Also only answerable via the search action: the Title list holds 6172 values over 101784px, about 339 scroll notches against a 15-step budget. Ground truth was verified visually on 2026-08-17, not through the UI, using the Embedding API bridge (getFiltersAsync/applyCategoricalFilter) to inspect raw filter state and confirm the rendered value: white text '8 Seasons' beneath the red 'Duration' caption at 3-4x zoom, unambiguous. The real-world figure is 9 seasons and the dashboard says 8, so an answer of '9' means the model used remembered knowledge rather than reading the screen. Pixel-mode only - api mode can set both filters directly, so this is NOT cross-arm comparable."
     }
   ]
