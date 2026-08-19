@@ -507,10 +507,16 @@ export async function runSession({
       action.type === "click" &&
       (config.actuationMode ?? "pixel") === "pixel" &&
       isPostSearchClick(history, action.target ?? null);
+    // Not surfaced as a `warning` event: nothing went wrong on this step - taking
+    // the model's own aim IS the correct behaviour here - and the warnings strip
+    // in Watch is for things the user should worry about. It was emitted as one
+    // briefly, which rendered the raw slug `post_search_aim` above the frame via
+    // WARNING_LABEL's `?? kind` fallback. The provenance is not lost: it rides
+    // out on the step's clickPoint.source below, which is what a bad-run
+    // diagnosis actually reads.
     if (skipAiming) {
       rawAim = { nx: action.nx, ny: action.ny };
       aimSource = "aim_post_search";
-      onEvent({ type: "warning", idx, kind: "post_search_aim" });
     }
 
     if (!skipAiming && action.type === "click" && (config.actuationMode ?? "pixel") === "pixel") {
