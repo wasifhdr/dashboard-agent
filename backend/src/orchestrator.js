@@ -14,7 +14,13 @@ import { resolveClickPoint, isPostSearchClick } from "./clickAiming.js";
 import { executeActionWithTimeout, describeAction } from "./actuator.js";
 import * as store from "./store.js";
 import { isNearDeadPoint, isNearDeadScroll, clearStaleGuards } from "./pixelGuard.js";
-import { createDiscoveryLog, stampFromInventory, claimsAbsentTarget } from "./discoveries.js";
+import {
+  createDiscoveryLog,
+  stampFromInventory,
+  claimsAbsentTarget,
+  claimsUnperformedAction,
+  contradictsFilterState,
+} from "./discoveries.js";
 
 function actionKey(action) {
   switch (action.type) {
@@ -158,6 +164,18 @@ export async function runSession({
   let stepDiscovery = null;
   const history = [];
   let invalidCount = 0;
+  // Steps rejected for claiming an action that never ran. Capped rather than
+  // unbounded: the guard costs a whole step each time it fires, and a model
+  // that keeps fabricating would otherwise never be allowed to answer at all.
+  // Past the cap the step budget and consecutiveNonProgress are what bound the
+  // run, exactly as they do for every other stuck agent.
+  let unperformedClaims = 0;
+  const maxUnperformedClaims = 2;
+  // Answers rejected for reporting a value the filter state rules out. Capped
+  // for the same reason, and separately, so one guard firing twice cannot use
+  // up the other's budget.
+  let unfoundedReadings = 0;
+  const maxUnfoundedReadings = 2;
   let consecutiveWaits = 0;
   // Tracks steps in a row that made no real progress (rejected/errored),
   // regardless of whether they were exact repeats. Used to escalate
@@ -420,6 +438,89 @@ export async function runSession({
     // 15-step run killed the session and blamed a streak that never happened.
     invalidCount = 0;
 
+    // The model saying it ALREADY did something the actuator never executed.
+    // Checked before the discovery is recorded, so the fabrication it is about
+    // to justify never reaches the log, the next prompt, or the database.
+    //
+    // This lands before the `answer` branch on purpose: that branch
+    // short-circuits the loop with the model's own confidence taken verbatim,
+    // so a claim checked after it would be checked after the run was already
+    // over. Session 07d5fcc0 ended exactly that way - at step 8 of a 15-step
+    // budget, on an answer whose second half was never looked at.
+    const unperformed =
+      unperformedClaims < maxUnperformedClaims ? claimsUnperformedAction(thought, history, action) : null;
+    if (unperformed) {
+      unperformedClaims++;
+      persistAndEmit({
+        idx,
+        thought,
+        action,
+        status: "rejected_claim",
+        errorMsg: `claimed to have ${unperformed.verb} "${unperformed.object}", which never ran`,
+        framePath,
+        inventory: inv,
+        changedRegions,
+        startedAt: stepStartedAt,
+        durationMs,
+        actionBadge: { text: "Rejected: action never happened", type: action.type },
+      });
+      consecutiveNonProgress++;
+      // Names the specific claim rather than accusing in general: the model has
+      // to be told WHICH of its sentences the run does not support, or it
+      // rewrites the honest half of the thought and keeps the invented half.
+      correctiveFeedback = withEscalation(
+        `You wrote that you ${unperformed.verb} ${JSON.stringify(unperformed.object)}, but no such action appears in your HISTORY - ` +
+          `it never ran, so you have not seen its result and must not report one. ` +
+          `Perform the action now, and read the result off a later screenshot.`,
+      );
+      prevFramePath = framePath;
+      continue;
+    }
+
+    // What the agent itself has operated: only EXECUTED actions, since a
+    // rejected click changed nothing. This is what separates a filter the agent
+    // set from one the workbook opened with - see contradictsFilterState.
+    const agentSetValues = history
+      .filter((h) => h.status === "ok")
+      .map((h) => `${h.target ?? ""} ${h.text ?? ""}`);
+    // The reading the model claims to have taken, against the state the bridge
+    // says the dashboard was actually in. The answer text is checked too: an
+    // answer can carry the invented number without any discovery at all, which
+    // is how session 11f816e1 ended (the search really ran, the row was never
+    // clicked, and the value came off a field the open dropdown was covering).
+    const stateConflict =
+      contradictsFilterState(discovery, inv, agentSetValues) ??
+      (action.type === "answer" ? contradictsFilterState(action.answer, inv, agentSetValues) : null);
+
+    // An answer consumes the fabricated fact and ends the run at the model's own
+    // confidence, so it has to be stopped outright. Any other action is left to
+    // proceed - dropping the reading below is proportionate there, and the step
+    // still does useful work.
+    if (stateConflict && action.type === "answer" && unfoundedReadings < maxUnfoundedReadings) {
+      unfoundedReadings++;
+      persistAndEmit({
+        idx,
+        thought,
+        action,
+        status: "rejected_state",
+        errorMsg: `reported a value for "${stateConflict.named}" while ${stateConflict.field} is set to "${stateConflict.applied}"`,
+        framePath,
+        inventory: inv,
+        changedRegions,
+        startedAt: stepStartedAt,
+        durationMs,
+        actionBadge: { text: "Rejected: not what is on screen", type: "answer" },
+      });
+      consecutiveNonProgress++;
+      correctiveFeedback = withEscalation(
+        `You reported a value for ${JSON.stringify(stateConflict.named)}, but the ${stateConflict.field} filter is set to ` +
+          `${JSON.stringify(stateConflict.applied)}, so the dashboard cannot have been showing ${JSON.stringify(stateConflict.named)}. ` +
+          `Select it first, then read its value off a later screenshot.`,
+      );
+      prevFramePath = framePath;
+      continue;
+    }
+
     // Recorded BEFORE the action runs, and kept even if the action is then
     // rejected by the loop guard or the zoom-refine pass: a rejected click
     // does not invalidate the reading. The model looked at this frame and read
@@ -427,7 +528,11 @@ export async function runSession({
     // Rejected steps are common in pixel mode, so discarding their readings
     // would throw away a large share of what the agent learns.
     const recorded = discoveryLog.add({
-      text: discovery,
+      // A reading the filter state rules out is dropped at the door rather than
+      // added and retracted like claimsAbsentTarget's: that verdict only exists
+      // after the aiming pass runs, while this one is knowable from the frame's
+      // own inventory before the action is executed at all.
+      text: stateConflict ? null : discovery,
       turnIndex,
       stepIdx: idx,
       stateStamp: stampFromInventory(inv),
@@ -439,6 +544,7 @@ export async function runSession({
       discoveryCapWarned = true;
       onEvent({ type: "warning", idx, kind: "discovery_cap" });
     }
+    if (stateConflict) onEvent({ type: "warning", idx, kind: "discovery_unfounded" });
 
     onEvent({ type: "thought", idx, text: thought, discovery: stepDiscovery });
 
@@ -765,7 +871,7 @@ export async function runSession({
         actionBadge: { text: describeAction(action, null), type: "click" },
         clickPoint: { nx: action.nx, ny: action.ny, target: action.target ?? null, source: aimSource, aim: rawAim },
       });
-      history.push({ idx, key, type: "click", status: "ok", nx: action.nx, ny: action.ny, changed: clickChanged });
+      history.push({ idx, key, type: "click", status: "ok", nx: action.nx, ny: action.ny, target: action.target ?? null, changed: clickChanged });
 
       if (!clickChanged) {
         deadClickPoints.push({ nx: action.nx, ny: action.ny });
@@ -957,7 +1063,7 @@ export async function runSession({
         actionBadge: { text: describeAction(action, null), type: "scroll" },
         scrollPoint: { nx: action.nx, ny: action.ny, direction: action.direction, target: action.target ?? null },
       });
-      history.push({ idx, key: aimedKey, type: "scroll", status: "ok", nx: action.nx, ny: action.ny, direction: action.direction, changed: scrollChanged });
+      history.push({ idx, key: aimedKey, type: "scroll", status: "ok", nx: action.nx, ny: action.ny, direction: action.direction, target: action.target ?? null, changed: scrollChanged });
 
       if (!scrollChanged) {
         deadScrollPoints.push({ nx: action.nx, ny: action.ny, direction: action.direction });
@@ -1084,7 +1190,7 @@ export async function runSession({
         startedAt: stepStartedAt, durationMs,
         actionBadge: { text: describeAction(action, null), type: "search" },
       });
-      history.push({ idx, key, type: "search", status: "ok", text: action.text, changed: searchRan });
+      history.push({ idx, key, type: "search", status: "ok", text: action.text, target: action.target ?? null, changed: searchRan });
 
       if (!searchRan) {
         // The action fails transiently roughly 1 time in 8 (finding 12's

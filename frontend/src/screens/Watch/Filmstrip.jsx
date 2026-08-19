@@ -5,7 +5,13 @@ function statusDotColor(actionStatus) {
   if (!actionStatus || actionStatus === "ok") return null;
   // ok_nochange sits with the rejections, not with ok: the action ran but hit
   // nothing, so the step is a non-advance and should be scannable as one.
-  if (actionStatus === "rejected_loop" || actionStatus === "rejected_target" || actionStatus === "ok_nochange")
+  if (
+    actionStatus === "rejected_loop" ||
+    actionStatus === "rejected_target" ||
+    actionStatus === "rejected_claim" ||
+    actionStatus === "rejected_state" ||
+    actionStatus === "ok_nochange"
+  )
     return "bg-gold";
   return "bg-coral"; // error, invalid_json, vlm_error
 }

@@ -170,6 +170,23 @@ function ActionLine({ step, pending }) {
       step.action?.type === "click"
         ? `rejected: wrong location${point ? ` ${point}` : ""} — rethinking…`
         : "rejected: unknown target — rethinking…";
+  } else if (status === "rejected_claim") {
+    // The model said it had already done something the run never executed, so
+    // whatever it read off that imagined result is not evidence. Worth spelling
+    // out rather than folding into the generic rejection copy: this is the one
+    // rejection that is about the agent's HONESTY, and a viewer who sees the
+    // fabricated sentence in the thought above needs to know it was caught.
+    icon = "✗";
+    colorClass = "text-gold-ink";
+    explain = `rejected: ${step.errorMsg ?? "claimed an action that never ran"} — rethinking…`;
+  } else if (status === "rejected_state") {
+    // The agent reported a value the dashboard could not have been showing —
+    // the filter that selects entities was pinned to a different one. Distinct
+    // from rejected_claim: there the ACTION never happened, here the action
+    // history is fine and the READING is the part that could not have.
+    icon = "✗";
+    colorClass = "text-gold-ink";
+    explain = `rejected: ${step.errorMsg ?? "the filter state rules that reading out"} — rethinking…`;
   } else if (status === "error") {
     icon = "✗";
     colorClass = "text-coral-ink";

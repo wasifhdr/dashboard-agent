@@ -126,7 +126,7 @@ The "action" object must be exactly one of these shapes:
 Rules:
 1. Exactly one action per turn.
 2. Only use target_id values that appear in the CURRENT inventory below - ids can change between turns if the dashboard changes.
-3. Prefer "answer" as soon as CONFIRMED DISCOVERIES plus the current screenshot contain everything needed - do not take extra actions once you already have enough information.
+3. Answer only when CONFIRMED DISCOVERIES plus the current screenshot cover EVERY part of the question - then answer immediately. If the question names several things to compare, an unread value for any one of them is a missing step, not a caveat: go and read it. Never write an answer containing "we still need to check ..." or "to fully answer this" - that sentence means the answer is not ready. Spending more steps is not a failure; answering early is.
 4. Never repeat an action you have already performed successfully - check the history below first; repeating is rejected and wastes a turn.
 5. Only use "wait" if the dashboard visibly appears to still be loading or updating; never use it more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it.
@@ -175,7 +175,7 @@ The "action" object must be exactly one of:
 Rules:
 1. Exactly one action per turn.
 2. To operate a control that opens (a dropdown, a filter list), click it once, then WAIT for the next screenshot and click the value you want.
-3. Prefer "answer" as soon as CONFIRMED DISCOVERIES plus the screenshot show everything needed.
+3. Answer only when CONFIRMED DISCOVERIES plus the current screenshot cover EVERY part of the question - then answer immediately. If the question names several things to compare, an unread value for any one of them is a missing step, not a caveat: go and read it. Never write an answer containing "we still need to check ..." or "to fully answer this" - that sentence means the answer is not ready. Spending more steps is not a failure; answering early is.
 4. If a click produces no visible change, you missed the control or it is not on screen — NEVER repeat the same or a nearby click. Move to a clearly different location. If several clicks in a row change nothing, stop targeting that control: answer from what is visible, or fail.
 5. Only use "wait" if the dashboard visibly appears to still be updating; never more than twice in a row.
 6. Only use "fail" if the question is genuinely unanswerable from this dashboard after exploring it by clicking.
@@ -194,7 +194,8 @@ Scrolling moves rows OFF the screen as well as on, and you are never shown an ea
 
 GROUNDING - THIS OVERRIDES EVERYTHING ELSE:
 Never state a number or value you have not actually seen on a screenshot in this session, and never record one as a "discovery". You may know real-world figures for countries, companies and years from memory; they are NOT evidence about THIS dashboard and using them is the worst mistake you can make here. Only report what you have read, or what is listed under CONFIRMED DISCOVERIES.
-If the value you need is not visible, make it visible - click, scroll, or change a control - and read it on a later turn. If you cannot make it visible, say so with "fail". An honest "fail" is far better than a confident number you did not read.`;
+If the value you need is not visible, make it visible - click, scroll, or change a control - and read it on a later turn. If you cannot make it visible, say so with "fail". An honest "fail" is far better than a confident number you did not read.
+If part of the question is still unchecked, the honest move is another action - never a remembered figure, and never a partial answer dressed up with a caveat.`;
 
 function buildPrompt({
   question,
