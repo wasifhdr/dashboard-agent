@@ -76,7 +76,9 @@ export default function QuickAsk({ isRunning, unread, onOpen, onVoiceAsk }) {
   });
 
   const close = useCallback(() => {
-    dictation.stop();
+    // `cancel`, not `stop`: the draft is being thrown away, and a transcript
+    // that landed a second later would refill a box nobody is looking at.
+    dictation.cancel();
     setOpen(false);
     setValue("");
   }, [dictation]);
@@ -101,7 +103,7 @@ export default function QuickAsk({ isRunning, unread, onOpen, onVoiceAsk }) {
     e?.preventDefault();
     const question = value.trim();
     if (!question || submitting) return;
-    dictation.stop();
+    dictation.cancel();
     setSubmitting(true);
     try {
       await onVoiceAsk(question);
@@ -189,6 +191,7 @@ export default function QuickAsk({ isRunning, unread, onOpen, onVoiceAsk }) {
             <button
               type="button"
               onClick={handleMicClick}
+              disabled={dictation.transcribing}
               aria-label={dictation.listening ? "Stop dictating" : "Ask by voice"}
               aria-pressed={dictation.listening}
               title={dictation.listening ? "Stop dictating" : "Ask by voice"}
@@ -197,6 +200,7 @@ export default function QuickAsk({ isRunning, unread, onOpen, onVoiceAsk }) {
                 "glass-teal grid size-9 shrink-0 place-items-center rounded-pill transition-colors",
                 "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
                 dictation.listening ? "ready-ping relative text-coral-ink" : "text-teal-ink",
+                dictation.transcribing && "opacity-70",
               )}
             >
               <MicIcon />
@@ -219,7 +223,13 @@ export default function QuickAsk({ isRunning, unread, onOpen, onVoiceAsk }) {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) handleSubmit(e);
                   }}
-                  placeholder={dictation.listening ? "Listening…" : "Speak or type a question…"}
+                  placeholder={
+                    dictation.listening
+                      ? "Listening…"
+                      : dictation.transcribing
+                        ? "Cleaning up what you said…"
+                        : "Speak or type a question…"
+                  }
                   aria-label="Voice question"
                   className="thin-scrollbar min-w-0 flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed text-fg placeholder:text-fg/40 focus:outline-none"
                 />

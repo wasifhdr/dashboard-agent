@@ -76,6 +76,28 @@ export async function synthesizeSpeech(text, signal) {
   return res.blob();
 }
 
+export async function getSttConfig() {
+  const res = await fetch("/api/stt/config");
+  if (!res.ok) throw new Error(`GET /api/stt/config failed: ${res.status}`);
+  return res.json();
+}
+
+// Returns the transcript for a recorded blob, or throws — callers keep the
+// browser's own interim transcript rather than surfacing an error, so remote
+// transcription only ever upgrades dictation, never breaks it. The blob is
+// posted raw (not multipart): its own MIME type is the only metadata the
+// backend needs to hand it on to Groq.
+export async function transcribeAudio(blob, signal) {
+  const res = await fetch("/api/stt", {
+    method: "POST",
+    headers: { "Content-Type": blob.type || "audio/webm" },
+    body: blob,
+    signal,
+  });
+  const body = await jsonOrThrow(res, "POST /api/stt");
+  return String(body.text ?? "");
+}
+
 export async function listSessions() {
   const res = await fetch("/api/sessions");
   if (!res.ok) throw new Error(`GET /api/sessions failed: ${res.status}`);

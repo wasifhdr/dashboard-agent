@@ -142,6 +142,97 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
+// Speech-to-text proxy. Same shape and same key as the TTS route above, and
+// the same never-hard-fail contract: the frontend keeps whatever the browser's
+// own Web Speech API already transcribed, so a missing key, a 429 or Groq being
+// down costs accuracy, never the dictation itself.
+//
+// The audio arrives as a raw body rather than multipart because the browser
+// sends exactly one blob and the only thing that has to survive the hop is the
+// container type - decoding multipart just to re-encode it for Groq would need
+// a dependency to do nothing.
+const STT_EXTENSION = {
+  "audio/webm": "webm",
+  "audio/ogg": "ogg",
+  "audio/mp4": "mp4",
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/flac": "flac",
+};
+
+app.get("/api/stt/config", (req, res) => {
+  const stt = config.stt ?? {};
+  res.json({
+    available: !!(stt.enabled && stt.endpoint && (!stt.apiKeyEnv || process.env[stt.apiKeyEnv])),
+    model: stt.modelName ?? null,
+  });
+});
+
+app.post(
+  "/api/stt",
+  express.raw({ type: ["audio/*", "application/octet-stream"], limit: "25mb" }),
+  async (req, res) => {
+    const stt = config.stt ?? {};
+    if (!stt.enabled || !stt.endpoint) {
+      return res.status(503).json({ error: "stt_disabled" });
+    }
+    const apiKey = stt.apiKeyEnv ? process.env[stt.apiKeyEnv] : null;
+    if (stt.apiKeyEnv && !apiKey) {
+      return res.status(503).json({ error: "stt_key_missing", detail: `${stt.apiKeyEnv} is not set` });
+    }
+
+    const audio = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!audio || audio.length === 0) return res.status(400).json({ error: "empty_audio" });
+    if (audio.length > (stt.maxBytes ?? 20 * 1024 * 1024)) {
+      return res.status(413).json({ error: "audio_too_large" });
+    }
+
+    // Strip any ";codecs=opus" - Groq keys off the filename extension, and the
+    // parameterised type is not a map key.
+    const mime = String(req.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const ext = STT_EXTENSION[mime] ?? "webm";
+
+    const form = new FormData();
+    form.append("file", new Blob([audio], { type: mime || "audio/webm" }), `dictation.${ext}`);
+    form.append("model", stt.modelName);
+    form.append("response_format", "json");
+    if (stt.language) form.append("language", stt.language);
+    // A light domain hint, not a vocabulary list: it nudges casing and question
+    // punctuation without teaching the model to hallucinate dashboard nouns
+    // into audio that never contained them.
+    if (stt.prompt) form.append("prompt", stt.prompt);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), stt.timeoutMs ?? 30000);
+    try {
+      const upstream = await fetch(stt.endpoint, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: controller.signal,
+      });
+
+      if (!upstream.ok) {
+        const detail = await upstream.text();
+        console.warn(`[stt] upstream ${upstream.status}: ${detail.slice(0, 300)}`);
+        return res
+          .status(502)
+          .json({ error: "stt_upstream_error", status: upstream.status, detail: detail.slice(0, 500) });
+      }
+
+      const body = await upstream.json();
+      return res.json({ text: String(body?.text ?? "").trim() });
+    } catch (err) {
+      const reason = err.name === "AbortError" ? "stt_timeout" : "stt_request_failed";
+      console.warn(`[stt] ${reason}: ${err.message}`);
+      return res.status(502).json({ error: reason, detail: err.message });
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+);
+
 app.get("/api/dashboards/meta", (req, res) => {
   const dashboards = (config.dashboards ?? []).map((d) => {
     const step1 = store.latestStep1ForDashboard(d.url);

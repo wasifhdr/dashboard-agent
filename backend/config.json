@@ -19,6 +19,16 @@
     "timeoutMs": 20000,
     "maxChars": 1200
   },
+  "stt": {
+    "enabled": true,
+    "endpoint": "https://api.groq.com/openai/v1/audio/transcriptions",
+    "modelName": "whisper-large-v3-turbo",
+    "language": "en",
+    "prompt": "A spoken question about a Tableau dashboard.",
+    "apiKeyEnv": "GROQ_API_KEY",
+    "timeoutMs": 30000,
+    "maxBytes": 20971520
+  },
   "promptStyle": "constrained_json",
   "maxSteps": 15,
   "imageLongSide": 1920,

@@ -175,7 +175,10 @@ export default function Composer({
     e.preventDefault();
     const question = value.trim();
     if (!question || submitting) return;
-    dictation.stop(); // sending ends dictation — never leave the mic live
+    // Sending ends dictation — never leave the mic live. `cancel`, not `stop`,
+    // because the field is about to be cleared and a late accurate transcript
+    // would type the sent question back into it.
+    dictation.cancel();
     setError("");
     setSubmitting(true);
     try {
@@ -297,15 +300,18 @@ export default function Composer({
             <button
               type="button"
               onClick={handleMicClick}
+              disabled={dictation.transcribing}
               aria-label={dictation.listening ? "Stop dictating" : "Dictate your question"}
               aria-pressed={dictation.listening}
               title={dictation.listening ? "Stop dictating" : "Dictate your question"}
               className={cx(
                 "grid size-10 shrink-0 place-items-center rounded-pill transition-colors",
                 "focus-visible:outline-[3px] focus-visible:outline-focus focus-visible:outline-offset-2",
-                dictation.listening
-                  ? "ready-ping relative bg-coral/15 text-coral-ink"
-                  : "text-fg/55 hover:bg-glass-hover hover:text-fg",
+                dictation.listening && "ready-ping relative bg-coral/15 text-coral-ink",
+                dictation.transcribing && "bg-teal/15 text-teal-ink",
+                !dictation.listening &&
+                  !dictation.transcribing &&
+                  "text-fg/55 hover:bg-glass-hover hover:text-fg",
               )}
             >
               <MicIcon />
@@ -326,10 +332,14 @@ export default function Composer({
       {/* Transient only — both the mic and the read-aloud toggle live in the
           controls row above, so the idle composer stays one line of text plus
           that row. This appears solely while dictating or after a mic failure. */}
-      {(dictation.listening || dictation.error) && (
+      {(dictation.listening || dictation.transcribing || dictation.error) && (
         <div className="px-4 pb-2 text-xs text-fg/50">
           {dictation.error ? (
             <span className="text-coral-ink">{dictation.error}</span>
+          ) : dictation.transcribing ? (
+            // The mic is already closed here — this is the second, accurate
+            // transcription pass replacing what you watched appear live.
+            <span className="text-shimmer text-shimmer-muted">Cleaning up what you said…</span>
           ) : (
             "Listening… click the mic to stop."
           )}
