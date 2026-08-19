@@ -597,13 +597,15 @@ body {
   /* The stops can't use currentColor: the sweep needs `color: transparent` for
      background-clip: text to show through, and currentColor would then resolve
      to that transparent value and erase the text entirely. */
+  --shimmer-base: var(--color-fg);
+  --shimmer-glint: var(--color-gold-ink);
   background-image: linear-gradient(
     100deg,
-    var(--color-fg) 0%,
-    var(--color-fg) 35%,
-    var(--color-gold-ink) 50%,
-    var(--color-fg) 65%,
-    var(--color-fg) 100%
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 35%,
+    var(--shimmer-glint) 50%,
+    var(--shimmer-base) 65%,
+    var(--shimmer-base) 100%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -611,6 +613,28 @@ body {
   color: transparent;
   -webkit-text-fill-color: transparent;
   animation: text-shimmer 1.6s linear infinite;
+}
+
+/* Same sweep in the loading pill's own palette. The stops are variables rather
+   than currentColor (see above), so a caller that isn't body-text coloured
+   overrides them. Must come AFTER .text-shimmer: equal specificity, so source
+   order decides which value of --shimmer-base wins. */
+.text-shimmer.text-shimmer-info {
+  --shimmer-base: var(--color-sky-ink);
+  --shimmer-glint: var(--color-fg);
+}
+
+/* The thread's "still working" label, which rests at text-fg/70 rather than
+   full body colour. The 70% stop is faded in the gradient itself, since
+   background-clip: text leaves no text colour left to fade with opacity. */
+.text-shimmer.text-shimmer-muted {
+  --shimmer-base: color-mix(in oklab, var(--color-fg) 70%, transparent);
+}
+
+/* Teal glint, for the run-level "working on this question" row — it keeps the
+   colour its ring spinner carried. Composes with -muted, which sets the base. */
+.text-shimmer.text-shimmer-teal {
+  --shimmer-glint: var(--color-teal-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {

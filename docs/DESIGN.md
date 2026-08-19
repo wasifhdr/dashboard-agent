@@ -174,7 +174,10 @@ Shared components in `src/components/ui/` are the source of truth; highlights:
 - **Modal** — overlay `bg-canvas-edge/60 backdrop-blur-sm`; panel `glass-raised rounded-card-lg`.
 - **EmptyState** — dashed `border-glass-border-strong bg-glass/40`, display statement with one
   `-ink` accent phrase.
-- **Spinner** — `border-glass-border border-t-teal-ink`. **Skeleton** — `animate-pulse bg-glass`.
+- **Shimmer** — every "still working" state is the label itself sweeping, never a ring beside it:
+  `.text-shimmer` (gold glint on body text), plus `-muted` (fg/70 base), `-info` (sky-ink, for the
+  loading pill) and `-teal` (teal glint, run-level). There is no Spinner component any more.
+  **Skeleton** — `animate-pulse bg-glass`.
 - **Segmented meter** — used cells `bg-green shadow-green-glow` (all flip to coral at limit),
   unused `bg-glass border-glass-border`, mono caption.
 - **Success flourish** — `.ring-ping` one 600ms ring on the final answer only.

@@ -3,7 +3,6 @@ import { cx } from "../../components/ui/cx.js";
 import CapsLabel from "../../components/ui/CapsLabel.jsx";
 import { threadBottomClearance } from "./ChatDock.jsx";
 import { speakableAnswer } from "./speech.js";
-import Spinner from "../../components/ui/Spinner.jsx";
 import { TERMINAL_STATUSES } from "./terminalStatuses.js";
 
 const OUTCOME_CONFIG = {
@@ -215,8 +214,9 @@ function StepCard({ step, revealMode, isSelected, onSelect }) {
     >
       {revealMode === "pending" && (
         <div className="flex items-center gap-2">
-          <Spinner className="border-glass-border border-t-gold-ink" />
-          <span className="text-sm text-fg/70">Reading the dashboard…</span>
+          {/* Shimmering label, no spinner — same signal the pending action line
+              uses, so every "still working" state in the thread reads alike. */}
+          <span className="text-shimmer text-shimmer-muted text-sm">Reading the dashboard…</span>
           {step.attempt && (
             <span className="text-xs text-gold-ink">
               Attempt {step.attempt} of 3 — the previous response was invalid.
@@ -263,8 +263,7 @@ function LiveStepCard({ step, isSelected, onSelect }) {
     >
       {!step.thought && !isInvalid && (
         <div className="flex items-center gap-2">
-          <Spinner className="border-glass-border border-t-gold-ink" />
-          <span className="text-sm text-fg/70">Reading the dashboard…</span>
+          <span className="text-shimmer text-shimmer-muted text-sm">Reading the dashboard…</span>
           {step.attempt && (
             <span className="text-xs text-gold-ink">
               Attempt {step.attempt} of 3 — the previous response was invalid.

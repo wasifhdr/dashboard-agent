@@ -10,7 +10,6 @@ import Feed from "./Feed.jsx";
 import Composer from "./Composer.jsx";
 import ChatPanel from "./ChatDock.jsx";
 import QuickAsk from "./QuickAsk.jsx";
-import Spinner from "../../components/ui/Spinner.jsx";
 import { cx } from "../../components/ui/cx.js";
 import Card from "../../components/ui/Card.jsx";
 import Badge from "../../components/ui/Badge.jsx";
@@ -393,7 +392,9 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
   const showingStagePreview = !showLive && !loadingState && !selectedStep?.frameUrl && !!stream.thumbnailUrl;
   let stageStatus = null;
   if (loadingState) {
-    stageStatus = { variant: "info", text: loadingState.message, spinner: true };
+    // No spinner: the message itself shimmers while the dashboard opens, the
+    // same signal the pending action line in the feed uses.
+    stageStatus = { variant: "info", text: loadingState.message, shimmer: true };
   } else if (stream.conversationError && runs.length === 0) {
     // The eager open failed — say so instead of showing an idle preview that
     // looks live. Asking a question retries the open.
@@ -496,8 +497,11 @@ export default function Watch({ mode, sessionId, conversationId, resumeConversat
           <div className="flex h-7 items-center justify-center gap-2 px-4">
             {stageStatus && (
               <Badge variant={stageStatus.variant} pulse={stageStatus.pulse} className={stageStatus.className}>
-                {stageStatus.spinner && <Spinner className="size-3 shrink-0" />}
-                {stageStatus.text}
+                {stageStatus.shimmer ? (
+                  <span className="text-shimmer text-shimmer-info">{stageStatus.text}</span>
+                ) : (
+                  stageStatus.text
+                )}
               </Badge>
             )}
           </div>

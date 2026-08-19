@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import Spinner from "../../components/ui/Spinner.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import { cx } from "../../components/ui/cx.js";
 
@@ -331,9 +330,10 @@ export default function LiveStage({
               </div>
             )
           ) : (
-            <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-              <Spinner />
-              <p className="text-sm text-fg/70">
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              {/* The waiting line shimmers rather than sitting beside a ring, so
+                  every "still working" state in the app reads the same way. */}
+              <p className="text-shimmer text-shimmer-muted text-sm">
                 {connected ? "Connecting to live view…" : "Waiting for the live dashboard…"}
               </p>
             </div>

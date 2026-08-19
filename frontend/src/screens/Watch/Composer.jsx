@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "../../components/ui/Button.jsx";
-import Spinner from "../../components/ui/Spinner.jsx";
 import { cx } from "../../components/ui/cx.js";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition.js";
 
@@ -229,8 +228,11 @@ export default function Composer({
     return (
       <div className="glass-pane rounded-card px-4 py-3">
         <div className="flex items-center gap-3">
-          <Spinner className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-sm text-fg/60">{runningQuestion}</span>
+          {/* The question shimmers for as long as the turn runs, instead of a
+              ring beside it — same signal the feed's own pending rows use. */}
+          <span className="text-shimmer text-shimmer-muted text-shimmer-teal min-w-0 flex-1 truncate text-sm">
+            {runningQuestion}
+          </span>
           <Button
             size="icon"
             variant="danger"
