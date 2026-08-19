@@ -61,6 +61,7 @@
       "description": "Netflix's catalog of ~6,200 movies and TV shows — distribution by country, content rating, genre, and year, with a Type (Movie/TV Show) filter. Single-view dashboard.",
       "tags": ["streaming", "movies", "tv shows", "netflix", "entertainment"],
       "exampleQuestions": [
+        "Compare between the duration of the TV shows 13 Reasons Why and American Horror Story",
         "According to the Movies and TV Shows Distribution, what percentage of the Netflix catalog are Movies?",
         "Which genre has the most titles in the Top 10 Genre chart, and how many titles does it have?"
       ]
